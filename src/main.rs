@@ -1,7 +1,8 @@
-use futures::{Future, Sink, Stream};
+use futures::{Future, Sink, Stream, StreamExt, SinkExt};
 use std::result;
-pub mod combined;
 pub mod mem;
+pub mod mem_and_quinn;
+pub mod mem_or_quinn;
 pub mod quinn;
 
 trait InteractionPattern {}
@@ -174,6 +175,28 @@ pub trait Channel<Req, Res> {
 //     }
 // }
 
-fn main() {
-    println!("Hello, world!");
+#[tokio::main]
+async fn main() {
+    let (mut server, mut client) = mem::connection::<String, u64>(1);
+    let to_string_service = tokio::spawn(async move {
+        let (mut send, mut recv) = server.accept_bi().await.unwrap();
+        while let Some(item) = recv.next().await {
+            let item = item.unwrap();
+            println!("server got: {:?}", item);
+            send.send(item.to_string()).await.unwrap();
+        }
+    });
+    let (mut send, mut recv) = client.open_bi().await.unwrap();
+    let print_result_service = tokio::spawn(async move {
+        while let Some(item) = recv.next().await {
+            let item = item.unwrap();
+            println!("got result: {}", item);
+        }
+    });
+    for i in 0..100 {
+        send.send(i).await.unwrap();
+    }
+    drop(send);
+    to_string_service.await.unwrap();
+    print_result_service.await.unwrap();
 }

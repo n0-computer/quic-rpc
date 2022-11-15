@@ -6,20 +6,18 @@ use std::{pin::Pin, result, task::Poll};
 pub enum NoError {}
 
 #[pin_project]
-pub struct WrapNoError<S> {
-    #[pin]
-    inner: S,
-}
+pub struct ResStream<Res>(
+    #[pin] mpsc::Receiver<Res>);
 
-impl<S: futures::Stream + Unpin> futures::Stream for WrapNoError<S> {
-    type Item = Result<S::Item, NoError>;
+impl<Res> futures::Stream for ResStream<Res> {
+    type Item = Result<Res, NoError>;
 
     fn poll_next(
         self: Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Option<Self::Item>> {
         let mut this = self.project();
-        match this.inner.poll_next_unpin(cx) {
+        match this.0.poll_next_unpin(cx) {
             std::task::Poll::Ready(Some(item)) => std::task::Poll::Ready(Some(Ok(item))),
             std::task::Poll::Ready(None) => std::task::Poll::Ready(None),
             std::task::Poll::Pending => std::task::Poll::Pending,
@@ -34,6 +32,7 @@ pub struct Channel<Req, Res> {
     sink: mpsc::Sender<Socket<Res, Req>>,
 }
 
+#[derive(Debug)]
 pub enum AcceptBiError {
     SenderDropped,
 }
@@ -99,8 +98,6 @@ impl<'a, Req, Res> Future for AcceptBiFuture<'a, Req, Res> {
 
 pub type ReqSink<Req> = mpsc::Sender<Req>;
 
-pub type ResStream<Res> = WrapNoError<mpsc::Receiver<Res>>;
-
 pub type SendError = mpsc::SendError;
 
 pub type RecvError = NoError;
@@ -123,8 +120,8 @@ impl<Req: Send + 'static, Res: Send + 'static> crate::Channel<Req, Res> for Chan
     fn open_bi(&mut self) -> Self::OpenBiFuture<'_> {
         let (local_send, remote_recv) = mpsc::channel::<Req>(1);
         let (remote_send, local_recv) = mpsc::channel::<Res>(1);
-        let remote_recv = WrapNoError { inner: remote_recv };
-        let local_recv = WrapNoError { inner: local_recv };
+        let remote_recv = ResStream(remote_recv);
+        let local_recv = ResStream(local_recv);
         let inner = self.sink.send((remote_send, remote_recv));
         OpenBiFuture::new(inner, (local_send, local_recv))
     }
@@ -136,4 +133,16 @@ impl<Req: Send + 'static, Res: Send + 'static> crate::Channel<Req, Res> for Chan
     fn accept_bi(&mut self) -> Self::AcceptBiFuture<'_> {
         AcceptBiFuture(self.stream.next())
     }
+}
+
+pub fn connection<Req, Res>(buffer: usize) -> (Channel<Req, Res>, Channel<Res, Req>) {
+    let (send1, recv1) = mpsc::channel::<Socket<Req, Res>>(buffer);
+    let (send2, recv2) = mpsc::channel::<Socket<Res, Req>>(buffer);
+    (Channel {
+        stream: recv1,
+        sink: send2,
+    }, Channel {
+        stream: recv2,
+        sink: send1,
+    })
 }

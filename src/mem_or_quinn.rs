@@ -1,20 +1,14 @@
 use crate::mem;
 use crate::quinn;
-use either::Either;
-use futures::future::BoxFuture;
-use futures::FutureExt;
-use futures::Sink;
-use futures::Stream;
+use futures::{future::BoxFuture, FutureExt, Sink, Stream};
 use pin_project::pin_project;
-use serde::de::DeserializeOwned;
-use serde::Serialize;
-use std::io;
-use std::pin::Pin;
-use std::result;
-use std::task::Context;
-use std::task::Poll;
+use serde::{Serialize, de::DeserializeOwned};
+use std::{io, pin::Pin, result, task::{Context, Poll}};
 
-pub type Channel<Req, Res> = Either<mem::Channel<Req, Res>, ::quinn::Connection>;
+pub enum Channel<Req, Res> {
+    Mem(mem::Channel<Req, Res>),
+    Quinn(::quinn::Connection),
+}
 
 #[pin_project(project = ReqSinkProj)]
 pub enum ReqSink<Req> {
@@ -33,29 +27,29 @@ impl<Req: Serialize> Sink<Req> for ReqSink<Req> {
 
     fn poll_ready(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         match self.project() {
-            ReqSinkProj::Mem(sink) => sink.poll_ready(cx).map_err(Either::Left),
-            ReqSinkProj::Quinn(sink) => sink.poll_ready(cx).map_err(Either::Right),
+            ReqSinkProj::Mem(sink) => sink.poll_ready(cx).map_err(Error::Mem),
+            ReqSinkProj::Quinn(sink) => sink.poll_ready(cx).map_err(Error::Quinn),
         }
     }
 
     fn start_send(self: Pin<&mut Self>, item: Req) -> Result<(), Self::Error> {
         match self.project() {
-            ReqSinkProj::Mem(sink) => sink.start_send(item).map_err(Either::Left),
-            ReqSinkProj::Quinn(sink) => sink.start_send(item).map_err(Either::Right),
+            ReqSinkProj::Mem(sink) => sink.start_send(item).map_err(Error::Mem),
+            ReqSinkProj::Quinn(sink) => sink.start_send(item).map_err(Error::Quinn),
         }
     }
 
     fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         match self.project() {
-            ReqSinkProj::Mem(sink) => sink.poll_flush(cx).map_err(Either::Left),
-            ReqSinkProj::Quinn(sink) => sink.poll_flush(cx).map_err(Either::Right),
+            ReqSinkProj::Mem(sink) => sink.poll_flush(cx).map_err(Error::Mem),
+            ReqSinkProj::Quinn(sink) => sink.poll_flush(cx).map_err(Error::Quinn),
         }
     }
 
     fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         match self.project() {
-            ReqSinkProj::Mem(sink) => sink.poll_close(cx).map_err(Either::Left),
-            ReqSinkProj::Quinn(sink) => sink.poll_close(cx).map_err(Either::Right),
+            ReqSinkProj::Mem(sink) => sink.poll_close(cx).map_err(Error::Mem),
+            ReqSinkProj::Quinn(sink) => sink.poll_close(cx).map_err(Error::Quinn),
         }
     }
 }
@@ -75,13 +69,18 @@ impl<Res: DeserializeOwned> Stream for ResStream<Res> {
     }
 }
 
-pub type SendError = Either<mem::SendError, io::Error>;
+pub enum Error<M, Q> {
+    Mem(M),
+    Quinn(Q),
+}
+
+pub type SendError = Error<mem::SendError, io::Error>;
 
 pub type RecvError = io::Error;
 
-pub type OpenBiError = Either<mem::OpenBiError, quinn::OpenBiError>;
+pub type OpenBiError = Error<mem::OpenBiError, quinn::OpenBiError>;
 
-pub type AcceptBiError = Either<mem::AcceptBiError, quinn::AcceptBiError>;
+pub type AcceptBiError = Error<mem::AcceptBiError, quinn::AcceptBiError>;
 
 type Socket<Req, Res> = (self::ReqSink<Req>, self::ResStream<Res>);
 
@@ -102,13 +101,13 @@ impl<Req: Serialize + Send + 'static, Res: DeserializeOwned + Send + 'static>
 
     fn open_bi(&mut self) -> Self::OpenBiFuture<'_> {
         match self {
-            Either::Left(mem) => async {
-                let (send, recv) = mem.open_bi().await.map_err(Either::Left)?;
+            Channel::Mem(mem) => async {
+                let (send, recv) = mem.open_bi().await.map_err(Error::Mem)?;
                 Ok((ReqSink::Mem(send), ResStream::Mem(recv)))
             }
             .boxed(),
-            Either::Right(quinn) => async {
-                let (send, recv) = quinn.open_bi().await.map_err(Either::Right)?;
+            Channel::Quinn(quinn) => async {
+                let (send, recv) = quinn.open_bi().await.map_err(Error::Quinn)?;
                 Ok((ReqSink::Quinn(send), ResStream::Quinn(recv)))
             }
             .boxed(),
@@ -122,13 +121,13 @@ impl<Req: Serialize + Send + 'static, Res: DeserializeOwned + Send + 'static>
 
     fn accept_bi(&mut self) -> Self::AcceptBiFuture<'_> {
         match self {
-            Either::Left(mem) => async {
-                let (send, recv) = mem.accept_bi().await.map_err(Either::Left)?;
+            Channel::Mem(mem) => async {
+                let (send, recv) = mem.accept_bi().await.map_err(Error::Mem)?;
                 Ok((ReqSink::Mem(send), ResStream::Mem(recv)))
             }
             .boxed(),
-            Either::Right(quinn) => async {
-                let (send, recv) = quinn.accept_bi().await.map_err(Either::Right)?;
+            Channel::Quinn(quinn) => async {
+                let (send, recv) = quinn.accept_bi().await.map_err(Error::Quinn)?;
                 Ok((ReqSink::Quinn(send), ResStream::Quinn(recv)))
             }
             .boxed(),
