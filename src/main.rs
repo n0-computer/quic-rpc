@@ -56,16 +56,18 @@ trait Channel<Req, Res> {
     type Sink: Sink<Req, Error = Self::SendError>;
     type Stream: Stream<Item = result::Result<Res, Self::RecvError>>;
     /// Error you might get when opening a new stream
-    type ConnectionError;
+    type OpenBiError;
+    /// Error you might get when waiting for new streams
+    type AcceptBiError;
     /// Error you might get while sending messages from a stream
     type SendError;
     /// Error you might get while receiving messages from a stream
     type RecvError;
 
-    type OpenBiFuture<'a>: Future<Output = result::Result<(Self::Sink, Self::Stream), Self::ConnectionError>> + 'a where Self: 'a;
+    type OpenBiFuture<'a>: Future<Output = result::Result<(Self::Sink, Self::Stream), Self::OpenBiError>> + 'a where Self: 'a;
     fn open_bi(&mut self) -> Self::OpenBiFuture<'_>;
 
-    type AcceptBiFuture<'a>: Future<Output = result::Result<(Self::Sink, Self::Stream), Self::ConnectionError>> + 'a where Self: 'a;
+    type AcceptBiFuture<'a>: Future<Output = result::Result<(Self::Sink, Self::Stream), Self::AcceptBiError>> + 'a where Self: 'a;
     fn accept_bi(&mut self) -> Self::AcceptBiFuture<'_>;
 }
 
@@ -89,13 +91,15 @@ impl<Req: Serialize + Send + 'static, Res: DeserializeOwned + Send + 'static> Ch
 
     type Stream = Pin<Box<dyn Stream<Item = result::Result<Res, Self::RecvError>> + Send>>;
 
-    type ConnectionError = quinn::ConnectionError;
+    type OpenBiError = quinn::ConnectionError;
+
+    type AcceptBiError = quinn::ConnectionError;
 
     type SendError = std::io::Error;
 
     type RecvError = std::io::Error;
 
-    type OpenBiFuture<'a> = BoxFuture<'a, result::Result<QuinnSocket<Req, Res>, Self::ConnectionError>>;
+    type OpenBiFuture<'a> = BoxFuture<'a, result::Result<QuinnSocket<Req, Res>, Self::OpenBiError>>;
 
     fn open_bi(&mut self) -> Self::OpenBiFuture<'_> {
         let this = self.clone();
@@ -115,7 +119,7 @@ impl<Req: Serialize + Send + 'static, Res: DeserializeOwned + Send + 'static> Ch
         }.boxed()
     }
 
-    type AcceptBiFuture<'a> = BoxFuture<'a, result::Result<QuinnSocket<Req, Res>, Self::ConnectionError>>;
+    type AcceptBiFuture<'a> = BoxFuture<'a, result::Result<QuinnSocket<Req, Res>, Self::AcceptBiError>>;
 
     fn accept_bi(&mut self) -> Self::AcceptBiFuture<'_> {
         let this = self.clone();
@@ -136,19 +140,23 @@ impl<Req: Serialize + Send + 'static, Res: DeserializeOwned + Send + 'static> Ch
     }
 }
 
+struct PeerDropped;
+
 impl<Req: Send + 'static, Res: Send + 'static> Channel<Req, Res> for MemChannel<Req, Res> {
 
     type Sink = mpsc::Sender<Req>;
 
     type Stream = WrapNoError<mpsc::Receiver<Res>>;
 
-    type ConnectionError = anyhow::Error;
+    type OpenBiError = mpsc::SendError;
+
+    type AcceptBiError = PeerDropped;
 
     type SendError = mpsc::SendError;
 
     type RecvError = NoError;
 
-    type OpenBiFuture<'a> = BoxFuture<'a, anyhow::Result<MemSocket<Req, Res>>>;
+    type OpenBiFuture<'a> = BoxFuture<'a, result::Result<MemSocket<Req, Res>, Self::OpenBiError>>;
 
     fn open_bi(&mut self) -> Self::OpenBiFuture<'_> {
         let (local_send, remote_recv) = mpsc::channel::<Req>(1);
@@ -159,15 +167,15 @@ impl<Req: Send + 'static, Res: Send + 'static> Channel<Req, Res> for MemChannel<
             // try to send the remote end
             self.sink.send((remote_send, remote_recv)).await?;
             // keep the local end and return it
-            anyhow::Ok((local_send, local_recv))
+            Ok((local_send, local_recv))
         }.boxed()
     }
 
-    type AcceptBiFuture<'a> = BoxFuture<'a, anyhow::Result<MemSocket<Req, Res>>>;
+    type AcceptBiFuture<'a> = BoxFuture<'a, result::Result<MemSocket<Req, Res>, Self::AcceptBiError>>;
 
     fn accept_bi(&mut self) -> Self::AcceptBiFuture<'_> {
         async {
-            Ok(self.stream.next().await.context("no more connections")?)
+            self.stream.next().await.ok_or(PeerDropped)
         }.boxed()
     }
 }
