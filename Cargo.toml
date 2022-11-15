@@ -7,6 +7,7 @@ edition = "2021"
 
 [dependencies]
 anyhow = "1.0.66"
+either = "1.8.0"
 futures = "0.3.25"
 pin-project = "1.0.12"
 quinn = "0.9.0"
