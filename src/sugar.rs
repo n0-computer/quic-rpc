@@ -1,3 +1,4 @@
+use futures::Future;
 use futures::future;
 use futures::future::BoxFuture;
 use futures::stream::BoxStream;
@@ -8,11 +9,13 @@ use futures::StreamExt;
 use futures::TryFutureExt;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
+use std::error;
+use std::fmt;
 use std::marker::PhantomData;
 use std::pin::Pin;
 use std::result;
 
-use crate::mem_and_quinn as underlying;
+use crate::mem as underlying;
 use crate::Channel;
 
 /// A service
@@ -24,24 +27,40 @@ pub trait Service {
 /// A message for a service
 ///
 /// For each server and each message, only one interaction pattern can be defined.
-pub trait Msg<S: Service>: Into<S::Req> + 'static {
+pub trait Msg<S: Service>: Into<S::Req> + TryFrom<S::Req> + Send + 'static {
     type Update: Into<S::Req> + TryFrom<S::Req> + Send + 'static;
     type Response: Into<S::Res> + TryFrom<S::Res> + Send + 'static;
     type Pattern: InteractionPattern;
 }
 
+pub trait RpcMsg<S: Service>: Into<S::Req> + TryFrom<S::Req> + Send + 'static {
+    type Response: Into<S::Res> + TryFrom<S::Res> + Send + 'static;
+}
+
+impl<S: Service, T: RpcMsg<S>> Msg<S> for T
+{
+    type Update = Self;
+
+    type Response = T::Response;
+
+    type Pattern = Rpc;
+}
+
 pub trait HandleBidi<S: Service, M: Msg<S, Pattern = BidiStreaming>> {
     fn handle(
-        &mut self,
+        &self,
         msg: M,
         input: underlying::ResStream<S::Req>,
         output: underlying::ReqSink<S::Res>,
     ) -> BoxFuture<'_, result::Result<(), underlying::SendError>>;
 }
 
-pub trait HandleRpc<S: Service, M: Msg<S, Update = NoRequest, Pattern = Rpc>> {
+pub trait HandleRpc<S: Service, M: Msg<S, Pattern = Rpc>> {
+
+    type RpcFuture: Future<Output = M::Response> + Send + 'static;
+
     fn handle(
-        &mut self,
+        &self,
         msg: M,
         _input: underlying::ResStream<S::Req>,
         mut output: underlying::ReqSink<S::Res>,
@@ -54,7 +73,7 @@ pub trait HandleRpc<S: Service, M: Msg<S, Update = NoRequest, Pattern = Rpc>> {
         .boxed()
     }
 
-    fn rpc(&mut self, msg: M) -> BoxFuture<'static, M::Response>;
+    fn rpc(&self, msg: M) -> Self::RpcFuture;
 }
 
 pub trait InteractionPattern: 'static {}
@@ -73,19 +92,13 @@ impl InteractionPattern for BidiStreaming {}
 
 pub enum NoRequest {}
 
-pub struct ClientChannel<S, Req, Res> {
-    channel: underlying::Channel<Req, Res>,
+pub struct ClientChannel<S: Service> {
+    channel: underlying::Channel<S::Req, S::Res>,
     _s: PhantomData<S>,
 }
 
-pub enum FireAndForgetError {
-    /// Unable to open a stream to the server
-    Open(underlying::OpenBiError),
-    /// Unable to send the request to the server
-    Send(underlying::SendError),
-}
-
 /// Error for rpc interactions
+#[derive(Debug)]
 pub enum RpcError {
     /// Unable to open a stream to the server
     Open(underlying::OpenBiError),
@@ -99,6 +112,15 @@ pub enum RpcError {
     DowncastError,
 }
 
+impl fmt::Display for RpcError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Debug::fmt(self, f)
+    }
+}
+
+impl error::Error for RpcError {}
+
+#[derive(Debug)]
 pub enum BidiError {
     /// Unable to open a stream to the server
     Open(underlying::OpenBiError),
@@ -106,6 +128,15 @@ pub enum BidiError {
     Send(underlying::SendError),
 }
 
+impl fmt::Display for BidiError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Debug::fmt(self, f)
+    }
+}
+
+impl error::Error for BidiError {}
+
+#[derive(Debug)]
 pub enum ClientStreamingError {
     /// Unable to open a stream to the server
     Open(underlying::OpenBiError),
@@ -113,6 +144,15 @@ pub enum ClientStreamingError {
     Send(underlying::SendError),
 }
 
+impl fmt::Display for ClientStreamingError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Debug::fmt(self, f)
+    }
+}
+
+impl error::Error for ClientStreamingError {}
+
+#[derive(Debug)]
 pub enum ClientStreamingItemError {
     EarlyClose,
     /// Unable to receive the response from the server
@@ -121,6 +161,7 @@ pub enum ClientStreamingItemError {
     DowncastError,
 }
 
+#[derive(Debug)]
 pub enum StreamingResponseError {
     /// Unable to open a stream to the server
     Open(underlying::OpenBiError),
@@ -128,6 +169,7 @@ pub enum StreamingResponseError {
     Send(underlying::SendError),
 }
 
+#[derive(Debug)]
 pub enum StreamingResponseItemError {
     /// Unable to receive the response from the server
     RecvError(underlying::RecvError),
@@ -135,6 +177,7 @@ pub enum StreamingResponseItemError {
     DowncastError,
 }
 
+#[derive(Debug)]
 pub enum BidiItemError {
     /// Unable to receive the response from the server
     RecvError(underlying::RecvError),
@@ -142,7 +185,7 @@ pub enum BidiItemError {
     DowncastError,
 }
 
-impl<S: Service> ClientChannel<S, S::Req, S::Res> {
+impl<S: Service> ClientChannel<S> {
     pub fn new(channel: underlying::Channel<S::Req, S::Res>) -> Self {
         Self {
             channel,
