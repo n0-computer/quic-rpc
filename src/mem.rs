@@ -1,3 +1,4 @@
+use core::fmt;
 use futures::{channel::mpsc, Future, FutureExt, SinkExt, StreamExt};
 use pin_project::pin_project;
 use std::{pin::Pin, result, task::Poll};
@@ -5,9 +6,16 @@ use std::{pin::Pin, result, task::Poll};
 #[derive(Debug)]
 pub enum NoError {}
 
+impl fmt::Display for NoError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Debug::fmt(self, f)
+    }
+}
+
+impl std::error::Error for NoError {}
+
 #[pin_project]
-pub struct ResStream<Res>(
-    #[pin] mpsc::Receiver<Res>);
+pub struct ResStream<Res>(#[pin] mpsc::Receiver<Res>);
 
 impl<Res> futures::Stream for ResStream<Res> {
     type Item = Result<Res, NoError>;
@@ -36,6 +44,14 @@ pub struct Channel<Req, Res> {
 pub enum AcceptBiError {
     SenderDropped,
 }
+
+impl fmt::Display for AcceptBiError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Debug::fmt(self, f)
+    }
+}
+
+impl std::error::Error for AcceptBiError {}
 
 #[pin_project]
 pub struct OpenBiFuture<'a, Req, Res> {
@@ -138,11 +154,14 @@ impl<Req: Send + 'static, Res: Send + 'static> crate::Channel<Req, Res> for Chan
 pub fn connection<Req, Res>(buffer: usize) -> (Channel<Req, Res>, Channel<Res, Req>) {
     let (send1, recv1) = mpsc::channel::<Socket<Req, Res>>(buffer);
     let (send2, recv2) = mpsc::channel::<Socket<Res, Req>>(buffer);
-    (Channel {
-        stream: recv1,
-        sink: send2,
-    }, Channel {
-        stream: recv2,
-        sink: send1,
-    })
+    (
+        Channel {
+            stream: recv1,
+            sink: send2,
+        },
+        Channel {
+            stream: recv2,
+            sink: send1,
+        },
+    )
 }

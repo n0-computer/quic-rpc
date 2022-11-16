@@ -2,8 +2,13 @@ use crate::mem;
 use crate::quinn;
 use futures::{future::BoxFuture, FutureExt, Sink, Stream};
 use pin_project::pin_project;
-use serde::{Serialize, de::DeserializeOwned};
-use std::{io, pin::Pin, result, task::{Context, Poll}};
+use serde::{de::DeserializeOwned, Serialize};
+use std::{
+    io,
+    pin::Pin,
+    result,
+    task::{Context, Poll},
+};
 
 pub struct Channel<Req, Res> {
     mem: mem::Channel<Req, Res>,
@@ -69,6 +74,7 @@ impl<Res: DeserializeOwned> Stream for ResStream<Res> {
     }
 }
 
+#[derive(Debug)]
 pub enum Error<M, Q> {
     Mem(M),
     Quinn(Q),
@@ -116,7 +122,8 @@ impl<Req: Serialize + Send + 'static, Res: DeserializeOwned + Send + 'static>
     fn accept_bi(&mut self) -> Self::AcceptBiFuture<'_> {
         let mem_future = self.mem.accept_bi();
         // disambiguate accept_bi call so we don't get the one directly from quinn::Connection
-        let quinn_future = <::quinn::Connection as crate::Channel<Req, Res>>::accept_bi(&mut self.quinn);
+        let quinn_future =
+            <::quinn::Connection as crate::Channel<Req, Res>>::accept_bi(&mut self.quinn);
         async move {
             tokio::select! {
                 res = mem_future => res.map(|(send, recv)| (ReqSink::Mem(send), ResStream::Mem(recv))).map_err(Error::Mem),

@@ -2,8 +2,13 @@ use crate::mem;
 use crate::quinn;
 use futures::{future::BoxFuture, FutureExt, Sink, Stream};
 use pin_project::pin_project;
-use serde::{Serialize, de::DeserializeOwned};
-use std::{io, pin::Pin, result, task::{Context, Poll}};
+use serde::{de::DeserializeOwned, Serialize};
+use std::{
+    io,
+    pin::Pin,
+    result,
+    task::{Context, Poll},
+};
 
 pub enum Channel<Req, Res> {
     Mem(mem::Channel<Req, Res>),
@@ -69,6 +74,7 @@ impl<Res: DeserializeOwned> Stream for ResStream<Res> {
     }
 }
 
+#[derive(Debug)]
 pub enum Error<M, Q> {
     Mem(M),
     Quinn(Q),
