@@ -1,7 +1,7 @@
-use futures::Future;
 use futures::future;
 use futures::future::BoxFuture;
 use futures::stream::BoxStream;
+use futures::Future;
 use futures::FutureExt;
 use futures::Sink;
 use futures::SinkExt;
@@ -37,8 +37,7 @@ pub trait RpcMsg<S: Service>: Into<S::Req> + TryFrom<S::Req> + Send + 'static {
     type Response: Into<S::Res> + TryFrom<S::Res> + Send + 'static;
 }
 
-impl<S: Service, T: RpcMsg<S>> Msg<S> for T
-{
+impl<S: Service, T: RpcMsg<S>> Msg<S> for T {
     type Update = Self;
 
     type Response = T::Response;
@@ -50,20 +49,19 @@ pub trait HandleBidi<S: Service, M: Msg<S, Pattern = BidiStreaming>> {
     fn handle(
         &self,
         msg: M,
-        input: underlying::ResStream<S::Req>,
-        output: underlying::ReqSink<S::Res>,
+        input: underlying::RecvStream<S::Req>,
+        output: underlying::SendSink<S::Res>,
     ) -> BoxFuture<'_, result::Result<(), underlying::SendError>>;
 }
 
 pub trait HandleRpc<S: Service, M: Msg<S, Pattern = Rpc>> {
-
     type RpcFuture: Future<Output = M::Response> + Send + 'static;
 
     fn handle(
         &self,
         msg: M,
-        _input: underlying::ResStream<S::Req>,
-        mut output: underlying::ReqSink<S::Res>,
+        _input: underlying::RecvStream<S::Req>,
+        mut output: underlying::SendSink<S::Res>,
     ) -> BoxFuture<'_, result::Result<(), underlying::SendError>> {
         let fut = self.rpc(msg);
         async move {

@@ -1,6 +1,7 @@
 use core::fmt;
 use futures::{channel::mpsc, Future, FutureExt, SinkExt, StreamExt};
 use pin_project::pin_project;
+use serde::{de::DeserializeOwned, Serialize};
 use std::{pin::Pin, result, task::Poll};
 
 #[derive(Debug)]
@@ -15,9 +16,9 @@ impl fmt::Display for NoError {
 impl std::error::Error for NoError {}
 
 #[pin_project]
-pub struct ResStream<Res>(#[pin] mpsc::Receiver<Res>);
+pub struct RecvStream<Res>(#[pin] mpsc::Receiver<Res>);
 
-impl<Res> futures::Stream for ResStream<Res> {
+impl<Res> futures::Stream for RecvStream<Res> {
     type Item = Result<Res, NoError>;
 
     fn poll_next(
@@ -33,7 +34,7 @@ impl<Res> futures::Stream for ResStream<Res> {
     }
 }
 
-type Socket<Req, Res> = (self::ReqSink<Req>, self::ResStream<Res>);
+type Socket<Req, Res> = (self::SendSink<Req>, self::RecvStream<Res>);
 
 pub struct Channel<Req, Res> {
     stream: mpsc::Receiver<Socket<Req, Res>>,
@@ -112,7 +113,7 @@ impl<'a, Req, Res> Future for AcceptBiFuture<'a, Req, Res> {
     }
 }
 
-pub type ReqSink<Req> = mpsc::Sender<Req>;
+pub type SendSink<Req> = mpsc::Sender<Req>;
 
 pub type SendError = mpsc::SendError;
 
@@ -120,10 +121,14 @@ pub type RecvError = NoError;
 
 pub type OpenBiError = mpsc::SendError;
 
-impl<Req: Send + 'static, Res: Send + 'static> crate::Channel<Req, Res> for Channel<Req, Res> {
-    type ReqSink = self::ReqSink<Req>;
+impl<
+        Req: Serialize + DeserializeOwned + Send + 'static,
+        Res: Serialize + DeserializeOwned + Send + 'static,
+    > crate::Channel<Req, Res> for Channel<Req, Res>
+{
+    type SendSink<M: Serialize> = self::SendSink<M>;
 
-    type ResStream = self::ResStream<Res>;
+    type RecvStream<M: DeserializeOwned> = self::RecvStream<M>;
 
     type SendError = self::SendError;
 
@@ -136,8 +141,8 @@ impl<Req: Send + 'static, Res: Send + 'static> crate::Channel<Req, Res> for Chan
     fn open_bi(&mut self) -> Self::OpenBiFuture<'_> {
         let (local_send, remote_recv) = mpsc::channel::<Req>(1);
         let (remote_send, local_recv) = mpsc::channel::<Res>(1);
-        let remote_recv = ResStream(remote_recv);
-        let local_recv = ResStream(local_recv);
+        let remote_recv = RecvStream(remote_recv);
+        let local_recv = RecvStream(local_recv);
         let inner = self.sink.send((remote_send, remote_recv));
         OpenBiFuture::new(inner, (local_send, local_recv))
     }

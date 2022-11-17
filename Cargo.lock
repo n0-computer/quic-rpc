@@ -3,22 +3,6 @@
 version = 3
 
 [[package]]
-name = "abstract-rpc"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "derive_more",
- "futures",
- "pin-project",
- "quinn",
- "serde",
- "serde_json",
- "tokio",
- "tokio-serde",
- "tokio-util",
-]
-
-[[package]]
 name = "anyhow"
 version = "1.0.66"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -429,6 +413,22 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5ea3d908b0e36316caf9e9e2c4625cdde190a7e6f440d794667ed17a1855e725"
 dependencies = [
  "unicode-ident",
+]
+
+[[package]]
+name = "quic-rpc"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "derive_more",
+ "futures",
+ "pin-project",
+ "quinn",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-serde",
+ "tokio-util",
 ]
 
 [[package]]

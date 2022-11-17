@@ -1,4 +1,3 @@
-use ::quinn::{RecvStream, SendStream};
 use futures::{future::BoxFuture, FutureExt, Sink, SinkExt, Stream, StreamExt};
 use pin_project::pin_project;
 use serde::{de::DeserializeOwned, Serialize};
@@ -6,20 +5,20 @@ use std::{io, pin::Pin, result};
 use tokio_serde::{formats::SymmetricalBincode, SymmetricallyFramed};
 use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
 
-type Socket<Req, Res> = (ReqSink<Req>, ResStream<Res>);
+type Socket<Req, Res> = (SendSink<Req>, RecvStream<Res>);
 
 /// A sink that wraps a quinn SendStream with length delimiting and bincode
 #[pin_project]
-pub struct ReqSink<Req>(
+pub struct SendSink<Req>(
     #[pin]
     tokio_serde::SymmetricallyFramed<
-        FramedWrite<SendStream, LengthDelimitedCodec>,
+        FramedWrite<::quinn::SendStream, LengthDelimitedCodec>,
         Req,
         SymmetricalBincode<Req>,
     >,
 );
 
-impl<Req: Serialize> Sink<Req> for ReqSink<Req> {
+impl<Req: Serialize> Sink<Req> for SendSink<Req> {
     type Error = io::Error;
 
     fn poll_ready(
@@ -48,18 +47,18 @@ impl<Req: Serialize> Sink<Req> for ReqSink<Req> {
     }
 }
 
-/// A sink that wraps a quinn SendStream with length delimiting and bincode
+/// A stream that wraps a quinn RecvStream with length delimiting and bincode
 #[pin_project]
-pub struct ResStream<T>(
+pub struct RecvStream<T>(
     #[pin]
     tokio_serde::SymmetricallyFramed<
-        FramedRead<RecvStream, LengthDelimitedCodec>,
+        FramedRead<::quinn::RecvStream, LengthDelimitedCodec>,
         T,
         SymmetricalBincode<T>,
     >,
 );
 
-impl<T: DeserializeOwned> Stream for ResStream<T> {
+impl<T: DeserializeOwned> Stream for RecvStream<T> {
     type Item = result::Result<T, io::Error>;
 
     fn poll_next(
@@ -74,12 +73,14 @@ pub type OpenBiError = quinn::ConnectionError;
 
 pub type AcceptBiError = quinn::ConnectionError;
 
-impl<Req: Serialize + Send + 'static, Res: DeserializeOwned + Send + 'static>
-    crate::Channel<Req, Res> for quinn::Connection
+impl<
+        Req: Serialize + DeserializeOwned + Send + 'static,
+        Res: Serialize + DeserializeOwned + Send + 'static,
+    > crate::Channel<Req, Res> for quinn::Connection
 {
-    type ReqSink = self::ReqSink<Req>;
+    type SendSink<M: Serialize> = self::SendSink<M>;
 
-    type ResStream = self::ResStream<Res>;
+    type RecvStream<M: DeserializeOwned> = self::RecvStream<M>;
 
     type OpenBiError = self::OpenBiError;
 
@@ -107,8 +108,8 @@ impl<Req: Serialize + Send + 'static, Res: DeserializeOwned + Send + 'static>
             let recv = SymmetricallyFramed::new(recv, SymmetricalBincode::<Res>::default());
             let send = SymmetricallyFramed::new(send, SymmetricalBincode::<Req>::default());
             // box so we don't have to write down the insanely long type
-            let send = ReqSink(send);
-            let recv = ResStream(recv);
+            let send = SendSink(send);
+            let recv = RecvStream(recv);
             Ok((send, recv))
         }
         .boxed()
@@ -132,8 +133,8 @@ impl<Req: Serialize + Send + 'static, Res: DeserializeOwned + Send + 'static>
             let recv = SymmetricallyFramed::new(recv, SymmetricalBincode::<Res>::default());
             let send = SymmetricallyFramed::new(send, SymmetricalBincode::<Req>::default());
             // box so we don't have to write down the insanely long type
-            let send = ReqSink(send);
-            let recv = ResStream(recv);
+            let send = SendSink(send);
+            let recv = RecvStream(recv);
             Ok((send, recv))
         }
         .boxed()
