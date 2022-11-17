@@ -1,56 +1,12 @@
 use anyhow::Context;
 use derive_more::{From, TryInto};
-use futures::{future::BoxFuture, Future, FutureExt, Sink, SinkExt, Stream, StreamExt};
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use std::{fmt::Debug, result};
+use futures::{future::BoxFuture, FutureExt, SinkExt, StreamExt};
+use serde::{Deserialize, Serialize};
+use std::fmt::Debug;
 use sugar::{ClientChannel, RpcMsg};
 
 use crate::sugar::{HandleRpc, Service};
-pub mod mem;
-pub mod mem_and_quinn;
-pub mod mem_or_quinn;
-pub mod quinn;
-pub mod sugar;
-
-/// An abstract channel to a service
-///
-/// This assumes cheap streams, so every interaction uses a new stream.
-pub trait Channel<Req: Serialize + DeserializeOwned, Res: Serialize + DeserializeOwned> {
-    /// The sink used for sending either requests or responses on this channel
-    type SendSink<M: Serialize>: Sink<M, Error = Self::SendError>;
-    /// The stream used for receiving either requests or responses on this channel
-    type RecvStream<M: DeserializeOwned>: Stream<Item = result::Result<M, Self::RecvError>>;
-    /// Error you might get while sending messages to a sink
-    type SendError: Debug;
-    /// Error you might get while receiving messages from a stream
-    type RecvError: Debug;
-    /// Error you might get when opening a new connection to the server
-    type OpenBiError: Debug;
-    /// Future returned by open_bi
-    type OpenBiFuture<'a>: Future<
-            Output = result::Result<
-                (Self::SendSink<Req>, Self::RecvStream<Res>),
-                Self::OpenBiError,
-            >,
-        > + 'a
-    where
-        Self: 'a;
-    /// Open a bidirectional stream
-    fn open_bi(&mut self) -> Self::OpenBiFuture<'_>;
-    /// Error you might get when waiting for new streams on the server side
-    type AcceptBiError: Debug;
-    /// Future returned by accept_bi
-    type AcceptBiFuture<'a>: Future<
-            Output = result::Result<
-                (Self::SendSink<Req>, Self::RecvStream<Res>),
-                Self::AcceptBiError,
-            >,
-        > + 'a
-    where
-        Self: 'a;
-    /// Accept a bidirectional stream
-    fn accept_bi(&mut self) -> Self::AcceptBiFuture<'_>;
-}
+use quic_rpc::*;
 
 type Cid = [u8; 32];
 #[derive(Debug, Serialize, Deserialize)]
