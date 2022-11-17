@@ -116,6 +116,8 @@ impl Store {
         _put: PutFile,
         updates: impl Stream<Item = PutFileUpdate>,
     ) -> PutFileResponse {
+        tokio::pin!(updates);
+        while let Some(_update) = updates.next().await {}
         PutFileResponse([0; 32])
     }
 
@@ -152,7 +154,7 @@ async fn main() -> anyhow::Result<()> {
             let (req, chan) = d.accept_one(&mut server).await?;
             use StoreRequest::*;
             let store = store.clone();
-            let res = match req {
+            match req {
                 Put(msg) => d.rpc(msg, chan, store, Store::put).await,
                 Get(msg) => d.rpc(msg, chan, store, Store::get).await,
                 PutFile(msg) => d.client_streaming(msg, chan, store, Store::put_file).await,
@@ -163,8 +165,7 @@ async fn main() -> anyhow::Result<()> {
                 }
                 PutFileUpdate(_) => Err(RpcServerError::UnexpectedStartMessage)?,
                 ConvertFileUpdate(_) => Err(RpcServerError::UnexpectedStartMessage)?,
-            };
-            res.map_err(RpcServerError::SendError)?;
+            }?;
         }
     }
 
@@ -173,14 +174,40 @@ async fn main() -> anyhow::Result<()> {
     let server_handle = tokio::task::spawn(server_future(server));
 
     // a rpc call
+    println!("a rpc call");
     let res = client.rpc(Get([0u8; 32])).await?;
     println!("{:?}", res);
 
-    // client streaming call
+    // server streaming call
+    println!("a server streaming call");
     let mut s = client.server_streaming(GetFile([0u8; 32])).await?;
     while let Some(res) = s.next().await {
         println!("{:?}", res);
     }
+
+    // client streaming call
+    println!("a client streaming call");
+    let (mut send, mut recv) = client.client_streaming(PutFile).await?;
+    tokio::task::spawn(async move {
+        for i in 0..3 {
+            send.send(PutFileUpdate(vec![i])).await.unwrap();
+        }
+    });
+    let res = recv.await?;
+    println!("{:?}", res);
+
+    // bidi streaming call
+    println!("a bidi streaming call");
+    let (mut send, mut recv) = client.bidi(ConvertFile).await?;
+    tokio::task::spawn(async move {
+        for i in 0..3 {
+            send.send(ConvertFileUpdate(vec![i])).await.unwrap();
+        }
+    });
+    while let Some(res) = recv.next().await {
+        println!("{:?}", res);
+    }
+
     // dropping the client will cause the server to terminate
     drop(client);
     server_handle.await??;

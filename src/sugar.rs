@@ -1,6 +1,7 @@
 use futures::channel::oneshot;
 use futures::future;
 use futures::future::BoxFuture;
+use futures::future::Either;
 use futures::stream::BoxStream;
 use futures::task;
 use futures::Future;
@@ -22,6 +23,8 @@ use std::task::Poll;
 use crate::mem as underlying;
 use crate::Channel;
 use crate::Service;
+
+pub type BoxSink<'a, T, E> = Pin<Box<dyn Sink<T, Error = E> + Send>>;
 
 /// A message for a service
 ///
@@ -242,7 +245,7 @@ impl<S: Service> ClientChannel<S> {
         msg: M,
     ) -> result::Result<
         (
-            Pin<Box<dyn Sink<M::Update, Error = underlying::SendError>>>,
+            BoxSink<'static, M::Update, underlying::SendError>,
             BoxFuture<'static, result::Result<M::Response, ClientStreamingItemError>>,
         ),
         ClientStreamingError,
@@ -282,7 +285,7 @@ impl<S: Service> ClientChannel<S> {
         msg: M,
     ) -> result::Result<
         (
-            Pin<Box<dyn Sink<M::Update, Error = underlying::SendError>>>,
+            BoxSink<'static, M::Update, underlying::SendError>,
             BoxStream<'static, result::Result<M::Response, BidiItemError>>,
         ),
         BidiError,
@@ -399,7 +402,7 @@ impl<S: Service, C: crate::Channel<S::Req, S::Res>> DispatchHelper<S, C> {
         c: (C::SendSink<S::Res>, C::RecvStream<S::Req>),
         target: T,
         f: F,
-    ) -> result::Result<(), C::SendError>
+    ) -> result::Result<(), RpcServerError<S, C>>
     where
         M: Msg<S, Pattern = Rpc>,
         F: FnOnce(T, M) -> Fut,
@@ -413,7 +416,7 @@ impl<S: Service, C: crate::Channel<S::Req, S::Res>> DispatchHelper<S, C> {
         let res: S::Res = res.into();
         // send it and return the error if any
         tokio::pin!(send);
-        send.send(res).await
+        send.send(res).await.map_err(RpcServerError::SendError)
     }
 
     /// handle the message M using the given function on the target object
@@ -425,7 +428,7 @@ impl<S: Service, C: crate::Channel<S::Req, S::Res>> DispatchHelper<S, C> {
         c: (C::SendSink<S::Res>, C::RecvStream<S::Req>),
         target: T,
         f: F,
-    ) -> result::Result<(), C::SendError>
+    ) -> result::Result<(), RpcServerError<S, C>>
     where
         M: Msg<S, Pattern = ClientStreaming>,
         F: FnOnce(T, M, UpdateDowncaster<S, C, M>) -> Fut + Send + 'static,
@@ -434,13 +437,16 @@ impl<S: Service, C: crate::Channel<S::Req, S::Res>> DispatchHelper<S, C> {
     {
         let (send, recv) = c;
         let (updates, read_error) = UpdateDowncaster::new(recv);
-        // get the response
-        let res = f(target, req, updates).await;
-        // turn into a S::Res so we can send it
-        let res: S::Res = res.into();
-        // send it and return the error if any
-        tokio::pin!(send);
-        send.send(res).await
+        race2(read_error.map(Err), async move {
+            // get the response
+            let res = f(target, req, updates).await;
+            // turn into a S::Res so we can send it
+            let res: S::Res = res.into();
+            // send it and return the error if any
+            tokio::pin!(send);
+            send.send(res).await.map_err(RpcServerError::SendError)
+        })
+        .await
     }
 
     /// handle the message M using the given function on the target object
@@ -452,7 +458,7 @@ impl<S: Service, C: crate::Channel<S::Req, S::Res>> DispatchHelper<S, C> {
         c: (C::SendSink<S::Res>, C::RecvStream<S::Req>),
         target: T,
         f: F,
-    ) -> result::Result<(), C::SendError>
+    ) -> result::Result<(), RpcServerError<S, C>>
     where
         M: Msg<S, Pattern = BidiStreaming>,
         F: FnOnce(T, M, UpdateDowncaster<S, C, M>) -> Str + Send + 'static,
@@ -464,15 +470,20 @@ impl<S: Service, C: crate::Channel<S::Req, S::Res>> DispatchHelper<S, C> {
         let (updates, read_error) = UpdateDowncaster::new(recv);
         // get the response
         let responses = f(target, req, updates);
-        tokio::pin!(responses);
-        tokio::pin!(send);
-        while let Some(response) = responses.next().await {
-            // turn into a S::Res so we can send it
-            let response: S::Res = response.into();
-            // send it and return the error if any
-            send.send(response).await?;
-        }
-        Ok(())
+        race2(read_error.map(Err), async move {
+            tokio::pin!(responses);
+            tokio::pin!(send);
+            while let Some(response) = responses.next().await {
+                // turn into a S::Res so we can send it
+                let response: S::Res = response.into();
+                // send it and return the error if any
+                send.send(response)
+                    .await
+                    .map_err(RpcServerError::SendError)?;
+            }
+            Ok(())
+        })
+        .await
     }
 
     /// handle the message M using the given function on the target object
@@ -484,7 +495,7 @@ impl<S: Service, C: crate::Channel<S::Req, S::Res>> DispatchHelper<S, C> {
         c: (C::SendSink<S::Res>, C::RecvStream<S::Req>),
         target: T,
         f: F,
-    ) -> result::Result<(), C::SendError>
+    ) -> result::Result<(), RpcServerError<S, C>>
     where
         M: Msg<S, Pattern = ServerStreaming>,
         F: FnOnce(T, M) -> Str + Send + 'static,
@@ -500,7 +511,9 @@ impl<S: Service, C: crate::Channel<S::Req, S::Res>> DispatchHelper<S, C> {
             // turn into a S::Res so we can send it
             let response: S::Res = response.into();
             // send it and return the error if any
-            send.send(response).await?;
+            send.send(response)
+                .await
+                .map_err(RpcServerError::SendError)?;
         }
         Ok(())
     }
@@ -514,8 +527,9 @@ pub struct UpdateDowncaster<S: Service, C: Channel<S::Req, S::Res>, M: Msg<S>>(
 );
 
 impl<S: Service, C: Channel<S::Req, S::Res>, M: Msg<S>> UpdateDowncaster<S, C, M> {
-    fn new(recv: C::RecvStream<S::Req>) -> (Self, oneshot::Receiver<RpcServerError<S, C>>) {
+    fn new(recv: C::RecvStream<S::Req>) -> (Self, impl Future<Output = RpcServerError<S, C>>) {
         let (error_send, error_recv) = oneshot::channel();
+        let error_recv = error_recv.map(|x| x.unwrap());
         (Self(recv, Some(error_send), PhantomData), error_recv)
     }
 }
@@ -548,5 +562,12 @@ impl<S: Service, C: Channel<S::Req, S::Res>, M: Msg<S>> Stream for UpdateDowncas
             Poll::Ready(None) => Poll::Ready(None),
             Poll::Pending => Poll::Pending,
         }
+    }
+}
+
+async fn race2<T, A: Future<Output = T>, B: Future<Output = T>>(f1: A, f2: B) -> T {
+    tokio::select! {
+        x = f1 => x,
+        x = f2 => x,
     }
 }
