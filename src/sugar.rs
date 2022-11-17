@@ -1,7 +1,6 @@
 use futures::channel::oneshot;
 use futures::future;
 use futures::future::BoxFuture;
-use futures::future::Either;
 use futures::stream::BoxStream;
 use futures::task;
 use futures::Future;
@@ -22,6 +21,7 @@ use std::task::Poll;
 
 use crate::mem as underlying;
 use crate::Channel;
+use crate::ChannelTypes;
 use crate::Service;
 
 pub type BoxSink<'a, T, E> = Pin<Box<dyn Sink<T, Error = E> + Send>>;
@@ -323,7 +323,7 @@ impl<S, C> Clone for DispatchHelper<S, C> {
 impl<S, C> Copy for DispatchHelper<S, C> {}
 
 /// All the things that can go wrong on the server side
-pub enum RpcServerError<S: Service, C: crate::Channel<S::Req, S::Res>> {
+pub enum RpcServerError<C: ChannelTypes> {
     /// Unable to open a new channel
     AcceptBiError(C::AcceptBiError),
     /// Recv side for a channel was closed before getting the first message
@@ -338,7 +338,7 @@ pub enum RpcServerError<S: Service, C: crate::Channel<S::Req, S::Res>> {
     UnexpectedUpdateMessage,
 }
 
-impl<S: Service, C: crate::Channel<S::Req, S::Res>> fmt::Debug for RpcServerError<S, C> {
+impl<C: ChannelTypes> fmt::Debug for RpcServerError<C> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::AcceptBiError(arg0) => f.debug_tuple("AcceptBiError").field(arg0).finish(),
@@ -351,15 +351,15 @@ impl<S: Service, C: crate::Channel<S::Req, S::Res>> fmt::Debug for RpcServerErro
     }
 }
 
-impl<S: Service, C: crate::Channel<S::Req, S::Res>> fmt::Display for RpcServerError<S, C> {
+impl<C: ChannelTypes> fmt::Display for RpcServerError<C> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         fmt::Debug::fmt(&self, f)
     }
 }
 
-impl<S: Service, C: crate::Channel<S::Req, S::Res>> error::Error for RpcServerError<S, C> {}
+impl<C: ChannelTypes> error::Error for RpcServerError<C> {}
 
-impl<S: Service, C: crate::Channel<S::Req, S::Res>> Default for DispatchHelper<S, C> {
+impl<S: Service, C: ChannelTypes> Default for DispatchHelper<S, C> {
     fn default() -> Self {
         Self {
             _s: marker::PhantomData,
@@ -367,13 +367,13 @@ impl<S: Service, C: crate::Channel<S::Req, S::Res>> Default for DispatchHelper<S
     }
 }
 
-impl<S: Service, C: crate::Channel<S::Req, S::Res>> DispatchHelper<S, C> {
+impl<S: Service, C: ChannelTypes> DispatchHelper<S, C> {
     /// Accept one channel from the client, pull out the first request, and return both the first
     /// message and the channel for further processing.
     pub async fn accept_one(
         self,
-        channel: &mut C,
-    ) -> result::Result<(S::Req, (C::SendSink<S::Res>, C::RecvStream<S::Req>)), RpcServerError<S, C>>
+        channel: &mut C::Channel<S::Req, S::Res>,
+    ) -> result::Result<(S::Req, (C::SendSink<S::Res>, C::RecvStream<S::Req>)), RpcServerError<C>>
     where
         C::RecvStream<S::Req>: Unpin,
     {
@@ -402,7 +402,7 @@ impl<S: Service, C: crate::Channel<S::Req, S::Res>> DispatchHelper<S, C> {
         c: (C::SendSink<S::Res>, C::RecvStream<S::Req>),
         target: T,
         f: F,
-    ) -> result::Result<(), RpcServerError<S, C>>
+    ) -> result::Result<(), RpcServerError<C>>
     where
         M: Msg<S, Pattern = Rpc>,
         F: FnOnce(T, M) -> Fut,
@@ -428,7 +428,7 @@ impl<S: Service, C: crate::Channel<S::Req, S::Res>> DispatchHelper<S, C> {
         c: (C::SendSink<S::Res>, C::RecvStream<S::Req>),
         target: T,
         f: F,
-    ) -> result::Result<(), RpcServerError<S, C>>
+    ) -> result::Result<(), RpcServerError<C>>
     where
         M: Msg<S, Pattern = ClientStreaming>,
         F: FnOnce(T, M, UpdateDowncaster<S, C, M>) -> Fut + Send + 'static,
@@ -458,7 +458,7 @@ impl<S: Service, C: crate::Channel<S::Req, S::Res>> DispatchHelper<S, C> {
         c: (C::SendSink<S::Res>, C::RecvStream<S::Req>),
         target: T,
         f: F,
-    ) -> result::Result<(), RpcServerError<S, C>>
+    ) -> result::Result<(), RpcServerError<C>>
     where
         M: Msg<S, Pattern = BidiStreaming>,
         F: FnOnce(T, M, UpdateDowncaster<S, C, M>) -> Str + Send + 'static,
@@ -495,14 +495,14 @@ impl<S: Service, C: crate::Channel<S::Req, S::Res>> DispatchHelper<S, C> {
         c: (C::SendSink<S::Res>, C::RecvStream<S::Req>),
         target: T,
         f: F,
-    ) -> result::Result<(), RpcServerError<S, C>>
+    ) -> result::Result<(), RpcServerError<C>>
     where
         M: Msg<S, Pattern = ServerStreaming>,
         F: FnOnce(T, M) -> Str + Send + 'static,
         Str: Stream<Item = M::Response> + Send + 'static,
         T: Send + 'static,
     {
-        let (send, recv) = c;
+        let (send, _recv) = c;
         // get the response
         let responses = f(target, req);
         tokio::pin!(responses);
@@ -520,21 +520,21 @@ impl<S: Service, C: crate::Channel<S::Req, S::Res>> DispatchHelper<S, C> {
 }
 
 #[pin_project]
-pub struct UpdateDowncaster<S: Service, C: Channel<S::Req, S::Res>, M: Msg<S>>(
+pub struct UpdateDowncaster<S: Service, C: ChannelTypes, M: Msg<S>>(
     #[pin] C::RecvStream<S::Req>,
-    Option<oneshot::Sender<RpcServerError<S, C>>>,
+    Option<oneshot::Sender<RpcServerError<C>>>,
     PhantomData<M>,
 );
 
-impl<S: Service, C: Channel<S::Req, S::Res>, M: Msg<S>> UpdateDowncaster<S, C, M> {
-    fn new(recv: C::RecvStream<S::Req>) -> (Self, impl Future<Output = RpcServerError<S, C>>) {
+impl<S: Service, C: ChannelTypes, M: Msg<S>> UpdateDowncaster<S, C, M> {
+    fn new(recv: C::RecvStream<S::Req>) -> (Self, impl Future<Output = RpcServerError<C>>) {
         let (error_send, error_recv) = oneshot::channel();
         let error_recv = error_recv.map(|x| x.unwrap());
         (Self(recv, Some(error_send), PhantomData), error_recv)
     }
 }
 
-impl<S: Service, C: Channel<S::Req, S::Res>, M: Msg<S>> Stream for UpdateDowncaster<S, C, M> {
+impl<S: Service, C: ChannelTypes, M: Msg<S>> Stream for UpdateDowncaster<S, C, M> {
     type Item = M::Update;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut task::Context<'_>) -> Poll<Option<Self::Item>> {

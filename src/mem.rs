@@ -1,4 +1,4 @@
-use crate::RpcMessage;
+use crate::{ChannelTypes, RpcMessage};
 use core::fmt;
 use futures::{channel::mpsc, Future, FutureExt, SinkExt, StreamExt};
 use pin_project::pin_project;
@@ -121,7 +121,9 @@ pub type RecvError = NoError;
 
 pub type OpenBiError = mpsc::SendError;
 
-impl<In: RpcMessage, Out: RpcMessage> crate::Channel<In, Out> for Channel<In, Out> {
+pub struct MemChannelTypes;
+
+impl ChannelTypes for MemChannelTypes {
     type SendSink<M: RpcMessage> = self::SendSink<M>;
 
     type RecvStream<M: RpcMessage> = self::RecvStream<M>;
@@ -132,9 +134,19 @@ impl<In: RpcMessage, Out: RpcMessage> crate::Channel<In, Out> for Channel<In, Ou
 
     type OpenBiError = self::OpenBiError;
 
-    type OpenBiFuture<'a> = self::OpenBiFuture<'a, In, Out>;
+    type OpenBiFuture<'a, In: RpcMessage, Out: RpcMessage> = self::OpenBiFuture<'a, In, Out>;
 
-    fn open_bi(&mut self) -> Self::OpenBiFuture<'_> {
+    type AcceptBiError = AcceptBiError;
+
+    type AcceptBiFuture<'a, In: RpcMessage, Out: RpcMessage> = self::AcceptBiFuture<'a, In, Out>;
+
+    type Channel<In: RpcMessage, Out: RpcMessage> = self::Channel<In, Out>;
+}
+
+impl<In: RpcMessage, Out: RpcMessage> crate::Channel<In, Out, MemChannelTypes>
+    for Channel<In, Out>
+{
+    fn open_bi(&mut self) -> OpenBiFuture<'_, In, Out> {
         let (local_send, remote_recv) = mpsc::channel::<Out>(1);
         let (remote_send, local_recv) = mpsc::channel::<In>(1);
         let remote_recv = RecvStream(remote_recv);
@@ -143,11 +155,7 @@ impl<In: RpcMessage, Out: RpcMessage> crate::Channel<In, Out> for Channel<In, Ou
         OpenBiFuture::new(inner, (local_send, local_recv))
     }
 
-    type AcceptBiError = AcceptBiError;
-
-    type AcceptBiFuture<'a> = self::AcceptBiFuture<'a, In, Out>;
-
-    fn accept_bi(&mut self) -> Self::AcceptBiFuture<'_> {
+    fn accept_bi(&mut self) -> AcceptBiFuture<'_, In, Out> {
         AcceptBiFuture(self.stream.next())
     }
 }

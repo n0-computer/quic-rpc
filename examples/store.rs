@@ -3,6 +3,7 @@ use async_stream::stream;
 use derive_more::{From, TryInto};
 use futures::{SinkExt, Stream, StreamExt};
 use quic_rpc::{
+    mem::MemChannelTypes,
     sugar::{BidiStreaming, ClientStreaming, DispatchHelper, Msg, RpcServerError, ServerStreaming},
     Channel, *,
 };
@@ -121,7 +122,7 @@ impl Store {
         PutFileResponse([0; 32])
     }
 
-    fn get_file(self, get: GetFile) -> impl Stream<Item = GetFileResponse> + Send + 'static {
+    fn get_file(self, _get: GetFile) -> impl Stream<Item = GetFileResponse> + Send + 'static {
         stream! {
             for i in 0..3 {
                 yield GetFileResponse(vec![i]);
@@ -131,7 +132,7 @@ impl Store {
 
     fn convert_file(
         self,
-        get: ConvertFile,
+        _convert: ConvertFile,
         updates: impl Stream<Item = ConvertFileUpdate> + Send + 'static,
     ) -> impl Stream<Item = ConvertFileResponse> + Send + 'static {
         stream! {
@@ -146,7 +147,7 @@ impl Store {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     type Chan = mem::Channel<StoreRequest, StoreResponse>;
-    async fn server_future(server: Chan) -> result::Result<(), RpcServerError<StoreService, Chan>> {
+    async fn server_future(server: Chan) -> result::Result<(), RpcServerError<MemChannelTypes>> {
         let mut server = server;
         let store = Store;
         let d = DispatchHelper::default();
@@ -187,7 +188,7 @@ async fn main() -> anyhow::Result<()> {
 
     // client streaming call
     println!("a client streaming call");
-    let (mut send, mut recv) = client.client_streaming(PutFile).await?;
+    let (mut send, recv) = client.client_streaming(PutFile).await?;
     tokio::task::spawn(async move {
         for i in 0..3 {
             send.send(PutFileUpdate(vec![i])).await.unwrap();

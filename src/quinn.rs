@@ -1,4 +1,4 @@
-use crate::RpcMessage;
+use crate::{ChannelTypes, RpcMessage};
 use futures::{future::BoxFuture, FutureExt, Sink, SinkExt, Stream, StreamExt};
 use pin_project::pin_project;
 use serde::{de::DeserializeOwned, Serialize};
@@ -74,7 +74,15 @@ pub type OpenBiError = quinn::ConnectionError;
 
 pub type AcceptBiError = quinn::ConnectionError;
 
-impl<In: RpcMessage, Out: RpcMessage> crate::Channel<In, Out> for quinn::Connection {
+pub struct QuinnChannelTypes;
+
+pub type OpenBiFuture<'a, In, Out> =
+    BoxFuture<'a, result::Result<self::Socket<In, Out>, self::OpenBiError>>;
+
+pub type AcceptBiFuture<'a, In, Out> =
+    BoxFuture<'a, result::Result<self::Socket<In, Out>, self::AcceptBiError>>;
+
+impl ChannelTypes for QuinnChannelTypes {
     type SendSink<M: RpcMessage> = self::SendSink<M>;
 
     type RecvStream<M: RpcMessage> = self::RecvStream<M>;
@@ -87,9 +95,17 @@ impl<In: RpcMessage, Out: RpcMessage> crate::Channel<In, Out> for quinn::Connect
 
     type RecvError = io::Error;
 
-    type OpenBiFuture<'a> = BoxFuture<'a, result::Result<self::Socket<In, Out>, Self::OpenBiError>>;
+    type OpenBiFuture<'a, In: RpcMessage, Out: RpcMessage> = self::OpenBiFuture<'a, In, Out>;
 
-    fn open_bi(&mut self) -> Self::OpenBiFuture<'_> {
+    type AcceptBiFuture<'a, In: RpcMessage, Out: RpcMessage> = self::AcceptBiFuture<'a, In, Out>;
+
+    type Channel<In: RpcMessage, Out: RpcMessage> = quinn::Connection;
+}
+
+impl<In: RpcMessage, Out: RpcMessage> crate::Channel<In, Out, QuinnChannelTypes>
+    for quinn::Connection
+{
+    fn open_bi(&mut self) -> OpenBiFuture<'_, In, Out> {
         let this = self.clone();
         async move {
             let conn: result::Result<
@@ -111,10 +127,7 @@ impl<In: RpcMessage, Out: RpcMessage> crate::Channel<In, Out> for quinn::Connect
         .boxed()
     }
 
-    type AcceptBiFuture<'a> =
-        BoxFuture<'a, result::Result<self::Socket<In, Out>, Self::AcceptBiError>>;
-
-    fn accept_bi(&mut self) -> Self::AcceptBiFuture<'_> {
+    fn accept_bi(&mut self) -> AcceptBiFuture<'_, In, Out> {
         let this = self.clone();
         async move {
             let conn: result::Result<

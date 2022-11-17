@@ -1,5 +1,6 @@
 use crate::mem;
 use crate::quinn;
+use crate::ChannelTypes;
 use crate::RpcMessage;
 use futures::{future::BoxFuture, FutureExt, Sink, Stream};
 use pin_project::pin_project;
@@ -97,9 +98,17 @@ pub type OpenBiError = Error<mem::OpenBiError, quinn::OpenBiError>;
 
 pub type AcceptBiError = Error<mem::AcceptBiError, quinn::AcceptBiError>;
 
+pub type OpenBiFuture<'a, In, Out> =
+    BoxFuture<'a, result::Result<Socket<In, Out>, self::OpenBiError>>;
+
+pub type AcceptBiFuture<'a, In, Out> =
+    BoxFuture<'a, result::Result<self::Socket<In, Out>, self::AcceptBiError>>;
+
 type Socket<In, Out> = (self::SendSink<Out>, self::RecvStream<In>);
 
-impl<In: RpcMessage, Out: RpcMessage> crate::Channel<In, Out> for Channel<In, Out> {
+pub struct MemOrQuinnChannelTypes;
+
+impl ChannelTypes for MemOrQuinnChannelTypes {
     type SendSink<M: RpcMessage> = self::SendSink<M>;
 
     type RecvStream<M: RpcMessage> = self::RecvStream<M>;
@@ -110,9 +119,19 @@ impl<In: RpcMessage, Out: RpcMessage> crate::Channel<In, Out> for Channel<In, Ou
 
     type OpenBiError = self::OpenBiError;
 
-    type OpenBiFuture<'a> = BoxFuture<'a, result::Result<Socket<In, Out>, Self::OpenBiError>>;
+    type OpenBiFuture<'a, In: RpcMessage, Out: RpcMessage> = self::OpenBiFuture<'a, In, Out>;
 
-    fn open_bi(&mut self) -> Self::OpenBiFuture<'_> {
+    type AcceptBiError = self::AcceptBiError;
+
+    type AcceptBiFuture<'a, In: RpcMessage, Out: RpcMessage> = self::AcceptBiFuture<'a, In, Out>;
+
+    type Channel<In: RpcMessage, Out: RpcMessage> = self::Channel<In, Out>;
+}
+
+impl<In: RpcMessage, Out: RpcMessage> crate::Channel<In, Out, MemOrQuinnChannelTypes>
+    for Channel<In, Out>
+{
+    fn open_bi(&mut self) -> OpenBiFuture<'_, In, Out> {
         match self {
             Channel::Mem(mem) => async {
                 let (send, recv) = mem.open_bi().await.map_err(Error::Mem)?;
@@ -127,12 +146,7 @@ impl<In: RpcMessage, Out: RpcMessage> crate::Channel<In, Out> for Channel<In, Ou
         }
     }
 
-    type AcceptBiError = self::AcceptBiError;
-
-    type AcceptBiFuture<'a> =
-        BoxFuture<'a, result::Result<self::Socket<In, Out>, Self::AcceptBiError>>;
-
-    fn accept_bi(&mut self) -> Self::AcceptBiFuture<'_> {
+    fn accept_bi(&mut self) -> AcceptBiFuture<'_, In, Out> {
         match self {
             Channel::Mem(mem) => async {
                 let (send, recv) = mem.accept_bi().await.map_err(Error::Mem)?;
