@@ -4,7 +4,7 @@ use derive_more::{From, TryInto};
 use futures::{SinkExt, Stream, StreamExt};
 use quic_rpc::{
     mem::MemChannelTypes,
-    sugar::{BidiStreaming, ClientStreaming, DispatchHelper, Msg, RpcServerError, ServerStreaming},
+    sugar::{BidiStreaming, ClientStreaming, ServerChannel, Msg, RpcServerError, ServerStreaming},
     Channel, *,
 };
 use serde::{Deserialize, Serialize};
@@ -146,22 +146,20 @@ impl Store {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    type Chan = mem::Channel<StoreRequest, StoreResponse>;
-    async fn server_future(server: Chan) -> result::Result<(), RpcServerError<MemChannelTypes>> {
-        let mut server = server;
+    async fn server_future(server: ServerChannel<StoreService, MemChannelTypes>) -> result::Result<(), RpcServerError<MemChannelTypes>> {
+        let mut s = server;
         let store = Store;
-        let d = DispatchHelper::default();
         loop {
-            let (req, chan) = d.accept_one(&mut server).await?;
+            let (req, chan) = s.accept_one().await?;
             use StoreRequest::*;
             let store = store.clone();
             match req {
-                Put(msg) => d.rpc(msg, chan, store, Store::put).await,
-                Get(msg) => d.rpc(msg, chan, store, Store::get).await,
-                PutFile(msg) => d.client_streaming(msg, chan, store, Store::put_file).await,
-                GetFile(msg) => d.server_streaming(msg, chan, store, Store::get_file).await,
+                Put(msg) => s.rpc(msg, chan, store, Store::put).await,
+                Get(msg) => s.rpc(msg, chan, store, Store::get).await,
+                PutFile(msg) => s.client_streaming(msg, chan, store, Store::put_file).await,
+                GetFile(msg) => s.server_streaming(msg, chan, store, Store::get_file).await,
                 ConvertFile(msg) => {
-                    d.bidi_streaming(msg, chan, store, Store::convert_file)
+                    s.bidi_streaming(msg, chan, store, Store::convert_file)
                         .await
                 }
                 PutFileUpdate(_) => Err(RpcServerError::UnexpectedStartMessage)?,
@@ -172,6 +170,7 @@ async fn main() -> anyhow::Result<()> {
 
     let (client, server) = mem::connection::<StoreResponse, StoreRequest>(1);
     let mut client = ClientChannel::<StoreService, MemChannelTypes>::new(client);
+    let server = ServerChannel::<StoreService, MemChannelTypes>::new(server);
     let server_handle = tokio::task::spawn(server_future(server));
 
     // a rpc call

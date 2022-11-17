@@ -16,7 +16,6 @@ use futures::TryFutureExt;
 use pin_project::pin_project;
 use std::error;
 use std::fmt;
-use std::marker;
 use std::marker::PhantomData;
 use std::pin::Pin;
 use std::result;
@@ -305,20 +304,6 @@ impl<S: Service, C: ChannelTypes> ClientChannel<S, C> {
     }
 }
 
-pub struct DispatchHelper<S, C> {
-    _s: std::marker::PhantomData<(S, C)>,
-}
-
-impl<S, C> Clone for DispatchHelper<S, C> {
-    fn clone(&self) -> Self {
-        Self {
-            _s: std::marker::PhantomData,
-        }
-    }
-}
-
-impl<S, C> Copy for DispatchHelper<S, C> {}
-
 /// All the things that can go wrong on the server side
 pub enum RpcServerError<C: ChannelTypes> {
     /// Unable to open a new channel
@@ -356,25 +341,30 @@ impl<C: ChannelTypes> fmt::Display for RpcServerError<C> {
 
 impl<C: ChannelTypes> error::Error for RpcServerError<C> {}
 
-impl<S: Service, C: ChannelTypes> Default for DispatchHelper<S, C> {
-    fn default() -> Self {
+pub struct ServerChannel<S: Service, C: ChannelTypes> {
+    channel: C::Channel<S::Req, S::Res>,
+    _s: std::marker::PhantomData<(S, C)>,
+}
+
+impl<S: Service, C: ChannelTypes>  ServerChannel<S, C> {
+    pub fn new(channel: C::Channel<S::Req, S::Res>) -> Self {
         Self {
-            _s: marker::PhantomData,
+            channel,
+            _s: std::marker::PhantomData,
         }
     }
 }
 
-impl<S: Service, C: ChannelTypes> DispatchHelper<S, C> {
+impl<S: Service, C: ChannelTypes> ServerChannel<S, C> {
     /// Accept one channel from the client, pull out the first request, and return both the first
     /// message and the channel for further processing.
     pub async fn accept_one(
-        self,
-        channel: &mut C::Channel<S::Req, S::Res>,
+        &mut self,
     ) -> result::Result<(S::Req, (C::SendSink<S::Res>, C::RecvStream<S::Req>)), RpcServerError<C>>
     where
         C::RecvStream<S::Req>: Unpin,
     {
-        let mut channel = channel
+        let mut channel = self.channel
             .accept_bi()
             .await
             .map_err(RpcServerError::AcceptBiError)?;
@@ -394,7 +384,7 @@ impl<S: Service, C: ChannelTypes> DispatchHelper<S, C> {
     ///
     /// If you want to support concurrent requests, you need to spawn this on a tokio task yourself.
     pub async fn rpc<M, F, Fut, T>(
-        self,
+        &self,
         req: M,
         c: (C::SendSink<S::Res>, C::RecvStream<S::Req>),
         target: T,
@@ -420,7 +410,7 @@ impl<S: Service, C: ChannelTypes> DispatchHelper<S, C> {
     ///
     /// If you want to support concurrent requests, you need to spawn this on a tokio task yourself.
     pub async fn client_streaming<M, F, Fut, T>(
-        self,
+        &self,
         req: M,
         c: (C::SendSink<S::Res>, C::RecvStream<S::Req>),
         target: T,
@@ -450,7 +440,7 @@ impl<S: Service, C: ChannelTypes> DispatchHelper<S, C> {
     ///
     /// If you want to support concurrent requests, you need to spawn this on a tokio task yourself.
     pub async fn bidi_streaming<M, F, Str, T>(
-        self,
+        &self,
         req: M,
         c: (C::SendSink<S::Res>, C::RecvStream<S::Req>),
         target: T,
@@ -487,7 +477,7 @@ impl<S: Service, C: ChannelTypes> DispatchHelper<S, C> {
     ///
     /// If you want to support concurrent requests, you need to spawn this on a tokio task yourself.
     pub async fn server_streaming<M, F, Str, T>(
-        self,
+        &self,
         req: M,
         c: (C::SendSink<S::Res>, C::RecvStream<S::Req>),
         target: T,
@@ -502,8 +492,7 @@ impl<S: Service, C: ChannelTypes> DispatchHelper<S, C> {
         let (send, _recv) = c;
         // get the response
         let responses = f(target, req);
-        tokio::pin!(responses);
-        tokio::pin!(send);
+        tokio::pin!(send, responses);
         while let Some(response) = responses.next().await {
             // turn into a S::Res so we can send it
             let response: S::Res = response.into();
