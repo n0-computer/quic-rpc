@@ -1,3 +1,6 @@
+use crate::Channel;
+use crate::ChannelTypes;
+use crate::Service;
 use futures::channel::oneshot;
 use futures::future;
 use futures::future::BoxFuture;
@@ -18,11 +21,6 @@ use std::marker::PhantomData;
 use std::pin::Pin;
 use std::result;
 use std::task::Poll;
-
-use crate::mem as underlying;
-use crate::Channel;
-use crate::ChannelTypes;
-use crate::Service;
 
 pub type BoxSink<'a, T, E> = Pin<Box<dyn Sink<T, Error = E> + Send>>;
 
@@ -61,133 +59,131 @@ impl InteractionPattern for ServerStreaming {}
 pub struct BidiStreaming;
 impl InteractionPattern for BidiStreaming {}
 
-pub enum NoRequest {}
-
-pub struct ClientChannel<S: Service> {
-    channel: underlying::Channel<S::Res, S::Req>,
-    _s: PhantomData<S>,
-}
-
 /// Error for rpc interactions
 #[derive(Debug)]
-pub enum RpcClientError {
+pub enum RpcClientError<C: ChannelTypes> {
     /// Unable to open a stream to the server
-    Open(underlying::OpenBiError),
+    Open(C::OpenBiError),
     /// Unable to send the request to the server
-    Send(underlying::SendError),
+    Send(C::SendError),
     /// Server closed the stream before sending a response
     EarlyClose,
     /// Unable to receive the response from the server
-    RecvError(underlying::RecvError),
+    RecvError(C::RecvError),
     /// Unexpected response from the server
     DowncastError,
 }
 
-impl fmt::Display for RpcClientError {
+impl<C: ChannelTypes> fmt::Display for RpcClientError<C> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Debug::fmt(self, f)
     }
 }
 
-impl error::Error for RpcClientError {}
+impl<C: ChannelTypes> error::Error for RpcClientError<C> {}
 
 #[derive(Debug)]
-pub enum BidiError {
+pub enum BidiError<C: ChannelTypes> {
     /// Unable to open a stream to the server
-    Open(underlying::OpenBiError),
+    Open(C::OpenBiError),
     /// Unable to send the request to the server
-    Send(underlying::SendError),
+    Send(C::SendError),
 }
 
-impl fmt::Display for BidiError {
+impl<C: ChannelTypes> fmt::Display for BidiError<C> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Debug::fmt(self, f)
     }
 }
 
-impl error::Error for BidiError {}
+impl<C: ChannelTypes> error::Error for BidiError<C> {}
 
 #[derive(Debug)]
-pub enum ClientStreamingError {
+pub enum ClientStreamingError<C: ChannelTypes> {
     /// Unable to open a stream to the server
-    Open(underlying::OpenBiError),
+    Open(C::OpenBiError),
     /// Unable to send the request to the server
-    Send(underlying::SendError),
+    Send(C::SendError),
 }
 
-impl fmt::Display for ClientStreamingError {
+impl<C: ChannelTypes> fmt::Display for ClientStreamingError<C> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Debug::fmt(self, f)
     }
 }
 
-impl error::Error for ClientStreamingError {}
+impl<C: ChannelTypes> error::Error for ClientStreamingError<C> {}
 
 #[derive(Debug)]
-pub enum ClientStreamingItemError {
+pub enum ClientStreamingItemError<C: ChannelTypes> {
     EarlyClose,
     /// Unable to receive the response from the server
-    RecvError(underlying::RecvError),
+    RecvError(C::RecvError),
     /// Unexpected response from the server
     DowncastError,
 }
 
-impl fmt::Display for ClientStreamingItemError {
+impl<C: ChannelTypes> fmt::Display for ClientStreamingItemError<C> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Debug::fmt(self, f)
     }
 }
 
-impl error::Error for ClientStreamingItemError {}
+impl<C: ChannelTypes> error::Error for ClientStreamingItemError<C> {}
 
 #[derive(Debug)]
-pub enum StreamingResponseError {
+pub enum StreamingResponseError<C: ChannelTypes> {
     /// Unable to open a stream to the server
-    Open(underlying::OpenBiError),
+    Open(C::OpenBiError),
     /// Unable to send the request to the server
-    Send(underlying::SendError),
+    Send(C::SendError),
 }
 
-impl fmt::Display for StreamingResponseError {
+impl<C: ChannelTypes> fmt::Display for StreamingResponseError<C> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Debug::fmt(self, f)
     }
 }
 
-impl error::Error for StreamingResponseError {}
+impl<C: ChannelTypes> error::Error for StreamingResponseError<C> {}
 
 #[derive(Debug)]
-pub enum StreamingResponseItemError {
+pub enum StreamingResponseItemError<C: ChannelTypes> {
     /// Unable to receive the response from the server
-    RecvError(underlying::RecvError),
+    RecvError(C::RecvError),
     /// Unexpected response from the server
     DowncastError,
 }
 
-impl fmt::Display for StreamingResponseItemError {
+impl<C: ChannelTypes> fmt::Display for StreamingResponseItemError<C> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Debug::fmt(self, f)
     }
 }
 
-impl error::Error for StreamingResponseItemError {}
+impl<C: ChannelTypes> error::Error for StreamingResponseItemError<C> {}
 
 #[derive(Debug)]
-pub enum BidiItemError {
+pub enum BidiItemError<C: ChannelTypes> {
     /// Unable to receive the response from the server
-    RecvError(underlying::RecvError),
+    RecvError(C::RecvError),
     /// Unexpected response from the server
     DowncastError,
 }
 
-impl fmt::Display for BidiItemError {
+impl<C: ChannelTypes> fmt::Display for BidiItemError<C> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Debug::fmt(self, f)
     }
 }
 
-impl<S: Service> ClientChannel<S> {
-    pub fn new(channel: underlying::Channel<S::Res, S::Req>) -> Self {
+pub struct ClientChannel<S: Service, C: ChannelTypes> {
+    channel: C::Channel<S::Res, S::Req>,
+    _s: PhantomData<S>,
+}
+
+impl<S: Service, C: ChannelTypes> ClientChannel<S, C> {
+    pub fn new(channel: C::Channel<S::Res, S::Req>) -> Self {
         Self {
             channel,
             _s: PhantomData,
@@ -195,7 +191,7 @@ impl<S: Service> ClientChannel<S> {
     }
 
     /// RPC call to the server, single request, single response
-    pub async fn rpc<M>(&mut self, msg: M) -> result::Result<M::Response, RpcClientError>
+    pub async fn rpc<M>(&mut self, msg: M) -> result::Result<M::Response, RpcClientError<C>>
     where
         M: Msg<S, Pattern = Rpc> + Into<S::Req>,
     {
@@ -215,18 +211,19 @@ impl<S: Service> ClientChannel<S> {
         &mut self,
         msg: M,
     ) -> result::Result<
-        BoxStream<'static, result::Result<M::Response, StreamingResponseItemError>>,
-        StreamingResponseError,
+        BoxStream<'static, result::Result<M::Response, StreamingResponseItemError<C>>>,
+        StreamingResponseError<C>,
     >
     where
         M: Msg<S, Pattern = ServerStreaming> + Into<S::Req>,
     {
         let msg = msg.into();
-        let (mut send, recv) = self
+        let (send, recv) = self
             .channel
             .open_bi()
             .map_err(StreamingResponseError::Open)
             .await?;
+        tokio::pin!(send);
         send.send(msg).map_err(StreamingResponseError::Send).await?;
         let recv = recv
             .map(|x| match x {
@@ -245,10 +242,10 @@ impl<S: Service> ClientChannel<S> {
         msg: M,
     ) -> result::Result<
         (
-            BoxSink<'static, M::Update, underlying::SendError>,
-            BoxFuture<'static, result::Result<M::Response, ClientStreamingItemError>>,
+            BoxSink<'static, M::Update, C::SendError>,
+            BoxFuture<'static, result::Result<M::Response, ClientStreamingItemError<C>>>,
         ),
-        ClientStreamingError,
+        ClientStreamingError<C>,
     >
     where
         M: Msg<S, Pattern = ClientStreaming> + Into<S::Req>,
@@ -260,7 +257,7 @@ impl<S: Service> ClientChannel<S> {
             .map_err(ClientStreamingError::Open)
             .await?;
         send.send(msg).map_err(ClientStreamingError::Send).await?;
-        let send = send.with(|x: M::Update| future::ok::<S::Req, underlying::SendError>(x.into()));
+        let send = send.with(|x: M::Update| future::ok::<S::Req, C::SendError>(x.into()));
         let send = Box::pin(send);
         let recv = async move {
             let item = recv
@@ -285,10 +282,10 @@ impl<S: Service> ClientChannel<S> {
         msg: M,
     ) -> result::Result<
         (
-            BoxSink<'static, M::Update, underlying::SendError>,
-            BoxStream<'static, result::Result<M::Response, BidiItemError>>,
+            BoxSink<'static, M::Update, C::SendError>,
+            BoxStream<'static, result::Result<M::Response, BidiItemError<C>>>,
         ),
-        BidiError,
+        BidiError<C>,
     >
     where
         M: Msg<S, Pattern = BidiStreaming> + Into<S::Req>,
@@ -296,7 +293,7 @@ impl<S: Service> ClientChannel<S> {
         let msg = msg.into();
         let (mut send, recv) = self.channel.open_bi().await.map_err(BidiError::Open)?;
         send.send(msg).await.map_err(BidiError::Send)?;
-        let send = send.with(|x: M::Update| future::ok::<S::Req, underlying::SendError>(x.into()));
+        let send = send.with(|x: M::Update| future::ok::<S::Req, C::SendError>(x.into()));
         let send = Box::pin(send);
         let recv = recv
             .map(|x| match x {

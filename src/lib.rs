@@ -33,12 +33,13 @@ pub trait Service {
     type Res: RpcMessage;
 }
 
-pub trait ChannelTypes: Sized {
+pub trait ChannelTypes: Debug + Sized {
     /// The sink used for sending either requests or responses on this channel
-    type SendSink<M: RpcMessage>: Sink<M, Error = Self::SendError> + Send + 'static;
+    type SendSink<M: RpcMessage>: Sink<M, Error = Self::SendError> + Unpin + Send + 'static;
     /// The stream used for receiving either requests or responses on this channel
     type RecvStream<M: RpcMessage>: Stream<Item = result::Result<M, Self::RecvError>>
         + Send
+        + Unpin
         + 'static;
     /// Error you might get while sending messages to a sink
     type SendError: RpcError;

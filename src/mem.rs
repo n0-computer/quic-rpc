@@ -121,6 +121,7 @@ pub type RecvError = NoError;
 
 pub type OpenBiError = mpsc::SendError;
 
+#[derive(Debug)]
 pub struct MemChannelTypes;
 
 impl ChannelTypes for MemChannelTypes {

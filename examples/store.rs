@@ -171,7 +171,7 @@ async fn main() -> anyhow::Result<()> {
     }
 
     let (client, server) = mem::connection::<StoreResponse, StoreRequest>(1);
-    let mut client = ClientChannel::<StoreService>::new(client);
+    let mut client = ClientChannel::<StoreService, MemChannelTypes>::new(client);
     let server_handle = tokio::task::spawn(server_future(server));
 
     // a rpc call
