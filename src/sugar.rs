@@ -7,10 +7,9 @@ use futures::Sink;
 use futures::SinkExt;
 use futures::StreamExt;
 use futures::TryFutureExt;
-use serde::de::DeserializeOwned;
-use serde::Serialize;
 use std::error;
 use std::fmt;
+use std::marker;
 use std::marker::PhantomData;
 use std::pin::Pin;
 use std::result;
@@ -38,35 +37,6 @@ impl<S: Service, T: RpcMsg<S>> Msg<S> for T {
     type Response = T::Response;
 
     type Pattern = Rpc;
-}
-
-pub trait HandleBidi<S: Service, M: Msg<S, Pattern = BidiStreaming>> {
-    fn handle(
-        &self,
-        msg: M,
-        input: underlying::RecvStream<S::Req>,
-        output: underlying::SendSink<S::Res>,
-    ) -> BoxFuture<'_, result::Result<(), underlying::SendError>>;
-}
-
-pub trait HandleRpc<S: Service, M: Msg<S, Pattern = Rpc>> {
-    type RpcFuture: Future<Output = M::Response> + Send + 'static;
-
-    fn handle(
-        &self,
-        msg: M,
-        _input: underlying::RecvStream<S::Req>,
-        mut output: underlying::SendSink<S::Res>,
-    ) -> BoxFuture<'_, result::Result<(), underlying::SendError>> {
-        let fut = self.rpc(msg);
-        async move {
-            let response = fut.await;
-            output.send(response.into()).await
-        }
-        .boxed()
-    }
-
-    fn rpc(&self, msg: M) -> Self::RpcFuture;
 }
 
 pub trait InteractionPattern: 'static {}
@@ -297,5 +267,105 @@ impl<S: Service> ClientChannel<S> {
             })
             .boxed();
         Ok((send, recv))
+    }
+}
+
+pub struct DispatchHelper<S, C> {
+    _s: std::marker::PhantomData<(S, C)>,
+}
+
+impl<S, C> Clone for DispatchHelper<S, C> {
+    fn clone(&self) -> Self {
+        Self {
+            _s: std::marker::PhantomData,
+        }
+    }
+}
+
+impl<S, C> Copy for DispatchHelper<S, C> {}
+
+pub enum HandleOneError<S: Service, C: crate::Channel<S::Req, S::Res>> {
+    AcceptBiError(C::AcceptBiError),
+    EarlyClose,
+    RecvError(C::RecvError),
+    SendError(C::SendError),
+}
+
+impl<S: Service, C: crate::Channel<S::Req, S::Res>> fmt::Debug for HandleOneError<S, C> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::AcceptBiError(arg0) => f.debug_tuple("AcceptBiError").field(arg0).finish(),
+            Self::EarlyClose => write!(f, "EarlyClose"),
+            Self::RecvError(arg0) => f.debug_tuple("RecvError").field(arg0).finish(),
+            Self::SendError(arg0) => f.debug_tuple("SendError").field(arg0).finish(),
+        }
+    }
+}
+
+impl<S: Service, C: crate::Channel<S::Req, S::Res>> fmt::Display for HandleOneError<S, C> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        fmt::Debug::fmt(&self, f)
+    }
+}
+
+impl<S: Service, C: crate::Channel<S::Req, S::Res>> error::Error for HandleOneError<S, C> {}
+
+impl<S: Service, C: crate::Channel<S::Req, S::Res>> Default for DispatchHelper<S, C> {
+    fn default() -> Self {
+        Self {
+            _s: marker::PhantomData,
+        }
+    }
+}
+
+impl<S: Service, C: crate::Channel<S::Req, S::Res>> DispatchHelper<S, C> {
+    /// Accept one channel from the client, pull out the first request, and return both the first
+    /// message and the channel for further processing.
+    pub async fn accept_one(
+        self,
+        channel: &mut C,
+    ) -> result::Result<(S::Req, (C::SendSink<S::Res>, C::RecvStream<S::Req>)), HandleOneError<S, C>>
+    where
+        C::RecvStream<S::Req>: Unpin,
+    {
+        let mut channel = channel
+            .accept_bi()
+            .await
+            .map_err(HandleOneError::AcceptBiError)?;
+        // get the first message from the client. This will tell us what it wants to do.
+        let request: S::Req = channel
+            .1
+            .next()
+            .await
+            // no msg => early close
+            .ok_or(HandleOneError::EarlyClose)?
+            // recv error
+            .map_err(HandleOneError::RecvError)?;
+        Ok((request, channel))
+    }
+
+    /// handle the message M using the given function on the target object
+    ///
+    /// If you want to support concurrent requests, you need to spawn this on a tokio task yourself.
+    pub async fn rpc<M, F, Fut, T>(
+        self,
+        req: M,
+        c: (C::SendSink<S::Res>, C::RecvStream<S::Req>),
+        target: T,
+        f: F,
+    ) -> result::Result<(), C::SendError>
+    where
+        M: Msg<S>,
+        F: FnOnce(T, M) -> Fut,
+        Fut: Future<Output = M::Response>,
+    {
+        let (send, _recv) = c;
+        // get the response
+        let res = f(target, req).await;
+        // turn into a S::Res so we can send it
+        let res: S::Res = res.into();
+        // send it and return the error if any
+        tokio::pin!(send);
+        send.send(res).await
     }
 }
