@@ -7,12 +7,13 @@ A streaming rpc system based on quic
 ### Interaction patterns
 
 Provide not just request/response RPC, but also streaming in both directions, similar to [grpc].
-It is still a RPC system in the sense that interactions get initiated by the client.
 
 - 1 req -> 1 res
 - 1 req, update stream -> 1 res
 - 1 req -> res stream
 - 1 req, update stream -> res stream
+
+It is still a RPC system in the sense that interactions get initiated by the client.
 
 ### Transports
 

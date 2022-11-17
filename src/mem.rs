@@ -1,7 +1,7 @@
+use crate::RpcMessage;
 use core::fmt;
 use futures::{channel::mpsc, Future, FutureExt, SinkExt, StreamExt};
 use pin_project::pin_project;
-use serde::{de::DeserializeOwned, Serialize};
 use std::{pin::Pin, result, task::Poll};
 
 #[derive(Debug)]
@@ -121,14 +121,10 @@ pub type RecvError = NoError;
 
 pub type OpenBiError = mpsc::SendError;
 
-impl<
-        In: Serialize + DeserializeOwned + Send + 'static,
-        Out: Serialize + DeserializeOwned + Send + Unpin + 'static,
-    > crate::Channel<In, Out> for Channel<In, Out>
-{
-    type SendSink<M: Serialize + Unpin> = self::SendSink<M>;
+impl<In: RpcMessage, Out: RpcMessage> crate::Channel<In, Out> for Channel<In, Out> {
+    type SendSink<M: RpcMessage> = self::SendSink<M>;
 
-    type RecvStream<M: DeserializeOwned> = self::RecvStream<M>;
+    type RecvStream<M: RpcMessage> = self::RecvStream<M>;
 
     type SendError = self::SendError;
 

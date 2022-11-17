@@ -1,7 +1,8 @@
+#![allow(clippy::enum_variant_names)]
 use derive_more::{From, TryInto};
-use futures::{SinkExt, StreamExt};
+use futures::{SinkExt, Stream, StreamExt};
 use quic_rpc::{
-    sugar::{DispatchHelper, HandleOneError},
+    sugar::{ClientStreaming, DispatchHelper, Msg, RpcServerError},
     Channel, *,
 };
 use serde::{Deserialize, Serialize};
@@ -18,16 +19,34 @@ struct PutResponse(Cid);
 #[derive(Debug, Serialize, Deserialize)]
 struct GetResponse(Vec<u8>);
 
+#[derive(Debug, Serialize, Deserialize)]
+struct PutFile;
+
+#[derive(Debug, Serialize, Deserialize)]
+struct PutFileUpdate(Vec<u8>);
+
+#[derive(Debug, Serialize, Deserialize)]
+struct PutFileResponse(Cid);
+
+#[derive(Debug, Serialize, Deserialize)]
+struct GetFile(Cid);
+
+#[derive(Debug, Serialize, Deserialize)]
+struct GetFileResponse(Vec<u8>);
+
 #[derive(Debug, From, TryInto, Serialize, Deserialize)]
 enum StoreRequest {
     Put(Put),
     Get(Get),
+    PutFile(PutFile),
+    PutFileUpdate(PutFileUpdate),
 }
 
 #[derive(Debug, From, TryInto, Serialize, Deserialize)]
 enum StoreResponse {
     PutResponse(PutResponse),
     GetResponse(GetResponse),
+    PutFileResponse(PutFileResponse),
 }
 
 struct StoreService;
@@ -44,6 +63,12 @@ impl RpcMsg<StoreService> for Get {
     type Response = GetResponse;
 }
 
+impl Msg<StoreService> for PutFile {
+    type Response = PutFileResponse;
+    type Update = PutFileUpdate;
+    type Pattern = ClientStreaming;
+}
+
 #[derive(Clone)]
 struct Store;
 impl Store {
@@ -54,14 +79,25 @@ impl Store {
     async fn get(self, _get: Get) -> GetResponse {
         GetResponse(vec![])
     }
+
+    async fn put_file(
+        self,
+        _put: PutFile,
+        updates: impl Stream<Item = PutFileUpdate> + Send + 'static,
+    ) -> PutFileResponse {
+        PutFileResponse([0; 32])
+    }
+
+    async fn get_file(self, _put: GetFile) -> impl Stream<Item = GetFileResponse> + Send + 'static {
+        futures::stream::empty()
+    }
 }
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     type Chan = mem::Channel<StoreRequest, StoreResponse>;
-    async fn server_future(
-        mut server: Chan,
-    ) -> result::Result<(), HandleOneError<StoreService, Chan>> {
+    async fn server_future(server: Chan) -> result::Result<(), RpcServerError<StoreService, Chan>> {
+        let mut server = server;
         let store = Store;
         let d = DispatchHelper::default();
         loop {
@@ -71,8 +107,10 @@ async fn main() -> anyhow::Result<()> {
             let res = match req {
                 Put(msg) => d.rpc(msg, chan, store, Store::put).await,
                 Get(msg) => d.rpc(msg, chan, store, Store::get).await,
+                PutFile(msg) => d.client_streaming(msg, chan, store, Store::put_file).await,
+                PutFileUpdate(_) => Err(RpcServerError::UnexpectedStartMessage)?,
             };
-            res.map_err(HandleOneError::SendError)?;
+            res.map_err(RpcServerError::SendError)?;
         }
     }
 
@@ -81,6 +119,7 @@ async fn main() -> anyhow::Result<()> {
     let server_handle = tokio::task::spawn(server_future(server));
     let res = client.rpc(Get([0u8; 32])).await?;
     println!("{:?}", res);
+    // dropping the client will cause the server to terminate
     drop(client);
     server_handle.await??;
     Ok(())

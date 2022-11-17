@@ -1,3 +1,4 @@
+use crate::RpcMessage;
 use futures::{future::BoxFuture, FutureExt, Sink, SinkExt, Stream, StreamExt};
 use pin_project::pin_project;
 use serde::{de::DeserializeOwned, Serialize};
@@ -73,14 +74,10 @@ pub type OpenBiError = quinn::ConnectionError;
 
 pub type AcceptBiError = quinn::ConnectionError;
 
-impl<
-        In: Serialize + DeserializeOwned + Send + 'static,
-        Out: Serialize + DeserializeOwned + Send + Unpin + 'static,
-    > crate::Channel<In, Out> for quinn::Connection
-{
-    type SendSink<M: Serialize + Unpin> = self::SendSink<M>;
+impl<In: RpcMessage, Out: RpcMessage> crate::Channel<In, Out> for quinn::Connection {
+    type SendSink<M: RpcMessage> = self::SendSink<M>;
 
-    type RecvStream<M: DeserializeOwned> = self::RecvStream<M>;
+    type RecvStream<M: RpcMessage> = self::RecvStream<M>;
 
     type OpenBiError = self::OpenBiError;
 

@@ -1,8 +1,11 @@
 use crate::mem;
 use crate::quinn;
+use crate::RpcMessage;
 use futures::{future::BoxFuture, FutureExt, Sink, Stream};
 use pin_project::pin_project;
 use serde::{de::DeserializeOwned, Serialize};
+use std::fmt;
+use std::fmt::Debug;
 use std::{
     io,
     pin::Pin,
@@ -80,6 +83,12 @@ pub enum Error<M, Q> {
     Quinn(Q),
 }
 
+impl<M: Debug, Q: Debug> fmt::Display for Error<M, Q> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Debug::fmt(self, f)
+    }
+}
+
 pub type SendError = Error<mem::SendError, io::Error>;
 
 pub type RecvError = io::Error;
@@ -90,14 +99,10 @@ pub type AcceptBiError = Error<mem::AcceptBiError, quinn::AcceptBiError>;
 
 type Socket<In, Out> = (self::SendSink<Out>, self::RecvStream<In>);
 
-impl<
-        In: Serialize + DeserializeOwned + Send + 'static,
-        Out: Serialize + DeserializeOwned + Send + Unpin + 'static,
-    > crate::Channel<In, Out> for Channel<In, Out>
-{
-    type SendSink<M: Serialize + Unpin> = self::SendSink<M>;
+impl<In: RpcMessage, Out: RpcMessage> crate::Channel<In, Out> for Channel<In, Out> {
+    type SendSink<M: RpcMessage> = self::SendSink<M>;
 
-    type RecvStream<M: DeserializeOwned> = self::RecvStream<M>;
+    type RecvStream<M: RpcMessage> = self::RecvStream<M>;
 
     type SendError = self::SendError;
 
