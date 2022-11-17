@@ -91,11 +91,11 @@ pub type AcceptBiError = Error<mem::AcceptBiError, quinn::AcceptBiError>;
 type Socket<Req, Res> = (self::SendSink<Req>, self::RecvStream<Res>);
 
 impl<
-        Req: Serialize + DeserializeOwned + Send + 'static,
+        Req: Serialize + DeserializeOwned + Send + Unpin + 'static,
         Res: Serialize + DeserializeOwned + Send + 'static,
     > crate::Channel<Req, Res> for Channel<Req, Res>
 {
-    type SendSink<M: Serialize> = self::SendSink<M>;
+    type SendSink<M: Serialize + Unpin> = self::SendSink<M>;
 
     type RecvStream<M: DeserializeOwned> = self::RecvStream<M>;
 

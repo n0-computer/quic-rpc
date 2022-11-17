@@ -74,11 +74,11 @@ pub type OpenBiError = quinn::ConnectionError;
 pub type AcceptBiError = quinn::ConnectionError;
 
 impl<
-        Req: Serialize + DeserializeOwned + Send + 'static,
+        Req: Serialize + DeserializeOwned + Send + Unpin + 'static,
         Res: Serialize + DeserializeOwned + Send + 'static,
     > crate::Channel<Req, Res> for quinn::Connection
 {
-    type SendSink<M: Serialize> = self::SendSink<M>;
+    type SendSink<M: Serialize + Unpin> = self::SendSink<M>;
 
     type RecvStream<M: DeserializeOwned> = self::RecvStream<M>;
 

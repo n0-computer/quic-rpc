@@ -13,9 +13,9 @@ pub mod sugar;
 /// 
 /// Heavily inspired by quinn, but uses concrete Req and Res types instead of bytes. The reason for this is that
 /// we want to be able to write a memory channel that does not serialize and deserialize.
-pub trait Channel<Req: Serialize + DeserializeOwned, Res: Serialize + DeserializeOwned> {
+pub trait Channel<Req: Serialize + DeserializeOwned + Unpin, Res: Serialize + DeserializeOwned> {
     /// The sink used for sending either requests or responses on this channel
-    type SendSink<M: Serialize>: Sink<M, Error = Self::SendError>;
+    type SendSink<M: Serialize + Unpin>: Sink<M, Error = Self::SendError>;
     /// The stream used for receiving either requests or responses on this channel
     type RecvStream<M: DeserializeOwned>: Stream<Item = result::Result<M, Self::RecvError>>;
     /// Error you might get while sending messages to a sink

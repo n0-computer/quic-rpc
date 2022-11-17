@@ -1,12 +1,12 @@
 use anyhow::Context;
 use derive_more::{From, TryInto};
-use futures::{future::BoxFuture, FutureExt, SinkExt, StreamExt};
+use futures::{future::BoxFuture, FutureExt, SinkExt, StreamExt, Future};
 use serde::{Deserialize, Serialize};
-use std::fmt::Debug;
+use std::{fmt::Debug, result};
 use sugar::{ClientChannel, RpcMsg};
 
 use crate::sugar::{HandleRpc, Service};
-use quic_rpc::*;
+use quic_rpc::{*, sugar::Msg};
 
 type Cid = [u8; 32];
 #[derive(Debug, Serialize, Deserialize)]
@@ -44,28 +44,30 @@ impl RpcMsg<StoreService> for Get {
     type Response = GetResponse;
 }
 
-// struct DispatchHelper<This, S, C> {
-//     this: This,
-//     _sc: std::marker::PhantomData<(S, C)>,
-// }
+struct DispatchHelper<This, S, C> {
+    this: This,
+    _sc: std::marker::PhantomData<(S, C)>,
+}
 
-// impl<This, S: Service, C: crate::Channel<S::Req, S::Res>> DispatchHelper<This, S, C> {
+impl<This, S: Service, C: crate::Channel<S::Req, S::Res>> DispatchHelper<This, S, C> {
 
-//     /// handle the message M using the given function on the target object
-//     pub async fn handle_rpc<M, F, Fut>(this: &This, req: M, mut c: (mem::ReqSink<S::Res>, mem::ResStream<S::Req>), f: F) -> result::Result<(), C::SendError>
-//         where
-//             M: Msg<S>,
-//             F: FnOnce(&This, M) -> Fut,
-//             Fut: Future<Output = M::Response>
-//     {
-//         // get the response
-//         let res = f(this, req).await;
-//         // turn into a S::Res so we can send it
-//         let res: S::Res = res.into();
-//         // send it and return the error if any
-//         c.0.send(res).await
-//     }
-// }
+    /// handle the message M using the given function on the target object
+    pub async fn handle_rpc<M, F, Fut>(this: &This, req: M, c: (C::SendSink<S::Res>, C::RecvStream<S::Req>), f: F) -> result::Result<(), C::SendError>
+        where
+            M: Msg<S>,
+            F: FnOnce(&This, M) -> Fut,
+            Fut: Future<Output = M::Response>
+    {
+        // get the response
+        let res = f(this, req).await;
+        // turn into a S::Res so we can send it
+        let res: S::Res = res.into();
+        // send it and return the error if any
+        let (send, recv) = c;
+        tokio::pin!(send);
+        send.send(res).await
+    }
+}
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {

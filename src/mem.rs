@@ -122,11 +122,11 @@ pub type RecvError = NoError;
 pub type OpenBiError = mpsc::SendError;
 
 impl<
-        Req: Serialize + DeserializeOwned + Send + 'static,
+        Req: Serialize + DeserializeOwned + Send + Unpin + 'static,
         Res: Serialize + DeserializeOwned + Send + 'static,
     > crate::Channel<Req, Res> for Channel<Req, Res>
 {
-    type SendSink<M: Serialize> = self::SendSink<M>;
+    type SendSink<M: Serialize + Unpin> = self::SendSink<M>;
 
     type RecvStream<M: DeserializeOwned> = self::RecvStream<M>;
 
