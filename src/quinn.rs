@@ -5,7 +5,7 @@ use std::{io, pin::Pin, result};
 use tokio_serde::{formats::SymmetricalBincode, SymmetricallyFramed};
 use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
 
-type Socket<In, Out> = (RecvStream<In>, SendSink<Out>);
+type Socket<In, Out> = (SendSink<Out>, RecvStream<In>);
 
 /// A sink that wraps a quinn SendStream with length delimiting and bincode
 #[pin_project]
@@ -109,7 +109,7 @@ impl<
             // box so we don't have to write down the insanely long type
             let send = SendSink(send);
             let recv = RecvStream(recv);
-            Ok((recv, send))
+            Ok((send, recv))
         }
         .boxed()
     }
@@ -134,7 +134,7 @@ impl<
             // box so we don't have to write down the insanely long type
             let send = SendSink(send);
             let recv = RecvStream(recv);
-            Ok((recv, send))
+            Ok((send, recv))
         }
         .boxed()
     }

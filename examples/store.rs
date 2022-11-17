@@ -110,7 +110,7 @@ async fn main() -> anyhow::Result<()> {
     let (client, mut server) = mem::connection::<StoreResponse, StoreRequest>(1);
     let mut client = ClientChannel::<StoreService>::new(client);
     let server_handle = tokio::task::spawn(async move {
-        let (mut recv, send) = server.accept_bi().await?;
+        let (send, mut recv) = server.accept_bi().await?;
         let first = recv.next().await.context("no first message")??;
         match first {
             StoreRequest::Put(msg) => {
@@ -131,7 +131,7 @@ async fn main() -> anyhow::Result<()> {
 async fn main_unsugared() -> anyhow::Result<()> {
     let (mut server, mut client) = mem::connection::<u64, String>(1);
     let to_string_service = tokio::spawn(async move {
-        let (mut recv, mut send) = server.accept_bi().await?;
+        let (mut send, mut recv) = server.accept_bi().await?;
         while let Some(item) = recv.next().await {
             let item = item?;
             println!("server got: {:?}", item);
@@ -139,7 +139,7 @@ async fn main_unsugared() -> anyhow::Result<()> {
         }
         anyhow::Ok(())
     });
-    let (mut recv, mut send) = client.open_bi().await?;
+    let (mut send, mut recv) = client.open_bi().await?;
     let print_result_service = tokio::spawn(async move {
         while let Some(item) = recv.next().await {
             let item = item?;

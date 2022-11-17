@@ -34,7 +34,7 @@ impl<Res> futures::Stream for RecvStream<Res> {
     }
 }
 
-type Socket<In, Out> = (self::RecvStream<In>, self::SendSink<Out>);
+type Socket<In, Out> = (self::SendSink<Out>, self::RecvStream<In>);
 
 pub struct Channel<In, Out> {
     stream: mpsc::Receiver<Socket<In, Out>>,
@@ -143,8 +143,8 @@ impl<
         let (remote_send, local_recv) = mpsc::channel::<In>(1);
         let remote_recv = RecvStream(remote_recv);
         let local_recv = RecvStream(local_recv);
-        let inner = self.sink.send((remote_recv, remote_send));
-        OpenBiFuture::new(inner, (local_recv, local_send))
+        let inner = self.sink.send((remote_send, remote_recv));
+        OpenBiFuture::new(inner, (local_send, local_recv))
     }
 
     type AcceptBiError = AcceptBiError;

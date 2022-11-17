@@ -32,7 +32,7 @@ pub trait Channel<In: Serialize + DeserializeOwned, Out: Serialize + Deserialize
     type OpenBiError: Debug;
     /// Future returned by open_bi
     type OpenBiFuture<'a>: Future<
-            Output = result::Result<(Self::RecvStream<In>, Self::SendSink<Out>), Self::OpenBiError>,
+            Output = result::Result<(Self::SendSink<Out>, Self::RecvStream<In>), Self::OpenBiError>,
         > + 'a
     where
         Self: 'a;
@@ -43,7 +43,7 @@ pub trait Channel<In: Serialize + DeserializeOwned, Out: Serialize + Deserialize
     /// Future returned by accept_bi
     type AcceptBiFuture<'a>: Future<
             Output = result::Result<
-                (Self::RecvStream<In>, Self::SendSink<Out>),
+                (Self::SendSink<Out>, Self::RecvStream<In>),
                 Self::AcceptBiError,
             >,
         > + 'a

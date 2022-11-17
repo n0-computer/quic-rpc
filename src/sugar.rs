@@ -192,7 +192,7 @@ impl<S: Service> ClientChannel<S> {
         M: Msg<S, Pattern = Rpc> + Into<S::Req>,
     {
         let msg = msg.into();
-        let (mut recv, mut send) = self.channel.open_bi().await.map_err(RpcError::Open)?;
+        let (mut send, mut recv) = self.channel.open_bi().await.map_err(RpcError::Open)?;
         send.send(msg).await.map_err(RpcError::Send)?;
         let res = recv
             .next()
@@ -214,7 +214,7 @@ impl<S: Service> ClientChannel<S> {
         M: Msg<S, Pattern = ServerStreaming> + Into<S::Req>,
     {
         let msg = msg.into();
-        let (recv, mut send) = self
+        let (mut send, recv) = self
             .channel
             .open_bi()
             .map_err(StreamingResponseError::Open)
@@ -246,7 +246,7 @@ impl<S: Service> ClientChannel<S> {
         M: Msg<S, Pattern = ClientStreaming> + Into<S::Req>,
     {
         let msg = msg.into();
-        let (mut recv, mut send) = self
+        let (mut send, mut recv) = self
             .channel
             .open_bi()
             .map_err(ClientStreamingError::Open)
@@ -286,7 +286,7 @@ impl<S: Service> ClientChannel<S> {
         M: Msg<S, Pattern = BidiStreaming> + Into<S::Req>,
     {
         let msg = msg.into();
-        let (recv, mut send) = self.channel.open_bi().await.map_err(BidiError::Open)?;
+        let (mut send, recv) = self.channel.open_bi().await.map_err(BidiError::Open)?;
         send.send(msg).await.map_err(BidiError::Send)?;
         let send = send.with(|x: M::Update| future::ok::<S::Req, underlying::SendError>(x.into()));
         let send = Box::pin(send);

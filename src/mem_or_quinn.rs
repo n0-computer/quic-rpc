@@ -88,7 +88,7 @@ pub type OpenBiError = Error<mem::OpenBiError, quinn::OpenBiError>;
 
 pub type AcceptBiError = Error<mem::AcceptBiError, quinn::AcceptBiError>;
 
-type Socket<In, Out> = (self::RecvStream<In>, self::SendSink<Out>);
+type Socket<In, Out> = (self::SendSink<Out>, self::RecvStream<In>);
 
 impl<
         In: Serialize + DeserializeOwned + Send + 'static,
@@ -110,13 +110,13 @@ impl<
     fn open_bi(&mut self) -> Self::OpenBiFuture<'_> {
         match self {
             Channel::Mem(mem) => async {
-                let (recv, send) = mem.open_bi().await.map_err(Error::Mem)?;
-                Ok((RecvStream::Mem(recv), SendSink::Mem(send)))
+                let (send, recv) = mem.open_bi().await.map_err(Error::Mem)?;
+                Ok((SendSink::Mem(send), RecvStream::Mem(recv)))
             }
             .boxed(),
             Channel::Quinn(quinn) => async {
-                let (recv, send) = quinn.open_bi().await.map_err(Error::Quinn)?;
-                Ok((RecvStream::Quinn(recv), SendSink::Quinn(send)))
+                let (send, recv) = quinn.open_bi().await.map_err(Error::Quinn)?;
+                Ok((SendSink::Quinn(send), RecvStream::Quinn(recv)))
             }
             .boxed(),
         }
@@ -130,13 +130,13 @@ impl<
     fn accept_bi(&mut self) -> Self::AcceptBiFuture<'_> {
         match self {
             Channel::Mem(mem) => async {
-                let (recv, send) = mem.accept_bi().await.map_err(Error::Mem)?;
-                Ok((RecvStream::Mem(recv), SendSink::Mem(send)))
+                let (send, recv) = mem.accept_bi().await.map_err(Error::Mem)?;
+                Ok((SendSink::Mem(send), RecvStream::Mem(recv)))
             }
             .boxed(),
             Channel::Quinn(quinn) => async {
-                let (recv, send) = quinn.accept_bi().await.map_err(Error::Quinn)?;
-                Ok((RecvStream::Quinn(recv), SendSink::Quinn(send)))
+                let (send, recv) = quinn.accept_bi().await.map_err(Error::Quinn)?;
+                Ok((SendSink::Quinn(send), RecvStream::Quinn(recv)))
             }
             .boxed(),
         }

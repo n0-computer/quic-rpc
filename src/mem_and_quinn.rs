@@ -88,7 +88,7 @@ pub type OpenBiError = Error<mem::OpenBiError, quinn::OpenBiError>;
 
 pub type AcceptBiError = Error<mem::AcceptBiError, quinn::AcceptBiError>;
 
-type Socket<In, Out> = (self::RecvStream<In>, self::SendSink<Out>);
+type Socket<In, Out> = (self::SendSink<Out>, self::RecvStream<In>);
 
 impl<
         In: Serialize + DeserializeOwned + Send + 'static,
@@ -110,8 +110,8 @@ impl<
     fn open_bi(&mut self) -> Self::OpenBiFuture<'_> {
         // since we got both, prefer mem
         async {
-            let (recv, send) = self.mem.open_bi().await.map_err(Error::Mem)?;
-            Ok((RecvStream::Mem(recv), SendSink::Mem(send)))
+            let (send, recv) = self.mem.open_bi().await.map_err(Error::Mem)?;
+            Ok((SendSink::Mem(send), RecvStream::Mem(recv)))
         }
         .boxed()
     }
@@ -128,8 +128,8 @@ impl<
             <::quinn::Connection as crate::Channel<In, Out>>::accept_bi(&mut self.quinn);
         async move {
             tokio::select! {
-                res = mem_future => res.map(|(recv, send)| (RecvStream::Mem(recv), SendSink::Mem(send))).map_err(Error::Mem),
-                res = quinn_future => res.map(|(recv, send)| (RecvStream::Quinn(recv), SendSink::Quinn(send))).map_err(Error::Quinn),
+                res = mem_future => res.map(|(send, recv)| (SendSink::Mem(send), RecvStream::Mem(recv))).map_err(Error::Mem),
+                res = quinn_future => res.map(|(send, recv)| (SendSink::Quinn(send), RecvStream::Quinn(recv))).map_err(Error::Quinn),
             }
         }.boxed()
     }
