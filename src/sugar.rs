@@ -129,6 +129,14 @@ pub enum ClientStreamingItemError {
     DowncastError,
 }
 
+impl fmt::Display for ClientStreamingItemError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Debug::fmt(self, f)
+    }
+}
+
+impl error::Error for ClientStreamingItemError {}
+
 #[derive(Debug)]
 pub enum StreamingResponseError {
     /// Unable to open a stream to the server
@@ -136,6 +144,14 @@ pub enum StreamingResponseError {
     /// Unable to send the request to the server
     Send(underlying::SendError),
 }
+
+impl fmt::Display for StreamingResponseError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Debug::fmt(self, f)
+    }
+}
+
+impl error::Error for StreamingResponseError {}
 
 #[derive(Debug)]
 pub enum StreamingResponseItemError {
@@ -145,12 +161,26 @@ pub enum StreamingResponseItemError {
     DowncastError,
 }
 
+impl fmt::Display for StreamingResponseItemError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Debug::fmt(self, f)
+    }
+}
+
+impl error::Error for StreamingResponseItemError {}
+
 #[derive(Debug)]
 pub enum BidiItemError {
     /// Unable to receive the response from the server
     RecvError(underlying::RecvError),
     /// Unexpected response from the server
     DowncastError,
+}
+
+impl fmt::Display for BidiItemError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Debug::fmt(self, f)
+    }
 }
 
 impl<S: Service> ClientChannel<S> {
@@ -412,6 +442,36 @@ impl<S: Service, C: crate::Channel<S::Req, S::Res>> DispatchHelper<S, C> {
         tokio::pin!(send);
         send.send(res).await
     }
+
+    /// handle the message M using the given function on the target object
+    ///
+    /// If you want to support concurrent requests, you need to spawn this on a tokio task yourself.
+    pub async fn server_streaming<M, F, Str, T>(
+        self,
+        req: M,
+        c: (C::SendSink<S::Res>, C::RecvStream<S::Req>),
+        target: T,
+        f: F,
+    ) -> result::Result<(), C::SendError>
+    where
+        M: Msg<S, Pattern = ServerStreaming>,
+        F: FnOnce(T, M) -> Str + Send + 'static,
+        Str: Stream<Item = M::Response> + Send + 'static,
+        T: Send + 'static,
+    {
+        let (send, recv) = c;
+        // get the response
+        let responses = f(target, req);
+        tokio::pin!(responses);
+        tokio::pin!(send);
+        while let Some(response) = responses.next().await {
+            // turn into a S::Res so we can send it
+            let response: S::Res = response.into();
+            // send it and return the error if any
+            send.send(response).await?;
+        }
+        Ok(())
+    }
 }
 
 #[pin_project]
@@ -438,6 +498,7 @@ impl<S: Service, C: Channel<S::Req, S::Res>, M: Msg<S>> Stream for UpdateDowncas
                 Ok(msg) => match M::Update::try_from(msg) {
                     Ok(msg) => Poll::Ready(Some(msg)),
                     Err(_cause) => {
+                        // we were unable to downcast, so we need to send an error
                         if let Some(tx) = this.1.take() {
                             let _ = tx.send(RpcServerError::UnexpectedUpdateMessage);
                         }
@@ -445,6 +506,7 @@ impl<S: Service, C: Channel<S::Req, S::Res>, M: Msg<S>> Stream for UpdateDowncas
                     }
                 },
                 Err(cause) => {
+                    // we got a recv error, so return pending and send the error
                     if let Some(tx) = this.1.take() {
                         let _ = tx.send(RpcServerError::RecvError(cause));
                     }
