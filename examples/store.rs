@@ -2,11 +2,14 @@ use anyhow::Context;
 use derive_more::{From, TryInto};
 use futures::{future::BoxFuture, Future, FutureExt, SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
-use std::{fmt::Debug, result};
+use std::{
+    fmt::{Debug, Display},
+    result,
+};
 use sugar::{ClientChannel, RpcMsg};
 
 use crate::sugar::HandleRpc;
-use quic_rpc::{sugar::Msg, *};
+use quic_rpc::{sugar::Msg, Channel, *};
 
 type Cid = [u8; 32];
 #[derive(Debug, Serialize, Deserialize)]
@@ -44,51 +47,117 @@ impl RpcMsg<StoreService> for Get {
     type Response = GetResponse;
 }
 
-struct DispatchHelper<This, S, C> {
-    this: This,
-    _sc: std::marker::PhantomData<(S, C)>,
+pub struct DispatchHelper<S, C> {
+    _s: std::marker::PhantomData<(S, C)>,
 }
 
-impl<This, S: Service, C: crate::Channel<S::Req, S::Res>> DispatchHelper<This, S, C> {
+impl<S, C> Clone for DispatchHelper<S, C> {
+    fn clone(&self) -> Self {
+        Self {
+            _s: std::marker::PhantomData,
+        }
+    }
+}
+
+impl<S, C> Copy for DispatchHelper<S, C> {}
+
+pub enum HandleOneError<S: Service, C: quic_rpc::Channel<S::Req, S::Res>> {
+    AcceptBiError(C::AcceptBiError),
+    EarlyClose,
+    RecvError(C::RecvError),
+    SendError(C::SendError),
+}
+
+impl<S: Service, C: quic_rpc::Channel<S::Req, S::Res>> Debug for HandleOneError<S, C> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::AcceptBiError(arg0) => f.debug_tuple("AcceptBiError").field(arg0).finish(),
+            Self::EarlyClose => write!(f, "EarlyClose"),
+            Self::RecvError(arg0) => f.debug_tuple("RecvError").field(arg0).finish(),
+            Self::SendError(arg0) => f.debug_tuple("SendError").field(arg0).finish(),
+        }
+    }
+}
+
+impl<S: Service, C: quic_rpc::Channel<S::Req, S::Res>> Display for HandleOneError<S, C> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        Debug::fmt(&self, f)
+    }
+}
+
+impl<S: Service, C: quic_rpc::Channel<S::Req, S::Res>> std::error::Error for HandleOneError<S, C> {}
+
+impl<S: Service, C: quic_rpc::Channel<S::Req, S::Res>> DispatchHelper<S, C> {
+    fn new() -> Self {
+        Self {
+            _s: std::marker::PhantomData,
+        }
+    }
+
     /// handle the message M using the given function on the target object
-    pub async fn handle_rpc<M, F, Fut>(
-        this: &This,
+    ///
+    /// If you want to support concurrent requests, you need to spawn this on a tokio task yourself.
+    pub async fn rpc<M, F, Fut, T>(
+        self,
         req: M,
         c: (C::SendSink<S::Res>, C::RecvStream<S::Req>),
+        target: T,
         f: F,
     ) -> result::Result<(), C::SendError>
     where
         M: Msg<S>,
-        F: FnOnce(&This, M) -> Fut,
+        F: FnOnce(T, M) -> Fut,
         Fut: Future<Output = M::Response>,
     {
+        let (send, _recv) = c;
         // get the response
-        let res = f(this, req).await;
+        let res = f(target, req).await;
         // turn into a S::Res so we can send it
         let res: S::Res = res.into();
         // send it and return the error if any
-        let (send, recv) = c;
         tokio::pin!(send);
         send.send(res).await
+    }
+
+    pub async fn accept_one(
+        self,
+        channel: &mut C,
+    ) -> result::Result<(S::Req, (C::SendSink<S::Res>, C::RecvStream<S::Req>)), HandleOneError<S, C>>
+    where
+        C::RecvStream<S::Req>: Unpin,
+    {
+        let mut channel = channel
+            .accept_bi()
+            .await
+            .map_err(HandleOneError::AcceptBiError)?;
+        // get the first message from the client. This will tell us what it wants to do.
+        let request: S::Req = channel
+            .1
+            .next()
+            .await
+            // no msg => early close
+            .ok_or(HandleOneError::EarlyClose)?
+            // recv error
+            .map_err(HandleOneError::RecvError)?;
+        Ok((request, channel))
     }
 }
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    #[derive(Clone)]
     struct Store;
+    impl Store {
+        async fn put(self, put: Put) -> PutResponse {
+            PutResponse([0; 32])
+        }
 
-    // #[handlers]
-    // impl Store {
-    //     async fn handle_put(&self, put: Put) -> PutResponse {
-    //         PutResponse([0; 32])
-    //     }
+        async fn get(self, get: Get) -> GetResponse {
+            GetResponse(vec![])
+        }
 
-    //     async fn handle_get(&self, get: Get) -> GetResponse {
-    //         GetResponse(vec![])
-    //     }
-
-    //     // makes a dispatcher that takes a stream pair and then does its thing!
-    // }
+        // makes a dispatcher that takes a stream pair and then does its thing!
+    }
 
     impl HandleRpc<StoreService, Put> for Store {
         type RpcFuture = BoxFuture<'static, PutResponse>;
@@ -110,20 +179,22 @@ async fn main() -> anyhow::Result<()> {
     let (client, mut server) = mem::connection::<StoreResponse, StoreRequest>(1);
     let mut client = ClientChannel::<StoreService>::new(client);
     let server_handle = tokio::task::spawn(async move {
-        let (send, mut recv) = server.accept_bi().await?;
-        let first = recv.next().await.context("no first message")??;
-        match first {
-            StoreRequest::Put(msg) => {
-                store.handle(msg, recv, send).await?;
+        let d = DispatchHelper::new();
+        loop {
+            let (req, chan) = d.accept_one(&mut server).await?;
+            use StoreRequest::*;
+            let store = store.clone();
+            match req {
+                Put(msg) => d.rpc(msg, chan, store, Store::put).await,
+                Get(msg) => d.rpc(msg, chan, store, Store::get).await,
             }
-            StoreRequest::Get(msg) => {
-                store.handle(msg, recv, send).await?;
-            }
+            .map_err(HandleOneError::SendError)?;
         }
-        anyhow::Ok(())
+        Ok::<(), HandleOneError<StoreService, _>>(())
     });
     let res = client.rpc(Get([0u8; 32])).await?;
     println!("{:?}", res);
+    drop(client);
     server_handle.await??;
     Ok(())
 }

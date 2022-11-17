@@ -92,7 +92,7 @@ pub struct ClientChannel<S: Service> {
 
 /// Error for rpc interactions
 #[derive(Debug)]
-pub enum RpcError {
+pub enum RpcClientError {
     /// Unable to open a stream to the server
     Open(underlying::OpenBiError),
     /// Unable to send the request to the server
@@ -105,13 +105,13 @@ pub enum RpcError {
     DowncastError,
 }
 
-impl fmt::Display for RpcError {
+impl fmt::Display for RpcClientError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Debug::fmt(self, f)
     }
 }
 
-impl error::Error for RpcError {}
+impl error::Error for RpcClientError {}
 
 #[derive(Debug)]
 pub enum BidiError {
@@ -187,19 +187,19 @@ impl<S: Service> ClientChannel<S> {
     }
 
     /// RPC call to the server, single request, single response
-    pub async fn rpc<M>(&mut self, msg: M) -> result::Result<M::Response, RpcError>
+    pub async fn rpc<M>(&mut self, msg: M) -> result::Result<M::Response, RpcClientError>
     where
         M: Msg<S, Pattern = Rpc> + Into<S::Req>,
     {
         let msg = msg.into();
-        let (mut send, mut recv) = self.channel.open_bi().await.map_err(RpcError::Open)?;
-        send.send(msg).await.map_err(RpcError::Send)?;
+        let (mut send, mut recv) = self.channel.open_bi().await.map_err(RpcClientError::Open)?;
+        send.send(msg).await.map_err(RpcClientError::Send)?;
         let res = recv
             .next()
             .await
-            .ok_or(RpcError::EarlyClose)?
-            .map_err(RpcError::RecvError)?;
-        M::Response::try_from(res).map_err(|_| RpcError::DowncastError)
+            .ok_or(RpcClientError::EarlyClose)?
+            .map_err(RpcClientError::RecvError)?;
+        M::Response::try_from(res).map_err(|_| RpcClientError::DowncastError)
     }
 
     /// Bidi call to the server, request opens a stream, response is a stream
