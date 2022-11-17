@@ -2,6 +2,11 @@
 name = "quic-rpc"
 version = "0.1.0"
 edition = "2021"
+authors = ["Rüdiger Klaehn <rklaehn@protonmail.com>"]
+license = "Apache-2.0/MIT"
+repository = "https://github.com/n0-computer/quic-rpc"
+description = "A streaming rpc system based on quic"
+
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
