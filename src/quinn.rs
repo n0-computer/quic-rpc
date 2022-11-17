@@ -5,20 +5,20 @@ use std::{io, pin::Pin, result};
 use tokio_serde::{formats::SymmetricalBincode, SymmetricallyFramed};
 use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
 
-type Socket<Req, Res> = (SendSink<Req>, RecvStream<Res>);
+type Socket<In, Out> = (RecvStream<In>, SendSink<Out>);
 
 /// A sink that wraps a quinn SendStream with length delimiting and bincode
 #[pin_project]
-pub struct SendSink<Req>(
+pub struct SendSink<Out>(
     #[pin]
     tokio_serde::SymmetricallyFramed<
         FramedWrite<::quinn::SendStream, LengthDelimitedCodec>,
-        Req,
-        SymmetricalBincode<Req>,
+        Out,
+        SymmetricalBincode<Out>,
     >,
 );
 
-impl<Req: Serialize> Sink<Req> for SendSink<Req> {
+impl<Out: Serialize> Sink<Out> for SendSink<Out> {
     type Error = io::Error;
 
     fn poll_ready(
@@ -28,7 +28,7 @@ impl<Req: Serialize> Sink<Req> for SendSink<Req> {
         self.project().0.poll_ready_unpin(cx)
     }
 
-    fn start_send(self: Pin<&mut Self>, item: Req) -> Result<(), Self::Error> {
+    fn start_send(self: Pin<&mut Self>, item: Out) -> Result<(), Self::Error> {
         self.project().0.start_send_unpin(item)
     }
 
@@ -49,17 +49,17 @@ impl<Req: Serialize> Sink<Req> for SendSink<Req> {
 
 /// A stream that wraps a quinn RecvStream with length delimiting and bincode
 #[pin_project]
-pub struct RecvStream<T>(
+pub struct RecvStream<In>(
     #[pin]
     tokio_serde::SymmetricallyFramed<
         FramedRead<::quinn::RecvStream, LengthDelimitedCodec>,
-        T,
-        SymmetricalBincode<T>,
+        In,
+        SymmetricalBincode<In>,
     >,
 );
 
-impl<T: DeserializeOwned> Stream for RecvStream<T> {
-    type Item = result::Result<T, io::Error>;
+impl<In: DeserializeOwned> Stream for RecvStream<In> {
+    type Item = result::Result<In, io::Error>;
 
     fn poll_next(
         self: Pin<&mut Self>,
@@ -74,9 +74,9 @@ pub type OpenBiError = quinn::ConnectionError;
 pub type AcceptBiError = quinn::ConnectionError;
 
 impl<
-        Req: Serialize + DeserializeOwned + Send + Unpin + 'static,
-        Res: Serialize + DeserializeOwned + Send + 'static,
-    > crate::Channel<Req, Res> for quinn::Connection
+        In: Serialize + DeserializeOwned + Send + 'static,
+        Out: Serialize + DeserializeOwned + Send + Unpin + 'static,
+    > crate::Channel<In, Out> for quinn::Connection
 {
     type SendSink<M: Serialize + Unpin> = self::SendSink<M>;
 
@@ -90,8 +90,7 @@ impl<
 
     type RecvError = io::Error;
 
-    type OpenBiFuture<'a> =
-        BoxFuture<'a, result::Result<self::Socket<Req, Res>, Self::OpenBiError>>;
+    type OpenBiFuture<'a> = BoxFuture<'a, result::Result<self::Socket<In, Out>, Self::OpenBiError>>;
 
     fn open_bi(&mut self) -> Self::OpenBiFuture<'_> {
         let this = self.clone();
@@ -105,18 +104,18 @@ impl<
             let send = FramedWrite::new(send, LengthDelimitedCodec::new());
             let recv = FramedRead::new(recv, LengthDelimitedCodec::new());
             // now switch to streams of WantRequestUpdate and WantResponse
-            let recv = SymmetricallyFramed::new(recv, SymmetricalBincode::<Res>::default());
-            let send = SymmetricallyFramed::new(send, SymmetricalBincode::<Req>::default());
+            let recv = SymmetricallyFramed::new(recv, SymmetricalBincode::<In>::default());
+            let send = SymmetricallyFramed::new(send, SymmetricalBincode::<Out>::default());
             // box so we don't have to write down the insanely long type
             let send = SendSink(send);
             let recv = RecvStream(recv);
-            Ok((send, recv))
+            Ok((recv, send))
         }
         .boxed()
     }
 
     type AcceptBiFuture<'a> =
-        BoxFuture<'a, result::Result<self::Socket<Req, Res>, Self::AcceptBiError>>;
+        BoxFuture<'a, result::Result<self::Socket<In, Out>, Self::AcceptBiError>>;
 
     fn accept_bi(&mut self) -> Self::AcceptBiFuture<'_> {
         let this = self.clone();
@@ -130,12 +129,12 @@ impl<
             let send = FramedWrite::new(send, LengthDelimitedCodec::new());
             let recv = FramedRead::new(recv, LengthDelimitedCodec::new());
             // now switch to streams of WantRequestUpdate and WantResponse
-            let recv = SymmetricallyFramed::new(recv, SymmetricalBincode::<Res>::default());
-            let send = SymmetricallyFramed::new(send, SymmetricalBincode::<Req>::default());
+            let recv = SymmetricallyFramed::new(recv, SymmetricalBincode::<In>::default());
+            let send = SymmetricallyFramed::new(send, SymmetricalBincode::<Out>::default());
             // box so we don't have to write down the insanely long type
             let send = SendSink(send);
             let recv = RecvStream(recv);
-            Ok((send, recv))
+            Ok((recv, send))
         }
         .boxed()
     }

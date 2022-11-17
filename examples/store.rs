@@ -1,12 +1,12 @@
 use anyhow::Context;
 use derive_more::{From, TryInto};
-use futures::{future::BoxFuture, FutureExt, SinkExt, StreamExt, Future};
+use futures::{future::BoxFuture, Future, FutureExt, SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use std::{fmt::Debug, result};
 use sugar::{ClientChannel, RpcMsg};
 
-use crate::sugar::{HandleRpc, Service};
-use quic_rpc::{*, sugar::Msg};
+use crate::sugar::HandleRpc;
+use quic_rpc::{sugar::Msg, *};
 
 type Cid = [u8; 32];
 #[derive(Debug, Serialize, Deserialize)]
@@ -50,13 +50,17 @@ struct DispatchHelper<This, S, C> {
 }
 
 impl<This, S: Service, C: crate::Channel<S::Req, S::Res>> DispatchHelper<This, S, C> {
-
     /// handle the message M using the given function on the target object
-    pub async fn handle_rpc<M, F, Fut>(this: &This, req: M, c: (C::SendSink<S::Res>, C::RecvStream<S::Req>), f: F) -> result::Result<(), C::SendError>
-        where
-            M: Msg<S>,
-            F: FnOnce(&This, M) -> Fut,
-            Fut: Future<Output = M::Response>
+    pub async fn handle_rpc<M, F, Fut>(
+        this: &This,
+        req: M,
+        c: (C::SendSink<S::Res>, C::RecvStream<S::Req>),
+        f: F,
+    ) -> result::Result<(), C::SendError>
+    where
+        M: Msg<S>,
+        F: FnOnce(&This, M) -> Fut,
+        Fut: Future<Output = M::Response>,
     {
         // get the response
         let res = f(this, req).await;
@@ -103,10 +107,10 @@ async fn main() -> anyhow::Result<()> {
     }
 
     let store = Store;
-    let (client, mut server) = mem::connection::<StoreRequest, StoreResponse>(1);
+    let (client, mut server) = mem::connection::<StoreResponse, StoreRequest>(1);
     let mut client = ClientChannel::<StoreService>::new(client);
     let server_handle = tokio::task::spawn(async move {
-        let (send, mut recv) = server.accept_bi().await?;
+        let (mut recv, send) = server.accept_bi().await?;
         let first = recv.next().await.context("no first message")??;
         match first {
             StoreRequest::Put(msg) => {
@@ -125,9 +129,9 @@ async fn main() -> anyhow::Result<()> {
 }
 
 async fn main_unsugared() -> anyhow::Result<()> {
-    let (mut server, mut client) = mem::connection::<String, u64>(1);
+    let (mut server, mut client) = mem::connection::<u64, String>(1);
     let to_string_service = tokio::spawn(async move {
-        let (mut send, mut recv) = server.accept_bi().await?;
+        let (mut recv, mut send) = server.accept_bi().await?;
         while let Some(item) = recv.next().await {
             let item = item?;
             println!("server got: {:?}", item);
@@ -135,7 +139,7 @@ async fn main_unsugared() -> anyhow::Result<()> {
         }
         anyhow::Ok(())
     });
-    let (mut send, mut recv) = client.open_bi().await?;
+    let (mut recv, mut send) = client.open_bi().await?;
     let print_result_service = tokio::spawn(async move {
         while let Some(item) = recv.next().await {
             let item = item?;

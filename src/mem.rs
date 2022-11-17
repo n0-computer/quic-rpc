@@ -34,11 +34,11 @@ impl<Res> futures::Stream for RecvStream<Res> {
     }
 }
 
-type Socket<Req, Res> = (self::SendSink<Req>, self::RecvStream<Res>);
+type Socket<In, Out> = (self::RecvStream<In>, self::SendSink<Out>);
 
-pub struct Channel<Req, Res> {
-    stream: mpsc::Receiver<Socket<Req, Res>>,
-    sink: mpsc::Sender<Socket<Res, Req>>,
+pub struct Channel<In, Out> {
+    stream: mpsc::Receiver<Socket<In, Out>>,
+    sink: mpsc::Sender<Socket<Out, In>>,
 }
 
 #[derive(Debug)]
@@ -55,16 +55,16 @@ impl fmt::Display for AcceptBiError {
 impl std::error::Error for AcceptBiError {}
 
 #[pin_project]
-pub struct OpenBiFuture<'a, Req, Res> {
+pub struct OpenBiFuture<'a, In, Out> {
     #[pin]
-    inner: futures::sink::Send<'a, mpsc::Sender<Socket<Res, Req>>, Socket<Res, Req>>,
-    res: Option<Socket<Req, Res>>,
+    inner: futures::sink::Send<'a, mpsc::Sender<Socket<Out, In>>, Socket<Out, In>>,
+    res: Option<Socket<In, Out>>,
 }
 
-impl<'a, Req, Res> OpenBiFuture<'a, Req, Res> {
+impl<'a, In, Out> OpenBiFuture<'a, In, Out> {
     fn new(
-        inner: futures::sink::Send<'a, mpsc::Sender<Socket<Res, Req>>, Socket<Res, Req>>,
-        res: Socket<Req, Res>,
+        inner: futures::sink::Send<'a, mpsc::Sender<Socket<Out, In>>, Socket<Out, In>>,
+        res: Socket<In, Out>,
     ) -> Self {
         Self {
             inner,
@@ -73,8 +73,8 @@ impl<'a, Req, Res> OpenBiFuture<'a, Req, Res> {
     }
 }
 
-impl<'a, Req, Res> Future for OpenBiFuture<'a, Req, Res> {
-    type Output = result::Result<Socket<Req, Res>, mpsc::SendError>;
+impl<'a, In, Out> Future for OpenBiFuture<'a, In, Out> {
+    type Output = result::Result<Socket<In, Out>, mpsc::SendError>;
 
     fn poll(
         self: Pin<&mut Self>,
@@ -94,12 +94,12 @@ impl<'a, Req, Res> Future for OpenBiFuture<'a, Req, Res> {
 }
 
 #[pin_project]
-pub struct AcceptBiFuture<'a, Req, Res>(
-    #[pin] futures::stream::Next<'a, mpsc::Receiver<Socket<Req, Res>>>,
+pub struct AcceptBiFuture<'a, In, Out>(
+    #[pin] futures::stream::Next<'a, mpsc::Receiver<Socket<In, Out>>>,
 );
 
-impl<'a, Req, Res> Future for AcceptBiFuture<'a, Req, Res> {
-    type Output = result::Result<Socket<Req, Res>, AcceptBiError>;
+impl<'a, In, Out> Future for AcceptBiFuture<'a, In, Out> {
+    type Output = result::Result<Socket<In, Out>, AcceptBiError>;
 
     fn poll(
         self: Pin<&mut Self>,
@@ -113,7 +113,7 @@ impl<'a, Req, Res> Future for AcceptBiFuture<'a, Req, Res> {
     }
 }
 
-pub type SendSink<Req> = mpsc::Sender<Req>;
+pub type SendSink<Out> = mpsc::Sender<Out>;
 
 pub type SendError = mpsc::SendError;
 
@@ -122,9 +122,9 @@ pub type RecvError = NoError;
 pub type OpenBiError = mpsc::SendError;
 
 impl<
-        Req: Serialize + DeserializeOwned + Send + Unpin + 'static,
-        Res: Serialize + DeserializeOwned + Send + 'static,
-    > crate::Channel<Req, Res> for Channel<Req, Res>
+        In: Serialize + DeserializeOwned + Send + 'static,
+        Out: Serialize + DeserializeOwned + Send + Unpin + 'static,
+    > crate::Channel<In, Out> for Channel<In, Out>
 {
     type SendSink<M: Serialize + Unpin> = self::SendSink<M>;
 
@@ -136,20 +136,20 @@ impl<
 
     type OpenBiError = self::OpenBiError;
 
-    type OpenBiFuture<'a> = self::OpenBiFuture<'a, Req, Res>;
+    type OpenBiFuture<'a> = self::OpenBiFuture<'a, In, Out>;
 
     fn open_bi(&mut self) -> Self::OpenBiFuture<'_> {
-        let (local_send, remote_recv) = mpsc::channel::<Req>(1);
-        let (remote_send, local_recv) = mpsc::channel::<Res>(1);
+        let (local_send, remote_recv) = mpsc::channel::<Out>(1);
+        let (remote_send, local_recv) = mpsc::channel::<In>(1);
         let remote_recv = RecvStream(remote_recv);
         let local_recv = RecvStream(local_recv);
-        let inner = self.sink.send((remote_send, remote_recv));
-        OpenBiFuture::new(inner, (local_send, local_recv))
+        let inner = self.sink.send((remote_recv, remote_send));
+        OpenBiFuture::new(inner, (local_recv, local_send))
     }
 
     type AcceptBiError = AcceptBiError;
 
-    type AcceptBiFuture<'a> = self::AcceptBiFuture<'a, Req, Res>;
+    type AcceptBiFuture<'a> = self::AcceptBiFuture<'a, In, Out>;
 
     fn accept_bi(&mut self) -> Self::AcceptBiFuture<'_> {
         AcceptBiFuture(self.stream.next())

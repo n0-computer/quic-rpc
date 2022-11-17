@@ -7,13 +7,19 @@ pub mod mem_or_quinn;
 pub mod quinn;
 pub mod sugar;
 
+/// A service
+pub trait Service {
+    type Req: Serialize + DeserializeOwned + Send + Unpin + 'static;
+    type Res: Serialize + DeserializeOwned + Send + Unpin + 'static;
+}
+
 /// An abstract channel to a service
 ///
 /// This assumes cheap streams, so every interaction uses a new stream.
-/// 
+///
 /// Heavily inspired by quinn, but uses concrete Req and Res types instead of bytes. The reason for this is that
 /// we want to be able to write a memory channel that does not serialize and deserialize.
-pub trait Channel<Req: Serialize + DeserializeOwned + Unpin, Res: Serialize + DeserializeOwned> {
+pub trait Channel<In: Serialize + DeserializeOwned, Out: Serialize + DeserializeOwned + Unpin> {
     /// The sink used for sending either requests or responses on this channel
     type SendSink<M: Serialize + Unpin>: Sink<M, Error = Self::SendError>;
     /// The stream used for receiving either requests or responses on this channel
@@ -26,10 +32,7 @@ pub trait Channel<Req: Serialize + DeserializeOwned + Unpin, Res: Serialize + De
     type OpenBiError: Debug;
     /// Future returned by open_bi
     type OpenBiFuture<'a>: Future<
-            Output = result::Result<
-                (Self::SendSink<Req>, Self::RecvStream<Res>),
-                Self::OpenBiError,
-            >,
+            Output = result::Result<(Self::RecvStream<In>, Self::SendSink<Out>), Self::OpenBiError>,
         > + 'a
     where
         Self: 'a;
@@ -40,7 +43,7 @@ pub trait Channel<Req: Serialize + DeserializeOwned + Unpin, Res: Serialize + De
     /// Future returned by accept_bi
     type AcceptBiFuture<'a>: Future<
             Output = result::Result<
-                (Self::SendSink<Req>, Self::RecvStream<Res>),
+                (Self::RecvStream<In>, Self::SendSink<Out>),
                 Self::AcceptBiError,
             >,
         > + 'a

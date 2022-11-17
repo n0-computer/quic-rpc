@@ -17,12 +17,7 @@ use std::result;
 
 use crate::mem as underlying;
 use crate::Channel;
-
-/// A service
-pub trait Service {
-    type Req: Serialize + DeserializeOwned + Send + Unpin + 'static;
-    type Res: Serialize + DeserializeOwned + Send + Unpin + 'static;
-}
+use crate::Service;
 
 /// A message for a service
 ///
@@ -91,7 +86,7 @@ impl InteractionPattern for BidiStreaming {}
 pub enum NoRequest {}
 
 pub struct ClientChannel<S: Service> {
-    channel: underlying::Channel<S::Req, S::Res>,
+    channel: underlying::Channel<S::Res, S::Req>,
     _s: PhantomData<S>,
 }
 
@@ -184,7 +179,7 @@ pub enum BidiItemError {
 }
 
 impl<S: Service> ClientChannel<S> {
-    pub fn new(channel: underlying::Channel<S::Req, S::Res>) -> Self {
+    pub fn new(channel: underlying::Channel<S::Res, S::Req>) -> Self {
         Self {
             channel,
             _s: PhantomData,
@@ -197,7 +192,7 @@ impl<S: Service> ClientChannel<S> {
         M: Msg<S, Pattern = Rpc> + Into<S::Req>,
     {
         let msg = msg.into();
-        let (mut send, mut recv) = self.channel.open_bi().await.map_err(RpcError::Open)?;
+        let (mut recv, mut send) = self.channel.open_bi().await.map_err(RpcError::Open)?;
         send.send(msg).await.map_err(RpcError::Send)?;
         let res = recv
             .next()
@@ -219,7 +214,7 @@ impl<S: Service> ClientChannel<S> {
         M: Msg<S, Pattern = ServerStreaming> + Into<S::Req>,
     {
         let msg = msg.into();
-        let (mut send, recv) = self
+        let (recv, mut send) = self
             .channel
             .open_bi()
             .map_err(StreamingResponseError::Open)
@@ -251,7 +246,7 @@ impl<S: Service> ClientChannel<S> {
         M: Msg<S, Pattern = ClientStreaming> + Into<S::Req>,
     {
         let msg = msg.into();
-        let (mut send, mut recv) = self
+        let (mut recv, mut send) = self
             .channel
             .open_bi()
             .map_err(ClientStreamingError::Open)
@@ -291,7 +286,7 @@ impl<S: Service> ClientChannel<S> {
         M: Msg<S, Pattern = BidiStreaming> + Into<S::Req>,
     {
         let msg = msg.into();
-        let (mut send, recv) = self.channel.open_bi().await.map_err(BidiError::Open)?;
+        let (recv, mut send) = self.channel.open_bi().await.map_err(BidiError::Open)?;
         send.send(msg).await.map_err(BidiError::Send)?;
         let send = send.with(|x: M::Update| future::ok::<S::Req, underlying::SendError>(x.into()));
         let send = Box::pin(send);
