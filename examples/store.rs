@@ -3,7 +3,7 @@ use async_stream::stream;
 use derive_more::{From, TryInto};
 use futures::{SinkExt, Stream, StreamExt};
 use quic_rpc::{
-    sugar::{ClientStreaming, DispatchHelper, Msg, RpcServerError, ServerStreaming},
+    sugar::{BidiStreaming, ClientStreaming, DispatchHelper, Msg, RpcServerError, ServerStreaming},
     Channel, *,
 };
 use serde::{Deserialize, Serialize};
@@ -35,13 +35,28 @@ struct GetFile(Cid);
 #[derive(Debug, Serialize, Deserialize)]
 struct GetFileResponse(Vec<u8>);
 
+#[derive(Debug, Serialize, Deserialize)]
+struct ConvertFile;
+
+#[derive(Debug, Serialize, Deserialize)]
+struct ConvertFileUpdate(Vec<u8>);
+
+#[derive(Debug, Serialize, Deserialize)]
+struct ConvertFileResponse(Vec<u8>);
+
 #[derive(Debug, From, TryInto, Serialize, Deserialize)]
 enum StoreRequest {
     Put(Put),
+
     Get(Get),
+
     PutFile(PutFile),
     PutFileUpdate(PutFileUpdate),
+
     GetFile(GetFile),
+
+    ConvertFile(ConvertFile),
+    ConvertFileUpdate(ConvertFileUpdate),
 }
 
 #[derive(Debug, From, TryInto, Serialize, Deserialize)]
@@ -50,6 +65,7 @@ enum StoreResponse {
     GetResponse(GetResponse),
     PutFileResponse(PutFileResponse),
     GetFileResponse(GetFileResponse),
+    ConvertFileResponse(ConvertFileResponse),
 }
 
 struct StoreService;
@@ -78,6 +94,12 @@ impl Msg<StoreService> for GetFile {
     type Pattern = ServerStreaming;
 }
 
+impl Msg<StoreService> for ConvertFile {
+    type Response = ConvertFileResponse;
+    type Update = ConvertFileUpdate;
+    type Pattern = BidiStreaming;
+}
+
 #[derive(Clone)]
 struct Store;
 impl Store {
@@ -92,7 +114,7 @@ impl Store {
     async fn put_file(
         self,
         _put: PutFile,
-        updates: impl Stream<Item = PutFileUpdate> + Send + 'static,
+        updates: impl Stream<Item = PutFileUpdate>,
     ) -> PutFileResponse {
         PutFileResponse([0; 32])
     }
@@ -101,6 +123,19 @@ impl Store {
         stream! {
             for i in 0..3 {
                 yield GetFileResponse(vec![i]);
+            }
+        }
+    }
+
+    fn convert_file(
+        self,
+        get: ConvertFile,
+        updates: impl Stream<Item = ConvertFileUpdate> + Send + 'static,
+    ) -> impl Stream<Item = ConvertFileResponse> + Send + 'static {
+        stream! {
+            tokio::pin!(updates);
+            while let Some(msg) = updates.next().await {
+                yield ConvertFileResponse(msg.0);
             }
         }
     }
@@ -122,7 +157,12 @@ async fn main() -> anyhow::Result<()> {
                 Get(msg) => d.rpc(msg, chan, store, Store::get).await,
                 PutFile(msg) => d.client_streaming(msg, chan, store, Store::put_file).await,
                 GetFile(msg) => d.server_streaming(msg, chan, store, Store::get_file).await,
+                ConvertFile(msg) => {
+                    d.bidi_streaming(msg, chan, store, Store::convert_file)
+                        .await
+                }
                 PutFileUpdate(_) => Err(RpcServerError::UnexpectedStartMessage)?,
+                ConvertFileUpdate(_) => Err(RpcServerError::UnexpectedStartMessage)?,
             };
             res.map_err(RpcServerError::SendError)?;
         }

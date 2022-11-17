@@ -446,6 +446,38 @@ impl<S: Service, C: crate::Channel<S::Req, S::Res>> DispatchHelper<S, C> {
     /// handle the message M using the given function on the target object
     ///
     /// If you want to support concurrent requests, you need to spawn this on a tokio task yourself.
+    pub async fn bidi_streaming<M, F, Str, T>(
+        self,
+        req: M,
+        c: (C::SendSink<S::Res>, C::RecvStream<S::Req>),
+        target: T,
+        f: F,
+    ) -> result::Result<(), C::SendError>
+    where
+        M: Msg<S, Pattern = BidiStreaming>,
+        F: FnOnce(T, M, UpdateDowncaster<S, C, M>) -> Str + Send + 'static,
+        Str: Stream<Item = M::Response> + Send + 'static,
+        T: Send + 'static,
+    {
+        let (send, recv) = c;
+        // downcast the updates
+        let (updates, read_error) = UpdateDowncaster::new(recv);
+        // get the response
+        let responses = f(target, req, updates);
+        tokio::pin!(responses);
+        tokio::pin!(send);
+        while let Some(response) = responses.next().await {
+            // turn into a S::Res so we can send it
+            let response: S::Res = response.into();
+            // send it and return the error if any
+            send.send(response).await?;
+        }
+        Ok(())
+    }
+
+    /// handle the message M using the given function on the target object
+    ///
+    /// If you want to support concurrent requests, you need to spawn this on a tokio task yourself.
     pub async fn server_streaming<M, F, Str, T>(
         self,
         req: M,
