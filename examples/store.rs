@@ -4,7 +4,7 @@ use derive_more::{From, TryInto};
 use futures::{SinkExt, Stream, StreamExt};
 use quic_rpc::{
     mem::MemChannelTypes,
-    sugar::{BidiStreaming, ClientStreaming, ServerChannel, Msg, RpcServerError, ServerStreaming},
+    sugar::{BidiStreaming, ClientStreaming, Msg, RpcServerError, ServerChannel, ServerStreaming},
     Channel, *,
 };
 use serde::{Deserialize, Serialize};
@@ -44,6 +44,36 @@ struct ConvertFileUpdate(Vec<u8>);
 
 #[derive(Debug, Serialize, Deserialize)]
 struct ConvertFileResponse(Vec<u8>);
+
+macro_rules! request_enum {
+    // User entry points.
+    ($enum_name:ident { $variant_name:ident $($tt:tt)* }) => {
+        request_enum!(@ {[$enum_name] [$variant_name]} $($tt)*);
+    };
+
+    // Internal rules to categorize each value
+    (@ {[$enum_name:ident] [$($agg:ident)*]} $(,)? $variant_name:ident $($tt:tt)*) => {
+        request_enum!(@ {[$enum_name] [$($agg)* $variant_name]} $($tt)*);
+    };
+
+    // Final internal rule that generates the enum from the categorized input
+    (@ {[$enum_name:ident] [$($n:ident)*]} $(,)?) => {
+        #[derive(::std::fmt::Debug, ::derive_more::From, ::derive_more::TryInto, ::serde::Serialize, ::serde::Deserialize)]
+        enum $enum_name {
+            $($n($n),)*
+        }
+    };
+}
+
+request_enum! {
+    StoreRequest2 {
+        Put,
+        Get,
+        PutFile, PutFileUpdate,
+        GetFile,
+        ConvertFile, ConvertFileUpdate,
+    }
+}
 
 #[derive(Debug, From, TryInto, Serialize, Deserialize)]
 enum StoreRequest {
@@ -146,7 +176,9 @@ impl Store {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    async fn server_future(server: ServerChannel<StoreService, MemChannelTypes>) -> result::Result<(), RpcServerError<MemChannelTypes>> {
+    async fn server_future(
+        server: ServerChannel<StoreService, MemChannelTypes>,
+    ) -> result::Result<(), RpcServerError<MemChannelTypes>> {
         let mut s = server;
         let store = Store;
         loop {

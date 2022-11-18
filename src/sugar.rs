@@ -1,25 +1,12 @@
 use crate::Channel;
 use crate::ChannelTypes;
 use crate::Service;
-use futures::channel::oneshot;
-use futures::future;
-use futures::future::BoxFuture;
-use futures::stream::BoxStream;
-use futures::task;
-use futures::Future;
-use futures::FutureExt;
-use futures::Sink;
-use futures::SinkExt;
-use futures::Stream;
-use futures::StreamExt;
-use futures::TryFutureExt;
+use futures::{
+    channel::oneshot, future, future::BoxFuture, stream::BoxStream, task, task::Poll, Future,
+    FutureExt, Sink, SinkExt, Stream, StreamExt, TryFutureExt,
+};
 use pin_project::pin_project;
-use std::error;
-use std::fmt;
-use std::marker::PhantomData;
-use std::pin::Pin;
-use std::result;
-use std::task::Poll;
+use std::{error, fmt, marker::PhantomData, pin::Pin, result, time::Duration};
 
 pub type BoxSink<'a, T, E> = Pin<Box<dyn Sink<T, Error = E> + Send>>;
 
@@ -30,6 +17,7 @@ pub trait Msg<S: Service>: Into<S::Req> + TryFrom<S::Req> + Send + 'static {
     type Update: Into<S::Req> + TryFrom<S::Req> + Send + 'static;
     type Response: Into<S::Res> + TryFrom<S::Res> + Send + 'static;
     type Pattern: InteractionPattern;
+    const TIMEOUT: Duration = Duration::from_secs(10);
 }
 
 pub trait RpcMsg<S: Service>: Into<S::Req> + TryFrom<S::Req> + Send + 'static {
@@ -346,7 +334,7 @@ pub struct ServerChannel<S: Service, C: ChannelTypes> {
     _s: std::marker::PhantomData<(S, C)>,
 }
 
-impl<S: Service, C: ChannelTypes>  ServerChannel<S, C> {
+impl<S: Service, C: ChannelTypes> ServerChannel<S, C> {
     pub fn new(channel: C::Channel<S::Req, S::Res>) -> Self {
         Self {
             channel,
@@ -364,7 +352,8 @@ impl<S: Service, C: ChannelTypes> ServerChannel<S, C> {
     where
         C::RecvStream<S::Req>: Unpin,
     {
-        let mut channel = self.channel
+        let mut channel = self
+            .channel
             .accept_bi()
             .await
             .map_err(RpcServerError::AcceptBiError)?;
@@ -418,12 +407,12 @@ impl<S: Service, C: ChannelTypes> ServerChannel<S, C> {
     ) -> result::Result<(), RpcServerError<C>>
     where
         M: Msg<S, Pattern = ClientStreaming>,
-        F: FnOnce(T, M, UpdateDowncaster<S, C, M>) -> Fut + Send + 'static,
+        F: FnOnce(T, M, UpdateStream<S, C, M>) -> Fut + Send + 'static,
         Fut: Future<Output = M::Response> + Send + 'static,
         T: Send + 'static,
     {
         let (send, recv) = c;
-        let (updates, read_error) = UpdateDowncaster::new(recv);
+        let (updates, read_error) = UpdateStream::new(recv);
         race2(read_error.map(Err), async move {
             // get the response
             let res = f(target, req, updates).await;
@@ -448,18 +437,17 @@ impl<S: Service, C: ChannelTypes> ServerChannel<S, C> {
     ) -> result::Result<(), RpcServerError<C>>
     where
         M: Msg<S, Pattern = BidiStreaming>,
-        F: FnOnce(T, M, UpdateDowncaster<S, C, M>) -> Str + Send + 'static,
+        F: FnOnce(T, M, UpdateStream<S, C, M>) -> Str + Send + 'static,
         Str: Stream<Item = M::Response> + Send + 'static,
         T: Send + 'static,
     {
         let (send, recv) = c;
         // downcast the updates
-        let (updates, read_error) = UpdateDowncaster::new(recv);
+        let (updates, read_error) = UpdateStream::new(recv);
         // get the response
         let responses = f(target, req, updates);
         race2(read_error.map(Err), async move {
-            tokio::pin!(responses);
-            tokio::pin!(send);
+            tokio::pin!(responses, send);
             while let Some(response) = responses.next().await {
                 // turn into a S::Res so we can send it
                 let response: S::Res = response.into();
@@ -506,21 +494,36 @@ impl<S: Service, C: ChannelTypes> ServerChannel<S, C> {
 }
 
 #[pin_project]
-pub struct UpdateDowncaster<S: Service, C: ChannelTypes, M: Msg<S>>(
+pub struct UpdateStream<S: Service, C: ChannelTypes, M: Msg<S>>(
     #[pin] C::RecvStream<S::Req>,
     Option<oneshot::Sender<RpcServerError<C>>>,
     PhantomData<M>,
 );
 
-impl<S: Service, C: ChannelTypes, M: Msg<S>> UpdateDowncaster<S, C, M> {
+impl<S: Service, C: ChannelTypes, M: Msg<S>> UpdateStream<S, C, M> {
     fn new(recv: C::RecvStream<S::Req>) -> (Self, impl Future<Output = RpcServerError<C>>) {
         let (error_send, error_recv) = oneshot::channel();
-        let error_recv = error_recv.map(|x| x.unwrap());
+        let error_recv = UnwrapToPending(error_recv);
         (Self(recv, Some(error_send), PhantomData), error_recv)
     }
 }
 
-impl<S: Service, C: ChannelTypes, M: Msg<S>> Stream for UpdateDowncaster<S, C, M> {
+#[pin_project]
+pub struct UnwrapToPending<T>(#[pin] oneshot::Receiver<T>);
+
+impl<T> Future for UnwrapToPending<T> {
+    type Output = T;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut task::Context<'_>) -> Poll<Self::Output> {
+        match self.project().0.poll_unpin(cx) {
+            Poll::Ready(Ok(x)) => Poll::Ready(x),
+            Poll::Ready(Err(_)) => Poll::Pending,
+            Poll::Pending => Poll::Pending,
+        }
+    }
+}
+
+impl<S: Service, C: ChannelTypes, M: Msg<S>> Stream for UpdateStream<S, C, M> {
     type Item = M::Update;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut task::Context<'_>) -> Poll<Option<Self::Item>> {

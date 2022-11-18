@@ -33,9 +33,10 @@ pub trait Service {
     type Res: RpcMessage;
 }
 
+/// A module that defines a set of channel types
 pub trait ChannelTypes: Debug + Sized {
     /// The sink used for sending either requests or responses on this channel
-    type SendSink<M: RpcMessage>: Sink<M, Error = Self::SendError> + Unpin + Send + 'static;
+    type SendSink<M: RpcMessage>: Sink<M, Error = Self::SendError> + Send + Unpin + 'static;
     /// The stream used for receiving either requests or responses on this channel
     type RecvStream<M: RpcMessage>: Stream<Item = result::Result<M, Self::RecvError>>
         + Send

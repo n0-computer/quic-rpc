@@ -1,13 +1,10 @@
-use crate::mem;
-use crate::quinn;
-use crate::ChannelTypes;
-use crate::RpcMessage;
+use crate::{mem, quinn, ChannelTypes, RpcMessage};
 use futures::{future::BoxFuture, FutureExt, Sink, Stream};
 use pin_project::pin_project;
 use serde::{de::DeserializeOwned, Serialize};
-use std::fmt;
-use std::fmt::Debug;
 use std::{
+    fmt,
+    fmt::Debug,
     io,
     pin::Pin,
     result,
