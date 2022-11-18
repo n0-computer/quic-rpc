@@ -32,6 +32,10 @@ It is still a RPC system in the sense that interactions get initiated by the cli
 - Making remote message passing look like local async function calls
 - Being runtime agnostic. This is for tokio
 
+## Example
+
+[computation service](https://github.com/n0-computer/quic-rpc/blob/main/tests/math.rs)
+
 [quinn]: https://docs.rs/quinn/
 [futures]: https://docs.rs/futures/
 [grpc]: https://grpc.io/

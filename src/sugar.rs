@@ -6,7 +6,7 @@ use futures::{
     FutureExt, Sink, SinkExt, Stream, StreamExt, TryFutureExt,
 };
 use pin_project::pin_project;
-use std::{error, fmt, marker::PhantomData, pin::Pin, result, time::Duration};
+use std::{error, fmt, marker::PhantomData, pin::Pin, result};
 
 pub type BoxSink<'a, T, E> = Pin<Box<dyn Sink<T, Error = E> + Send>>;
 
@@ -17,7 +17,6 @@ pub trait Msg<S: Service>: Into<S::Req> + TryFrom<S::Req> + Send + 'static {
     type Update: Into<S::Req> + TryFrom<S::Req> + Send + 'static;
     type Response: Into<S::Res> + TryFrom<S::Res> + Send + 'static;
     type Pattern: InteractionPattern;
-    const TIMEOUT: Duration = Duration::from_secs(10);
 }
 
 pub trait RpcMsg<S: Service>: Into<S::Req> + TryFrom<S::Req> + Send + 'static {
@@ -163,6 +162,8 @@ impl<C: ChannelTypes> fmt::Display for BidiItemError<C> {
         fmt::Debug::fmt(self, f)
     }
 }
+
+impl<C: ChannelTypes> error::Error for BidiItemError<C> {}
 
 pub struct ClientChannel<S: Service, C: ChannelTypes> {
     channel: C::Channel<S::Res, S::Req>,
