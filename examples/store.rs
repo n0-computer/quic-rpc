@@ -185,15 +185,13 @@ async fn main() -> anyhow::Result<()> {
             let (req, chan) = s.accept_one().await?;
             use StoreRequest::*;
             let store = store.clone();
+            #[rustfmt::skip]
             match req {
                 Put(msg) => s.rpc(msg, chan, store, Store::put).await,
                 Get(msg) => s.rpc(msg, chan, store, Store::get).await,
                 PutFile(msg) => s.client_streaming(msg, chan, store, Store::put_file).await,
                 GetFile(msg) => s.server_streaming(msg, chan, store, Store::get_file).await,
-                ConvertFile(msg) => {
-                    s.bidi_streaming(msg, chan, store, Store::convert_file)
-                        .await
-                }
+                ConvertFile(msg) => s.bidi_streaming(msg, chan, store, Store::convert_file).await,
                 PutFileUpdate(_) => Err(RpcServerError::UnexpectedStartMessage)?,
                 ConvertFileUpdate(_) => Err(RpcServerError::UnexpectedStartMessage)?,
             }?;

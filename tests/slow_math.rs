@@ -1,71 +1,15 @@
-#![allow(dead_code)]
+mod math;
+use std::result;
+
 use async_stream::stream;
-use derive_more::{From, TryInto};
-use futures::{SinkExt, Stream, StreamExt, TryStreamExt};
+use futures::{Stream, StreamExt};
+use math::*;
 use quic_rpc::{
     sugar::{
-        BidiStreaming, ClientChannel, ClientStreaming, Msg, RpcMsg, RpcServerError, ServerChannel,
-        ServerStreaming,
+        BidiStreaming, ClientStreaming, Msg, RpcMsg, RpcServerError, ServerChannel, ServerStreaming,
     },
     ChannelTypes, Service,
 };
-use serde::{Deserialize, Serialize};
-use std::result;
-
-/// compute the square of a number
-#[derive(Debug, Serialize, Deserialize)]
-pub struct Sqr(pub u64);
-
-#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub struct SqrResponse(pub u128);
-
-/// sum a stream of numbers
-#[derive(Debug, Serialize, Deserialize)]
-pub struct Sum;
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct SumUpdate(pub u64);
-
-#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub struct SumResponse(pub u128);
-
-/// compute the fibonacci sequence as a stream
-#[derive(Debug, Serialize, Deserialize)]
-pub struct Fibonacci(pub u64);
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct FibonacciResponse(pub u128);
-
-/// multiply a stream of numbers, returning a stream
-#[derive(Debug, Serialize, Deserialize)]
-pub struct Multiply(pub u64);
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct MultiplyUpdate(pub u64);
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct MultiplyResponse(pub u128);
-
-/// request enum
-#[derive(Debug, Serialize, Deserialize, From, TryInto)]
-pub enum ComputeRequest {
-    Sqr(Sqr),
-    Sum(Sum),
-    SumUpdate(SumUpdate),
-    Fibonacci(Fibonacci),
-    Multiply(Multiply),
-    MultiplyUpdate(MultiplyUpdate),
-}
-
-/// response enum
-#[allow(clippy::enum_variant_names)]
-#[derive(Debug, Serialize, Deserialize, From, TryInto)]
-pub enum ComputeResponse {
-    SqrResponse(SqrResponse),
-    SumResponse(SumResponse),
-    FibonacciResponse(FibonacciResponse),
-    MultiplyResponse(MultiplyResponse),
-}
 
 #[derive(Debug, Clone)]
 pub struct ComputeService;
@@ -97,8 +41,13 @@ impl Msg<ComputeService> for Multiply {
     type Pattern = BidiStreaming;
 }
 
+async fn sleep_ms(ms: u64) {
+    tokio::time::sleep(std::time::Duration::from_millis(ms)).await;
+}
+
 impl ComputeService {
     async fn sqr(self, req: Sqr) -> SqrResponse {
+        sleep_ms(10000).await;
         SqrResponse(req.0 as u128 * req.0 as u128)
     }
 
@@ -106,6 +55,7 @@ impl ComputeService {
         let mut sum = 0u128;
         tokio::pin!(updates);
         while let Some(SumUpdate(n)) = updates.next().await {
+            sleep_ms(100).await;
             sum += n as u128;
         }
         SumResponse(sum)
@@ -116,6 +66,7 @@ impl ComputeService {
         let mut b = 1u128;
         let mut n = req.0;
         stream! {
+            sleep_ms(100).await;
             while n > 0 {
                 yield FibonacciResponse(a);
                 let c = a + b;
@@ -135,6 +86,7 @@ impl ComputeService {
         stream! {
             tokio::pin!(updates);
             while let Some(MultiplyUpdate(n)) = updates.next().await {
+                sleep_ms(100).await;
                 yield MultiplyResponse(product * n as u128);
             }
         }
@@ -160,41 +112,4 @@ impl ComputeService {
             }?;
         }
     }
-}
-
-pub async fn smoke_test<C: ChannelTypes>(
-    client: C::Channel<ComputeResponse, ComputeRequest>,
-) -> anyhow::Result<()> {
-    let mut client = ClientChannel::<ComputeService, C>::new(client);
-    // a rpc call
-    let res = client.rpc(Sqr(1234)).await?;
-    assert_eq!(res, SqrResponse(1522756));
-
-    // client streaming call
-    let (mut send, recv) = client.client_streaming(Sum).await?;
-    tokio::task::spawn(async move {
-        for i in 1..=3 {
-            send.send(SumUpdate(i)).await?;
-        }
-        Ok::<_, C::SendError>(())
-    });
-    let res = recv.await?;
-    assert_eq!(res, SumResponse(6));
-
-    // server streaming call
-    let s = client.server_streaming(Fibonacci(10)).await?;
-    let res = s.map_ok(|x| x.0).try_collect::<Vec<_>>().await?;
-    assert_eq!(res, vec![0, 1, 1, 2, 3, 5, 8, 13, 21, 34]);
-
-    // bidi streaming call
-    let (mut send, recv) = client.bidi(Multiply(2)).await?;
-    tokio::task::spawn(async move {
-        for i in 1..=3 {
-            send.send(MultiplyUpdate(i)).await?;
-        }
-        Ok::<_, C::SendError>(())
-    });
-    let res = recv.map_ok(|x| x.0).try_collect::<Vec<_>>().await?;
-    assert_eq!(res, vec![2, 4, 6]);
-    Ok(())
 }

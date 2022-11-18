@@ -6,6 +6,7 @@ use futures::{
     FutureExt, Sink, SinkExt, Stream, StreamExt, TryFutureExt,
 };
 use pin_project::pin_project;
+use std::task::Context;
 use std::{error, fmt, marker::PhantomData, pin::Pin, result};
 
 pub type BoxSink<'a, T, E> = Pin<Box<dyn Sink<T, Error = E> + Send>>;
@@ -191,6 +192,8 @@ impl<S: Service, C: ChannelTypes> ClientChannel<S, C> {
             .await
             .ok_or(RpcClientError::EarlyClose)?
             .map_err(RpcClientError::RecvError)?;
+        // keep send alive until we have the answer
+        drop(send);
         M::Response::try_from(res).map_err(|_| RpcClientError::DowncastError)
     }
 
@@ -206,21 +209,20 @@ impl<S: Service, C: ChannelTypes> ClientChannel<S, C> {
         M: Msg<S, Pattern = ServerStreaming> + Into<S::Req>,
     {
         let msg = msg.into();
-        let (send, recv) = self
+        let (mut send, recv) = self
             .channel
             .open_bi()
             .map_err(StreamingResponseError::Open)
             .await?;
-        tokio::pin!(send);
         send.send(msg).map_err(StreamingResponseError::Send).await?;
-        let recv = recv
-            .map(|x| match x {
-                Ok(x) => {
-                    M::Response::try_from(x).map_err(|_| StreamingResponseItemError::DowncastError)
-                }
-                Err(e) => Err(StreamingResponseItemError::RecvError(e)),
-            })
-            .boxed();
+        let recv = recv.map(move |x| match x {
+            Ok(x) => {
+                M::Response::try_from(x).map_err(|_| StreamingResponseItemError::DowncastError)
+            }
+            Err(e) => Err(StreamingResponseItemError::RecvError(e)),
+        });
+        // keep send alive so the request on the server side does not get cancelled
+        let recv = KeepaliveStream(recv, send).boxed();
         Ok(recv)
     }
 
@@ -386,14 +388,21 @@ impl<S: Service, C: ChannelTypes> ServerChannel<S, C> {
         Fut: Future<Output = M::Response>,
         T: Send + 'static,
     {
-        let (send, _recv) = c;
-        // get the response
-        let res = f(target, req).await;
-        // turn into a S::Res so we can send it
-        let res: S::Res = res.into();
-        // send it and return the error if any
-        tokio::pin!(send);
-        send.send(res).await.map_err(RpcServerError::SendError)
+        let (mut send, mut recv) = c;
+        // cancel if we get an update, no matter what it is
+        let cancel = recv
+            .next()
+            .map(|_| RpcServerError::UnexpectedUpdateMessage::<C>);
+        // race the computation and the cancellation
+        race2(cancel.map(Err), async move {
+            // get the response
+            let res = f(target, req).await;
+            // turn into a S::Res so we can send it
+            let res: S::Res = res.into();
+            // send it and return the error if any
+            send.send(res).await.map_err(RpcServerError::SendError)
+        })
+        .await
     }
 
     /// handle the message M using the given function on the target object
@@ -412,7 +421,7 @@ impl<S: Service, C: ChannelTypes> ServerChannel<S, C> {
         Fut: Future<Output = M::Response> + Send + 'static,
         T: Send + 'static,
     {
-        let (send, recv) = c;
+        let (mut send, recv) = c;
         let (updates, read_error) = UpdateStream::new(recv);
         race2(read_error.map(Err), async move {
             // get the response
@@ -420,7 +429,6 @@ impl<S: Service, C: ChannelTypes> ServerChannel<S, C> {
             // turn into a S::Res so we can send it
             let res: S::Res = res.into();
             // send it and return the error if any
-            tokio::pin!(send);
             send.send(res).await.map_err(RpcServerError::SendError)
         })
         .await
@@ -442,13 +450,13 @@ impl<S: Service, C: ChannelTypes> ServerChannel<S, C> {
         Str: Stream<Item = M::Response> + Send + 'static,
         T: Send + 'static,
     {
-        let (send, recv) = c;
+        let (mut send, recv) = c;
         // downcast the updates
         let (updates, read_error) = UpdateStream::new(recv);
         // get the response
         let responses = f(target, req, updates);
         race2(read_error.map(Err), async move {
-            tokio::pin!(responses, send);
+            tokio::pin!(responses);
             while let Some(response) = responses.next().await {
                 // turn into a S::Res so we can send it
                 let response: S::Res = response.into();
@@ -478,19 +486,39 @@ impl<S: Service, C: ChannelTypes> ServerChannel<S, C> {
         Str: Stream<Item = M::Response> + Send + 'static,
         T: Send + 'static,
     {
-        let (send, _recv) = c;
-        // get the response
-        let responses = f(target, req);
-        tokio::pin!(send, responses);
-        while let Some(response) = responses.next().await {
-            // turn into a S::Res so we can send it
-            let response: S::Res = response.into();
-            // send it and return the error if any
-            send.send(response)
-                .await
-                .map_err(RpcServerError::SendError)?;
-        }
-        Ok(())
+        let (mut send, mut recv) = c;
+        // cancel if we get an update, no matter what it is
+        let cancel = recv
+            .next()
+            .map(|_| RpcServerError::UnexpectedUpdateMessage::<C>);
+        // race the computation and the cancellation
+        race2(cancel.map(Err), async move {
+            // get the response
+            let responses = f(target, req);
+            tokio::pin!(responses);
+            while let Some(response) = responses.next().await {
+                // turn into a S::Res so we can send it
+                let response: S::Res = response.into();
+                // send it and return the error if any
+                send.send(response)
+                    .await
+                    .map_err(RpcServerError::SendError)?;
+            }
+            Ok(())
+        })
+        .await
+    }
+}
+
+/// Wrap a stream with an additional item that is kept alive until the stream is dropped
+#[pin_project]
+pub struct KeepaliveStream<S: Stream, X>(#[pin] S, X);
+
+impl<S: Stream, X> Stream for KeepaliveStream<S, X> {
+    type Item = S::Item;
+
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        self.project().0.poll_next(cx)
     }
 }
 

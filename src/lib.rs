@@ -23,9 +23,9 @@ impl<T> RpcMessage for T where T: Serialize + DeserializeOwned + Send + Unpin + 
 /// requirements for an internal error
 ///
 /// All errors have to be Send and 'static so they can be sent across threads.
-pub trait RpcError: Debug + Display + Send + Unpin + 'static {}
+pub trait RpcError: Debug + Display + Send + Sync + Unpin + 'static {}
 
-impl<T> RpcError for T where T: Debug + Display + Send + Unpin + 'static {}
+impl<T> RpcError for T where T: Debug + Display + Send + Sync + Unpin + 'static {}
 
 /// A service
 pub trait Service {
@@ -34,7 +34,7 @@ pub trait Service {
 }
 
 /// A module that defines a set of channel types
-pub trait ChannelTypes: Debug + Sized {
+pub trait ChannelTypes: Debug + Sized + Send + Sync + Unpin + 'static {
     /// The sink used for sending either requests or responses on this channel
     type SendSink<M: RpcMessage>: Sink<M, Error = Self::SendError> + Send + Unpin + 'static;
     /// The stream used for receiving either requests or responses on this channel
@@ -51,7 +51,8 @@ pub trait ChannelTypes: Debug + Sized {
     /// Future returned by open_bi
     type OpenBiFuture<'a, In: RpcMessage, Out: RpcMessage>: Future<
             Output = result::Result<(Self::SendSink<Out>, Self::RecvStream<In>), Self::OpenBiError>,
-        > + 'a
+        > + Send
+        + 'a
     where
         Self: 'a;
 
@@ -63,7 +64,8 @@ pub trait ChannelTypes: Debug + Sized {
                 (Self::SendSink<Out>, Self::RecvStream<In>),
                 Self::AcceptBiError,
             >,
-        > + 'a
+        > + Send
+        + 'a
     where
         Self: 'a;
 
@@ -76,7 +78,7 @@ pub trait ChannelTypes: Debug + Sized {
 ///
 /// Heavily inspired by quinn, but uses concrete Req and Res types instead of bytes. The reason for this is that
 /// we want to be able to write a memory channel that does not serialize and deserialize.
-pub trait Channel<In: RpcMessage, Out: RpcMessage, T: ChannelTypes> {
+pub trait Channel<In: RpcMessage, Out: RpcMessage, T: ChannelTypes>: Send + Sync + 'static {
     /// Open a bidirectional stream
     fn open_bi(&mut self) -> T::OpenBiFuture<'_, In, Out>;
     /// Accept a bidirectional stream
