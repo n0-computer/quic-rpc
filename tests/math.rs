@@ -14,37 +14,37 @@ use std::result;
 
 /// compute the square of a number
 #[derive(Debug, Serialize, Deserialize)]
-pub struct Sqr(u64);
+pub struct Sqr(pub u64);
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub struct SqrResponse(u128);
+pub struct SqrResponse(pub u128);
 
 /// sum a stream of numbers
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Sum;
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct SumUpdate(u64);
+pub struct SumUpdate(pub u64);
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub struct SumResponse(u128);
+pub struct SumResponse(pub u128);
 
 /// compute the fibonacci sequence as a stream
 #[derive(Debug, Serialize, Deserialize)]
-pub struct Fibonacci(u64);
+pub struct Fibonacci(pub u64);
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct FibonacciResponse(u128);
+pub struct FibonacciResponse(pub u128);
 
 /// multiply a stream of numbers, returning a stream
 #[derive(Debug, Serialize, Deserialize)]
-pub struct Multiply(u64);
+pub struct Multiply(pub u64);
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct MultiplyUpdate(u64);
+pub struct MultiplyUpdate(pub u64);
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct MultiplyResponse(u128);
+pub struct MultiplyResponse(pub u128);
 
 /// request enum
 #[derive(Debug, Serialize, Deserialize, From, TryInto)]
@@ -148,20 +148,12 @@ impl ComputeService {
             let (req, chan) = s.accept_one().await?;
             use ComputeRequest::*;
             let service = service.clone();
+            #[rustfmt::skip]
             match req {
                 Sqr(msg) => s.rpc(msg, chan, service, ComputeService::sqr).await,
-                Sum(msg) => {
-                    s.client_streaming(msg, chan, service, ComputeService::sum)
-                        .await
-                }
-                Fibonacci(msg) => {
-                    s.server_streaming(msg, chan, service, ComputeService::fibonacci)
-                        .await
-                }
-                Multiply(msg) => {
-                    s.bidi_streaming(msg, chan, service, ComputeService::multiply)
-                        .await
-                }
+                Sum(msg) => s.client_streaming(msg, chan, service, ComputeService::sum).await,
+                Fibonacci(msg) => s.server_streaming(msg, chan, service, ComputeService::fibonacci).await,
+                Multiply(msg) => s.bidi_streaming(msg, chan, service, ComputeService::multiply).await,
                 SumUpdate(_) => Err(RpcServerError::UnexpectedStartMessage)?,
                 MultiplyUpdate(_) => Err(RpcServerError::UnexpectedStartMessage)?,
             }?;
