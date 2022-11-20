@@ -24,12 +24,12 @@ impl<Res> futures::Stream for RecvStream<Res> {
     fn poll_next(
         self: Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Option<Self::Item>> {
+    ) -> Poll<Option<Self::Item>> {
         let mut this = self.project();
         match this.0.poll_next_unpin(cx) {
-            std::task::Poll::Ready(Some(item)) => std::task::Poll::Ready(Some(Ok(item))),
-            std::task::Poll::Ready(None) => std::task::Poll::Ready(None),
-            std::task::Poll::Pending => std::task::Poll::Pending,
+            Poll::Ready(Some(item)) => Poll::Ready(Some(Ok(item))),
+            Poll::Ready(None) => Poll::Ready(None),
+            Poll::Pending => Poll::Pending,
         }
     }
 }
@@ -148,8 +148,8 @@ impl<In: RpcMessage, Out: RpcMessage> crate::Channel<In, Out, MemChannelTypes>
     for Channel<In, Out>
 {
     fn open_bi(&mut self) -> OpenBiFuture<'_, In, Out> {
-        let (local_send, remote_recv) = mpsc::channel::<Out>(1);
-        let (remote_send, local_recv) = mpsc::channel::<In>(1);
+        let (local_send, remote_recv) = mpsc::channel::<Out>(128);
+        let (remote_send, local_recv) = mpsc::channel::<In>(128);
         let remote_recv = RecvStream(remote_recv);
         let local_recv = RecvStream(local_recv);
         let inner = self.sink.send((remote_send, remote_recv));

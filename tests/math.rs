@@ -10,7 +10,10 @@ use quic_rpc::{
     ChannelTypes, Service,
 };
 use serde::{Deserialize, Serialize};
-use std::result;
+use std::{
+    io::{self, Write},
+    result,
+};
 
 /// compute the square of a number
 #[derive(Debug, Serialize, Deserialize)]
@@ -196,5 +199,83 @@ pub async fn smoke_test<C: ChannelTypes>(
     });
     let res = recv.map_ok(|x| x.0).try_collect::<Vec<_>>().await?;
     assert_eq!(res, vec![2, 4, 6]);
+    Ok(())
+}
+
+pub async fn bench<C: ChannelTypes>(
+    mut client: ClientChannel<ComputeService, C>,
+) -> anyhow::Result<()>
+where
+    C::SendError: std::error::Error,
+{
+    let n = 1000000;
+    // individual RPCs
+    {
+        let mut sum = 0;
+        let t0 = std::time::Instant::now();
+        for i in 0..n {
+            sum += client.rpc(Sqr(i)).await?.0;
+            if i % 10000 == 0 {
+                print!(".");
+                io::stdout().flush()?;
+            }
+        }
+        println!(
+            "\nRPC seq {} {} rps",
+            sum,
+            (n as f64) / t0.elapsed().as_secs_f64()
+        );
+    }
+    // parallel RPCs (todo)
+    // {
+    //     let t0 = std::time::Instant::now();
+    //     let reqs = futures::stream::iter((0..n).map(Sqr));
+    //     let mut sum = 0;
+    //     let mut i = 0;
+    //     reqs.map(|x| {
+    //         async move {
+    //             // sum += client.rpc(x).await?.0;
+    //             // if i % 10000 == 0 {
+    //             //     print!(".");
+    //             //     io::stdout().flush()?;
+    //             // }
+    //             // i += 1;
+    //             anyhow::Ok(())
+    //         }
+    //     }).buffer_unordered(1000).try_collect::<Vec<_>>().await?;
+    //     println!(
+    //         "\nRPC par {} {} rps",
+    //         sum,
+    //         (n as f64) / t0.elapsed().as_secs_f64()
+    //     );
+    // }
+    // sequential streaming
+    {
+        let t0 = std::time::Instant::now();
+        let (send, recv) = client.bidi(Multiply(2)).await?;
+        let handle = tokio::task::spawn(async move {
+            let requests = futures::stream::iter((0..n).map(MultiplyUpdate));
+            requests.map(Ok).forward(send).await?;
+            anyhow::Result::<()>::Ok(())
+        });
+        let mut sum = 0;
+        tokio::pin!(recv);
+        let mut i = 0;
+        while let Some(res) = recv.next().await {
+            sum += res?.0;
+            if i % 10000 == 0 {
+                print!(".");
+                io::stdout().flush()?;
+            }
+            i += 1;
+        }
+        println!(
+            "\nbidi {} {} rps",
+            sum,
+            (n as f64) / t0.elapsed().as_secs_f64()
+        );
+
+        handle.await??;
+    }
     Ok(())
 }

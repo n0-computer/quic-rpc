@@ -1,11 +1,6 @@
-use std::{
-    io::{self, Write},
-    net::SocketAddr,
-    sync::Arc,
-};
+use std::{net::SocketAddr, sync::Arc};
 
 use anyhow::Context;
-use futures::{SinkExt, StreamExt};
 use quic_rpc::{
     quinn::QuinnChannelTypes,
     sugar::{ClientChannel, ServerChannel},
@@ -114,54 +109,9 @@ async fn quinn_channel_bench() -> anyhow::Result<()> {
         server_addr,
     } = make_endpoints()?;
     let server_handle = run_server(server);
-    let client = client
-        .connect(server_addr, "localhost")?
-        .await
-        .context("connect failed")?;
-    let mut client = ClientChannel::<ComputeService, C>::new(client);
-    let mut sum = 0;
-    let t0 = std::time::Instant::now();
-    let n = 100000;
-    for i in 0..n {
-        sum += client.rpc(Sqr(i)).await?.0;
-        if i % 10000 == 0 {
-            print!(".");
-            io::stdout().flush()?;
-        }
-    }
-    println!(
-        "\nRPC {} {} rps",
-        sum,
-        (n as f64) / t0.elapsed().as_secs_f64()
-    );
-    let t0 = std::time::Instant::now();
-    let (send, recv) = client.bidi(Multiply(2)).await?;
-    let handle = tokio::task::spawn(async move {
-        let mut send = send;
-        for i in 0..n {
-            send.send(MultiplyUpdate(i)).await?;
-        }
-        anyhow::Result::<()>::Ok(())
-    });
-    let mut sum = 0;
-    tokio::pin!(recv);
-    let mut i = 0;
-    while let Some(res) = recv.next().await {
-        sum += res?.0;
-        if i % 10000 == 0 {
-            print!(".");
-            io::stdout().flush()?;
-        }
-        i += 1;
-    }
-    println!(
-        "\nbidi {} {} rps",
-        sum,
-        (n as f64) / t0.elapsed().as_secs_f64()
-    );
-    drop(client);
-    println!("waiting for feeder");
-    handle.await??;
+    let client = client.connect(server_addr, "localhost")?.await?;
+    let client = ClientChannel::<ComputeService, C>::new(client);
+    bench(client).await?;
     println!("waiting for server");
     check_termination_anyhow::<C>(server_handle).await?;
     Ok(())
