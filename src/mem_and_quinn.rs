@@ -16,6 +16,15 @@ pub struct Channel<In, Out> {
     quinn: ::quinn::Connection,
 }
 
+impl<In, Out> Clone for Channel<In, Out> {
+    fn clone(&self) -> Self {
+        Self {
+            mem: self.mem.clone(),
+            quinn: self.quinn.clone(),
+        }
+    }
+}
+
 #[pin_project(project = SendSinkProj)]
 pub enum SendSink<Out> {
     Mem(#[pin] mem::SendSink<Out>),

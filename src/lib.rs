@@ -78,7 +78,9 @@ pub trait ChannelTypes: Debug + Sized + Send + Sync + Unpin + 'static {
 ///
 /// Heavily inspired by quinn, but uses concrete Req and Res types instead of bytes. The reason for this is that
 /// we want to be able to write a memory channel that does not serialize and deserialize.
-pub trait Channel<In: RpcMessage, Out: RpcMessage, T: ChannelTypes>: Send + Sync + 'static {
+pub trait Channel<In: RpcMessage, Out: RpcMessage, T: ChannelTypes>:
+    Send + Sync + Clone + 'static
+{
     /// Open a bidirectional stream
     fn open_bi(&mut self) -> T::OpenBiFuture<'_, In, Out>;
     /// Accept a bidirectional stream

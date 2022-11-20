@@ -16,6 +16,15 @@ pub enum Channel<In, Out> {
     Quinn(::quinn::Connection),
 }
 
+impl<In, Out> Clone for Channel<In, Out> {
+    fn clone(&self) -> Self {
+        match self {
+            Self::Mem(mem) => Self::Mem(mem.clone()),
+            Self::Quinn(quinn) => Self::Quinn(quinn.clone()),
+        }
+    }
+}
+
 #[pin_project(project = SendSinkProj)]
 pub enum SendSink<Out> {
     Mem(#[pin] mem::SendSink<Out>),
