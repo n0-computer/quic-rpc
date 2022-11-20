@@ -17,9 +17,9 @@ pub mod sugar;
 ///
 /// This does not seem like a big restriction. If you want a pure memory channel without the possibility
 /// to also use the quinn transport, you might want to use a mpsc channel directly.
-pub trait RpcMessage: Serialize + DeserializeOwned + Send + Unpin + 'static {}
+pub trait RpcMessage: Serialize + DeserializeOwned + Send + Sync + Unpin + 'static {}
 
-impl<T> RpcMessage for T where T: Serialize + DeserializeOwned + Send + Unpin + 'static {}
+impl<T> RpcMessage for T where T: Serialize + DeserializeOwned + Send + Sync + Unpin + 'static {}
 
 /// requirements for an internal error
 ///
@@ -83,7 +83,7 @@ pub trait Channel<In: RpcMessage, Out: RpcMessage, T: ChannelTypes>:
     Send + Sync + Clone + 'static
 {
     /// Open a bidirectional stream
-    fn open_bi(&mut self) -> T::OpenBiFuture<'_, In, Out>;
+    fn open_bi(&self) -> T::OpenBiFuture<'_, In, Out>;
     /// Accept a bidirectional stream
-    fn accept_bi(&mut self) -> T::AcceptBiFuture<'_, In, Out>;
+    fn accept_bi(&self) -> T::AcceptBiFuture<'_, In, Out>;
 }

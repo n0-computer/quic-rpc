@@ -12,7 +12,7 @@ use std::{
 
 pub struct Channel<In: RpcMessage, Out: RpcMessage> {
     mem: mem::Channel<In, Out>,
-    quinn: ::quinn::Connection,
+    quinn: quinn::Channel<In, Out>,
 }
 
 impl<In: RpcMessage, Out: RpcMessage> Clone for Channel<In, Out> {
@@ -137,7 +137,7 @@ impl ChannelTypes for MemAndQuinnChannelTypes {
 impl<In: RpcMessage, Out: RpcMessage> crate::Channel<In, Out, MemAndQuinnChannelTypes>
     for Channel<In, Out>
 {
-    fn open_bi(&mut self) -> OpenBiFuture<'_, In, Out> {
+    fn open_bi(&self) -> OpenBiFuture<'_, In, Out> {
         // since we got both, prefer mem
         async {
             let (send, recv) = self.mem.open_bi().await.map_err(Error::Mem)?;
@@ -146,11 +146,9 @@ impl<In: RpcMessage, Out: RpcMessage> crate::Channel<In, Out, MemAndQuinnChannel
         .boxed()
     }
 
-    fn accept_bi(&mut self) -> AcceptBiFuture<'_, In, Out> {
+    fn accept_bi(&self) -> AcceptBiFuture<'_, In, Out> {
         let mem_future = self.mem.accept_bi();
-        // disambiguate accept_bi call so we don't get the one directly from quinn::Connection
-        let quinn_future =
-            <::quinn::Connection as crate::Channel<In, Out, _>>::accept_bi(&mut self.quinn);
+        let quinn_future = self.quinn.accept_bi();
         async move {
             tokio::select! {
                 res = mem_future => res.map(|(send, recv)| (SendSink::Mem(send), RecvStream::Mem(recv))).map_err(Error::Mem),

@@ -246,7 +246,7 @@ async fn main() -> anyhow::Result<()> {
 }
 
 async fn _main_unsugared() -> anyhow::Result<()> {
-    let (mut server, mut client) = mem::connection::<u64, String>(1);
+    let (server, client) = mem::connection::<u64, String>(1);
     let to_string_service = tokio::spawn(async move {
         let (mut send, mut recv) = server.accept_bi().await?;
         while let Some(item) = recv.next().await {

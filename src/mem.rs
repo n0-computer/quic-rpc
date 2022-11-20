@@ -2,14 +2,14 @@
 //!
 //! This is currently based on [flume], but since no flume types are exposed it can be changed to another
 //! mpmc channel implementation, like [crossbeam].
-//! 
+//!
 //! [flume]: https://docs.rs/flume/
 //! [crossbeam]: https://docs.rs/crossbeam/
 use crate::{ChannelTypes, RpcMessage};
 use core::fmt;
 use futures::{Future, FutureExt, Sink, SinkExt, StreamExt};
 use pin_project::pin_project;
-use std::{fmt::Display, pin::Pin, result, task::Poll, error};
+use std::{error, fmt::Display, pin::Pin, result, task::Poll};
 
 /// Error when receiving from a channel
 ///
@@ -224,7 +224,7 @@ impl ChannelTypes for MemChannelTypes {
 impl<In: RpcMessage, Out: RpcMessage> crate::Channel<In, Out, MemChannelTypes>
     for Channel<In, Out>
 {
-    fn open_bi(&mut self) -> OpenBiFuture<'_, In, Out> {
+    fn open_bi(&self) -> OpenBiFuture<'_, In, Out> {
         let (local_send, remote_recv) = flume::bounded::<Out>(128);
         let (remote_send, local_recv) = flume::bounded::<In>(128);
         let remote_recv = RecvStream(remote_recv.into_stream());
@@ -235,7 +235,7 @@ impl<In: RpcMessage, Out: RpcMessage> crate::Channel<In, Out, MemChannelTypes>
         OpenBiFuture::new(inner, (local_send, local_recv))
     }
 
-    fn accept_bi(&mut self) -> AcceptBiFuture<'_, In, Out> {
+    fn accept_bi(&self) -> AcceptBiFuture<'_, In, Out> {
         AcceptBiFuture(self.stream.recv_async())
     }
 }

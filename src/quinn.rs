@@ -1,13 +1,28 @@
 //! QUIC channel implementation based on quinn
 use crate::{ChannelTypes, RpcMessage};
-use futures::{future::BoxFuture, FutureExt, Sink, SinkExt, Stream, StreamExt};
+use futures::{Future, FutureExt, Sink, SinkExt, Stream, StreamExt};
 use pin_project::pin_project;
 use serde::{de::DeserializeOwned, Serialize};
-use std::{io, pin::Pin, result};
+use std::{io, marker::PhantomData, pin::Pin, result};
 use tokio_serde::{formats::SymmetricalBincode, SymmetricallyFramed};
 use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
 
 type Socket<In, Out> = (SendSink<Out>, RecvStream<In>);
+
+#[derive(Debug)]
+pub struct Channel<In: RpcMessage, Out: RpcMessage>(quinn::Connection, PhantomData<(In, Out)>);
+
+impl<In: RpcMessage, Out: RpcMessage> Channel<In, Out> {
+    pub fn new(conn: quinn::Connection) -> Self {
+        Self(conn, PhantomData)
+    }
+}
+
+impl<In: RpcMessage, Out: RpcMessage> Clone for Channel<In, Out> {
+    fn clone(&self) -> Self {
+        Self(self.0.clone(), PhantomData)
+    }
+}
 
 /// A sink that wraps a quinn SendStream with length delimiting and bincode
 #[pin_project]
@@ -83,11 +98,60 @@ pub type AcceptBiError = quinn::ConnectionError;
 #[derive(Debug, Clone, Copy)]
 pub struct QuinnChannelTypes;
 
-pub type OpenBiFuture<'a, In, Out> =
-    BoxFuture<'a, result::Result<self::Socket<In, Out>, self::OpenBiError>>;
+#[pin_project]
+pub struct OpenBiFuture<'a, In, Out>(#[pin] quinn::OpenBi<'a>, PhantomData<(In, Out)>);
 
-pub type AcceptBiFuture<'a, In, Out> =
-    BoxFuture<'a, result::Result<self::Socket<In, Out>, self::AcceptBiError>>;
+impl<'a, In, Out> Future for OpenBiFuture<'a, In, Out> {
+    type Output = result::Result<self::Socket<In, Out>, self::OpenBiError>;
+
+    fn poll(
+        self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Self::Output> {
+        self.project().0.poll_unpin(cx).map(|conn| {
+            let (send, recv) = conn?;
+            // turn chunks of bytes into a stream of messages using length delimited codec
+            let send = FramedWrite::new(send, LengthDelimitedCodec::new());
+            let recv = FramedRead::new(recv, LengthDelimitedCodec::new());
+            // now switch to streams of WantRequestUpdate and WantResponse
+            let recv = SymmetricallyFramed::new(recv, SymmetricalBincode::<In>::default());
+            let send = SymmetricallyFramed::new(send, SymmetricalBincode::<Out>::default());
+            // box so we don't have to write down the insanely long type
+            let send = SendSink(send);
+            let recv = RecvStream(recv);
+            Ok((send, recv))
+        })
+    }
+}
+
+#[pin_project]
+pub struct AcceptBiFuture<'a, In, Out>(#[pin] quinn::AcceptBi<'a>, PhantomData<(In, Out)>);
+
+impl<'a, In, Out> Future for AcceptBiFuture<'a, In, Out> {
+    type Output = result::Result<self::Socket<In, Out>, self::OpenBiError>;
+
+    fn poll(
+        self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Self::Output> {
+        self.project().0.poll_unpin(cx).map(|conn| {
+            let (send, recv) = conn?;
+            // turn chunks of bytes into a stream of messages using length delimited codec
+            let send = FramedWrite::new(send, LengthDelimitedCodec::new());
+            let recv = FramedRead::new(recv, LengthDelimitedCodec::new());
+            // now switch to streams of WantRequestUpdate and WantResponse
+            let recv = SymmetricallyFramed::new(recv, SymmetricalBincode::<In>::default());
+            let send = SymmetricallyFramed::new(send, SymmetricalBincode::<Out>::default());
+            // box so we don't have to write down the insanely long type
+            let send = SendSink(send);
+            let recv = RecvStream(recv);
+            Ok((send, recv))
+        })
+    }
+}
+
+// pub type AcceptBiFuture<'a, In, Out> =
+//     BoxFuture<'a, result::Result<self::Socket<In, Out>, self::AcceptBiError>>;
 
 impl ChannelTypes for QuinnChannelTypes {
     type SendSink<M: RpcMessage> = self::SendSink<M>;
@@ -106,53 +170,17 @@ impl ChannelTypes for QuinnChannelTypes {
 
     type AcceptBiFuture<'a, In: RpcMessage, Out: RpcMessage> = self::AcceptBiFuture<'a, In, Out>;
 
-    type Channel<In: RpcMessage, Out: RpcMessage> = quinn::Connection;
+    type Channel<In: RpcMessage, Out: RpcMessage> = self::Channel<In, Out>;
 }
 
-impl<In: RpcMessage, Out: RpcMessage> crate::Channel<In, Out, QuinnChannelTypes>
-    for quinn::Connection
+impl<In: RpcMessage + Sync, Out: RpcMessage + Sync> crate::Channel<In, Out, QuinnChannelTypes>
+    for self::Channel<In, Out>
 {
-    fn open_bi(&mut self) -> OpenBiFuture<'_, In, Out> {
-        let this = self.clone();
-        async move {
-            let conn: result::Result<
-                (quinn::SendStream, quinn::RecvStream),
-                quinn::ConnectionError,
-            > = quinn::Connection::open_bi(&this).await;
-            let (send, recv) = conn?;
-            // turn chunks of bytes into a stream of messages using length delimited codec
-            let send = FramedWrite::new(send, LengthDelimitedCodec::new());
-            let recv = FramedRead::new(recv, LengthDelimitedCodec::new());
-            // now switch to streams of WantRequestUpdate and WantResponse
-            let recv = SymmetricallyFramed::new(recv, SymmetricalBincode::<In>::default());
-            let send = SymmetricallyFramed::new(send, SymmetricalBincode::<Out>::default());
-            // box so we don't have to write down the insanely long type
-            let send = SendSink(send);
-            let recv = RecvStream(recv);
-            Ok((send, recv))
-        }
-        .boxed()
+    fn open_bi(&self) -> OpenBiFuture<'_, In, Out> {
+        OpenBiFuture(self.0.open_bi(), PhantomData)
     }
 
-    fn accept_bi(&mut self) -> AcceptBiFuture<'_, In, Out> {
-        let this = self.clone();
-        async move {
-            let conn: result::Result<
-                (quinn::SendStream, quinn::RecvStream),
-                quinn::ConnectionError,
-            > = quinn::Connection::accept_bi(&this).await;
-            let (send, recv) = conn?;
-            // turn chunks of bytes into a stream of messages using length delimited codec
-            let send = FramedWrite::new(send, LengthDelimitedCodec::new());
-            let recv = FramedRead::new(recv, LengthDelimitedCodec::new());
-            // now switch to streams of WantRequestUpdate and WantResponse
-            let recv = SymmetricallyFramed::new(recv, SymmetricalBincode::<In>::default());
-            let send = SymmetricallyFramed::new(send, SymmetricalBincode::<Out>::default());
-            // box so we don't have to write down the insanely long type
-            let send = SendSink(send);
-            let recv = RecvStream(recv);
-            Ok((send, recv))
-        }
-        .boxed()
+    fn accept_bi(&self) -> AcceptBiFuture<'_, In, Out> {
+        AcceptBiFuture(self.0.accept_bi(), PhantomData)
     }
 }

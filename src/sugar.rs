@@ -10,7 +10,7 @@ use futures::{
 };
 use pin_project::pin_project;
 use std::task::Context;
-use std::{error, fmt, marker::PhantomData, pin::Pin, result, fmt::Debug};
+use std::{error, fmt, fmt::Debug, marker::PhantomData, pin::Pin, result};
 
 type BoxSink<'a, T, E> = Pin<Box<dyn Sink<T, Error = E> + Send>>;
 

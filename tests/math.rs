@@ -194,11 +194,14 @@ impl ComputeService {
                 Ok::<_, RpcServerError<C>>(())
             }
         });
-        process_stream.buffer_unordered(parallelism).for_each(|x| async move {
-            if let Err(e) = x {
-                eprintln!("error: {:?}", e);
-            }
-        }).await;
+        process_stream
+            .buffer_unordered(parallelism)
+            .for_each(|x| async move {
+                if let Err(e) = x {
+                    eprintln!("error: {:?}", e);
+                }
+            })
+            .await;
         Ok(())
     }
 }

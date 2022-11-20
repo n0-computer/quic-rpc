@@ -12,7 +12,7 @@ use std::{
 
 pub enum Channel<In: RpcMessage, Out: RpcMessage> {
     Mem(mem::Channel<In, Out>),
-    Quinn(::quinn::Connection),
+    Quinn(quinn::Channel<In, Out>),
 }
 
 impl<In: RpcMessage, Out: RpcMessage> Clone for Channel<In, Out> {
@@ -137,7 +137,7 @@ impl ChannelTypes for MemOrQuinnChannelTypes {
 impl<In: RpcMessage, Out: RpcMessage> crate::Channel<In, Out, MemOrQuinnChannelTypes>
     for Channel<In, Out>
 {
-    fn open_bi(&mut self) -> OpenBiFuture<'_, In, Out> {
+    fn open_bi(&self) -> OpenBiFuture<'_, In, Out> {
         match self {
             Channel::Mem(mem) => async {
                 let (send, recv) = mem.open_bi().await.map_err(Error::Mem)?;
@@ -152,7 +152,7 @@ impl<In: RpcMessage, Out: RpcMessage> crate::Channel<In, Out, MemOrQuinnChannelT
         }
     }
 
-    fn accept_bi(&mut self) -> AcceptBiFuture<'_, In, Out> {
+    fn accept_bi(&self) -> AcceptBiFuture<'_, In, Out> {
         match self {
             Channel::Mem(mem) => async {
                 let (send, recv) = mem.accept_bi().await.map_err(Error::Mem)?;
