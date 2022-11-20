@@ -74,7 +74,7 @@ pub type OpenBiError = quinn::ConnectionError;
 
 pub type AcceptBiError = quinn::ConnectionError;
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct QuinnChannelTypes;
 
 pub type OpenBiFuture<'a, In, Out> =

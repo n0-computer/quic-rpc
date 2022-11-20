@@ -111,7 +111,7 @@ pub type AcceptBiFuture<'a, In, Out> =
 
 type Socket<In, Out> = (self::SendSink<Out>, self::RecvStream<In>);
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct MemOrQuinnChannelTypes;
 
 impl ChannelTypes for MemOrQuinnChannelTypes {

@@ -17,6 +17,12 @@ impl std::error::Error for NoError {}
 
 pub struct RecvStream<Res: RpcMessage>(flume::r#async::RecvStream<'static, Res>);
 
+impl<In: RpcMessage> Clone for RecvStream<In> {
+    fn clone(&self) -> Self {
+        Self(self.0.clone())
+    }
+}
+
 impl<Res: RpcMessage> futures::Stream for RecvStream<Res> {
     type Item = Result<Res, NoError>;
 
@@ -183,7 +189,7 @@ impl Display for OpenBiError {
 
 impl std::error::Error for OpenBiError {}
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct MemChannelTypes;
 
 impl ChannelTypes for MemChannelTypes {

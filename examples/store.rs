@@ -99,6 +99,7 @@ enum StoreResponse {
     ConvertFileResponse(ConvertFileResponse),
 }
 
+#[derive(Debug, Clone)]
 struct StoreService;
 impl Service for StoreService {
     type Req = StoreRequest;

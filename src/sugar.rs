@@ -166,9 +166,19 @@ impl<C: ChannelTypes> fmt::Display for BidiItemError<C> {
 
 impl<C: ChannelTypes> error::Error for BidiItemError<C> {}
 
+#[derive(Debug)]
 pub struct ClientChannel<S: Service, C: ChannelTypes> {
     channel: C::Channel<S::Res, S::Req>,
     _s: PhantomData<S>,
+}
+
+impl<S: Service, C: ChannelTypes> Clone for ClientChannel<S, C> {
+    fn clone(&self) -> Self {
+        Self {
+            channel: self.channel.clone(),
+            _s: self._s,
+        }
+    }
 }
 
 impl<S: Service, C: ChannelTypes> ClientChannel<S, C> {
@@ -332,9 +342,19 @@ impl<C: ChannelTypes> fmt::Display for RpcServerError<C> {
 
 impl<C: ChannelTypes> error::Error for RpcServerError<C> {}
 
+#[derive(Debug)]
 pub struct ServerChannel<S: Service, C: ChannelTypes> {
     channel: C::Channel<S::Req, S::Res>,
     _s: std::marker::PhantomData<(S, C)>,
+}
+
+impl<S: Service, C: ChannelTypes> Clone for ServerChannel<S, C> {
+    fn clone(&self) -> Self {
+        Self {
+            channel: self.channel.clone(),
+            _s: std::marker::PhantomData,
+        }
+    }
 }
 
 impl<S: Service, C: ChannelTypes> ServerChannel<S, C> {

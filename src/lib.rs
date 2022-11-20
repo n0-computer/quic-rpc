@@ -28,13 +28,13 @@ pub trait RpcError: Debug + Display + Send + Sync + Unpin + 'static {}
 impl<T> RpcError for T where T: Debug + Display + Send + Sync + Unpin + 'static {}
 
 /// A service
-pub trait Service {
+pub trait Service: Send + Sync + Clone + 'static {
     type Req: RpcMessage;
     type Res: RpcMessage;
 }
 
 /// A module that defines a set of channel types
-pub trait ChannelTypes: Debug + Sized + Send + Sync + Unpin + 'static {
+pub trait ChannelTypes: Debug + Sized + Send + Sync + Unpin + Clone + 'static {
     /// The sink used for sending either requests or responses on this channel
     type SendSink<M: RpcMessage>: Sink<M, Error = Self::SendError> + Send + Unpin + 'static;
     /// The stream used for receiving either requests or responses on this channel

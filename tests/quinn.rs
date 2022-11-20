@@ -111,7 +111,7 @@ async fn quinn_channel_bench() -> anyhow::Result<()> {
     let server_handle = run_server(server);
     let client = client.connect(server_addr, "localhost")?.await?;
     let client = ClientChannel::<ComputeService, C>::new(client);
-    bench(client).await?;
+    bench(client, 50000).await?;
     println!("waiting for server");
     check_termination_anyhow::<C>(server_handle).await?;
     Ok(())

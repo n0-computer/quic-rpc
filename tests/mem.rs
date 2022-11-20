@@ -13,7 +13,7 @@ async fn mem_channel_bench() -> anyhow::Result<()> {
     let server = ServerChannel::<ComputeService, MemChannelTypes>::new(server);
     let server_handle = tokio::task::spawn(ComputeService::server(server));
     let client = ClientChannel::<ComputeService, C>::new(client);
-    bench(client).await?;
+    bench(client, 1000000).await?;
     // dropping the client will cause the server to terminate
     match server_handle.await? {
         Err(RpcServerError::AcceptBiError(_)) => {}

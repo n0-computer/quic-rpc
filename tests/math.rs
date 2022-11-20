@@ -204,11 +204,11 @@ pub async fn smoke_test<C: ChannelTypes>(
 
 pub async fn bench<C: ChannelTypes>(
     mut client: ClientChannel<ComputeService, C>,
+    n: u64,
 ) -> anyhow::Result<()>
 where
     C::SendError: std::error::Error,
 {
-    let n = 1000000;
     // individual RPCs
     {
         let mut sum = 0;
@@ -226,29 +226,28 @@ where
             (n as f64) / t0.elapsed().as_secs_f64()
         );
     }
-    // parallel RPCs (todo)
-    // {
-    //     let t0 = std::time::Instant::now();
-    //     let reqs = futures::stream::iter((0..n).map(Sqr));
-    //     let mut sum = 0;
-    //     let mut i = 0;
-    //     reqs.map(|x| {
-    //         async move {
-    //             // sum += client.rpc(x).await?.0;
-    //             // if i % 10000 == 0 {
-    //             //     print!(".");
-    //             //     io::stdout().flush()?;
-    //             // }
-    //             // i += 1;
-    //             anyhow::Ok(())
-    //         }
-    //     }).buffer_unordered(1000).try_collect::<Vec<_>>().await?;
-    //     println!(
-    //         "\nRPC par {} {} rps",
-    //         sum,
-    //         (n as f64) / t0.elapsed().as_secs_f64()
-    //     );
-    // }
+    // parallel RPCs
+    {
+        let t0 = std::time::Instant::now();
+        let reqs = futures::stream::iter((0..n).map(Sqr));
+        let resp = reqs
+            .map(|x| {
+                let mut client = client.clone();
+                async move {
+                    let res = client.rpc(x).await?.0;
+                    anyhow::Ok(res)
+                }
+            })
+            .buffer_unordered(32)
+            .try_collect::<Vec<_>>()
+            .await?;
+        let sum = resp.into_iter().sum::<u128>();
+        println!(
+            "\nRPC par {} {} rps",
+            sum,
+            (n as f64) / t0.elapsed().as_secs_f64()
+        );
+    }
     // sequential streaming
     {
         let t0 = std::time::Instant::now();
@@ -270,7 +269,7 @@ where
             i += 1;
         }
         println!(
-            "\nbidi {} {} rps",
+            "\nbidi seq {} {} rps",
             sum,
             (n as f64) / t0.elapsed().as_secs_f64()
         );
