@@ -537,14 +537,13 @@ impl<S: Service, C: ChannelTypes, M: Msg<S>> UpdateStream<S, C, M> {
     }
 }
 
-#[pin_project]
-pub struct UnwrapToPending<T>(#[pin] oneshot::Receiver<T>);
+pub struct UnwrapToPending<T>(oneshot::Receiver<T>);
 
 impl<T> Future for UnwrapToPending<T> {
     type Output = T;
 
-    fn poll(self: Pin<&mut Self>, cx: &mut task::Context<'_>) -> Poll<Self::Output> {
-        match self.project().0.poll_unpin(cx) {
+    fn poll(mut self: Pin<&mut Self>, cx: &mut task::Context<'_>) -> Poll<Self::Output> {
+        match self.0.poll_unpin(cx) {
             Poll::Ready(Ok(x)) => Poll::Ready(x),
             Poll::Ready(Err(_)) => Poll::Pending,
             Poll::Pending => Poll::Pending,

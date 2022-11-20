@@ -1,6 +1,6 @@
 use crate::{ChannelTypes, RpcMessage};
 use core::fmt;
-use futures::{channel::mpsc, Future, FutureExt, StreamExt};
+use futures::{Future, FutureExt, Sink, SinkExt, StreamExt};
 use pin_project::pin_project;
 use std::{fmt::Display, pin::Pin, result, task::Poll};
 
@@ -15,18 +15,16 @@ impl fmt::Display for NoError {
 
 impl std::error::Error for NoError {}
 
-#[pin_project]
-pub struct RecvStream<Res>(#[pin] mpsc::Receiver<Res>);
+pub struct RecvStream<Res: RpcMessage>(flume::r#async::RecvStream<'static, Res>);
 
-impl<Res> futures::Stream for RecvStream<Res> {
+impl<Res: RpcMessage> futures::Stream for RecvStream<Res> {
     type Item = Result<Res, NoError>;
 
     fn poll_next(
-        self: Pin<&mut Self>,
+        mut self: Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> Poll<Option<Self::Item>> {
-        let mut this = self.project();
-        match this.0.poll_next_unpin(cx) {
+        match self.0.poll_next_unpin(cx) {
             Poll::Ready(Some(item)) => Poll::Ready(Some(Ok(item))),
             Poll::Ready(None) => Poll::Ready(None),
             Poll::Pending => Poll::Pending,
@@ -36,12 +34,12 @@ impl<Res> futures::Stream for RecvStream<Res> {
 
 type Socket<In, Out> = (self::SendSink<Out>, self::RecvStream<In>);
 
-pub struct Channel<In, Out> {
+pub struct Channel<In: RpcMessage, Out: RpcMessage> {
     stream: flume::Receiver<Socket<In, Out>>,
     sink: flume::Sender<Socket<Out, In>>,
 }
 
-impl<In, Out> Clone for Channel<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> Clone for Channel<In, Out> {
     fn clone(&self) -> Self {
         Self {
             stream: self.stream.clone(),
@@ -64,13 +62,13 @@ impl fmt::Display for AcceptBiError {
 impl std::error::Error for AcceptBiError {}
 
 #[pin_project]
-pub struct OpenBiFuture<'a, In, Out> {
+pub struct OpenBiFuture<'a, In: RpcMessage, Out: RpcMessage> {
     #[pin]
     inner: flume::r#async::SendFut<'a, Socket<Out, In>>,
     res: Option<Socket<In, Out>>,
 }
 
-impl<'a, In, Out> OpenBiFuture<'a, In, Out> {
+impl<'a, In: RpcMessage, Out: RpcMessage> OpenBiFuture<'a, In, Out> {
     fn new(inner: flume::r#async::SendFut<'a, Socket<Out, In>>, res: Socket<In, Out>) -> Self {
         Self {
             inner,
@@ -79,7 +77,7 @@ impl<'a, In, Out> OpenBiFuture<'a, In, Out> {
     }
 }
 
-impl<'a, In, Out> Future for OpenBiFuture<'a, In, Out> {
+impl<'a, In: RpcMessage, Out: RpcMessage> Future for OpenBiFuture<'a, In, Out> {
     type Output = result::Result<Socket<In, Out>, self::OpenBiError>;
 
     fn poll(
@@ -99,17 +97,18 @@ impl<'a, In, Out> Future for OpenBiFuture<'a, In, Out> {
     }
 }
 
-#[pin_project]
-pub struct AcceptBiFuture<'a, In, Out>(#[pin] flume::r#async::RecvFut<'a, Socket<In, Out>>);
+pub struct AcceptBiFuture<'a, In: RpcMessage, Out: RpcMessage>(
+    flume::r#async::RecvFut<'a, Socket<In, Out>>,
+);
 
-impl<'a, In, Out> Future for AcceptBiFuture<'a, In, Out> {
+impl<'a, In: RpcMessage, Out: RpcMessage> Future for AcceptBiFuture<'a, In, Out> {
     type Output = result::Result<Socket<In, Out>, AcceptBiError>;
 
     fn poll(
-        self: Pin<&mut Self>,
+        mut self: Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Self::Output> {
-        match self.project().0.poll_unpin(cx) {
+        match self.0.poll_unpin(cx) {
             Poll::Ready(Ok(socket)) => Poll::Ready(Ok(socket)),
             Poll::Ready(Err(_)) => Poll::Ready(Err(AcceptBiError::SenderDropped)),
             Poll::Pending => Poll::Pending,
@@ -117,9 +116,57 @@ impl<'a, In, Out> Future for AcceptBiFuture<'a, In, Out> {
     }
 }
 
-pub type SendSink<Out> = mpsc::Sender<Out>;
+pub struct SendSink<Out: RpcMessage>(flume::r#async::SendSink<'static, Out>);
 
-pub type SendError = mpsc::SendError;
+impl<Out: RpcMessage> Sink<Out> for SendSink<Out> {
+    type Error = SendError;
+
+    fn poll_ready(
+        mut self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> Poll<Result<(), Self::Error>> {
+        self.0
+            .poll_ready_unpin(cx)
+            .map_err(|_| SendError::Disconnected)
+    }
+
+    fn start_send(mut self: Pin<&mut Self>, item: Out) -> Result<(), Self::Error> {
+        self.0
+            .start_send_unpin(item)
+            .map_err(|_| SendError::Disconnected)
+    }
+
+    fn poll_flush(
+        mut self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> Poll<Result<(), Self::Error>> {
+        self.0
+            .poll_flush_unpin(cx)
+            .map_err(|_| SendError::Disconnected)
+    }
+
+    fn poll_close(
+        mut self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> Poll<Result<(), Self::Error>> {
+        self.0
+            .poll_close_unpin(cx)
+            .map_err(|_| SendError::Disconnected)
+    }
+}
+
+#[derive(Debug)]
+pub enum SendError {
+    Disconnected,
+}
+
+impl Display for SendError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Debug::fmt(self, f)
+    }
+}
+
+impl std::error::Error for SendError {}
 
 pub type RecvError = NoError;
 
@@ -163,10 +210,12 @@ impl<In: RpcMessage, Out: RpcMessage> crate::Channel<In, Out, MemChannelTypes>
     for Channel<In, Out>
 {
     fn open_bi(&mut self) -> OpenBiFuture<'_, In, Out> {
-        let (local_send, remote_recv) = mpsc::channel::<Out>(128);
-        let (remote_send, local_recv) = mpsc::channel::<In>(128);
-        let remote_recv = RecvStream(remote_recv);
-        let local_recv = RecvStream(local_recv);
+        let (local_send, remote_recv) = flume::bounded::<Out>(128);
+        let (remote_send, local_recv) = flume::bounded::<In>(128);
+        let remote_recv = RecvStream(remote_recv.into_stream());
+        let local_recv = RecvStream(local_recv.into_stream());
+        let remote_send = SendSink(remote_send.into_sink());
+        let local_send = SendSink(local_send.into_sink());
         let inner = self.sink.send_async((remote_send, remote_recv));
         OpenBiFuture::new(inner, (local_send, local_recv))
     }
@@ -176,7 +225,9 @@ impl<In: RpcMessage, Out: RpcMessage> crate::Channel<In, Out, MemChannelTypes>
     }
 }
 
-pub fn connection<Req, Res>(buffer: usize) -> (Channel<Req, Res>, Channel<Res, Req>) {
+pub fn connection<Req: RpcMessage, Res: RpcMessage>(
+    buffer: usize,
+) -> (Channel<Req, Res>, Channel<Res, Req>) {
     let (send1, recv1) = flume::bounded::<Socket<Req, Res>>(buffer);
     let (send2, recv2) = flume::bounded::<Socket<Res, Req>>(buffer);
     (

@@ -1,7 +1,6 @@
 use crate::{mem, quinn, ChannelTypes, RpcMessage};
 use futures::{future::BoxFuture, FutureExt, Sink, Stream};
 use pin_project::pin_project;
-use serde::{de::DeserializeOwned, Serialize};
 use std::{
     fmt,
     fmt::Debug,
@@ -11,12 +10,12 @@ use std::{
     task::{Context, Poll},
 };
 
-pub struct Channel<In, Out> {
+pub struct Channel<In: RpcMessage, Out: RpcMessage> {
     mem: mem::Channel<In, Out>,
     quinn: ::quinn::Connection,
 }
 
-impl<In, Out> Clone for Channel<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> Clone for Channel<In, Out> {
     fn clone(&self) -> Self {
         Self {
             mem: self.mem.clone(),
@@ -26,18 +25,18 @@ impl<In, Out> Clone for Channel<In, Out> {
 }
 
 #[pin_project(project = SendSinkProj)]
-pub enum SendSink<Out> {
+pub enum SendSink<Out: RpcMessage> {
     Mem(#[pin] mem::SendSink<Out>),
     Quinn(#[pin] quinn::SendSink<Out>),
 }
 
 #[pin_project(project = ResStreamProj)]
-pub enum RecvStream<In> {
+pub enum RecvStream<In: RpcMessage> {
     Mem(#[pin] mem::RecvStream<In>),
     Quinn(#[pin] quinn::RecvStream<In>),
 }
 
-impl<Out: Serialize> Sink<Out> for SendSink<Out> {
+impl<Out: RpcMessage> Sink<Out> for SendSink<Out> {
     type Error = self::SendError;
 
     fn poll_ready(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
@@ -69,7 +68,7 @@ impl<Out: Serialize> Sink<Out> for SendSink<Out> {
     }
 }
 
-impl<In: DeserializeOwned> Stream for RecvStream<In> {
+impl<In: RpcMessage> Stream for RecvStream<In> {
     type Item = Result<In, io::Error>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
