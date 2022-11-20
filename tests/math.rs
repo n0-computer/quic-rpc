@@ -163,6 +163,44 @@ impl ComputeService {
             }?;
         }
     }
+
+    pub async fn server_par<C: ChannelTypes>(
+        server: ServerChannel<ComputeService, C>,
+        parallelism: usize,
+    ) -> result::Result<(), RpcServerError<C>> {
+        let s = server.clone();
+        let mut s2 = s.clone();
+        let service = ComputeService;
+        let request_stream = stream! {
+            loop {
+                yield s2.accept_one().await;
+            }
+        };
+        let process_stream = request_stream.map(move |r| {
+            let service = service.clone();
+            let s = s.clone();
+            async move {
+                let (req, chan) = r?;
+                use ComputeRequest::*;
+                #[rustfmt::skip]
+                match req {
+                    Sqr(msg) => s.rpc(msg, chan, service, ComputeService::sqr).await,
+                    Sum(msg) => s.client_streaming(msg, chan, service, ComputeService::sum).await,
+                    Fibonacci(msg) => s.server_streaming(msg, chan, service, ComputeService::fibonacci).await,
+                    Multiply(msg) => s.bidi_streaming(msg, chan, service, ComputeService::multiply).await,
+                    SumUpdate(_) => Err(RpcServerError::UnexpectedStartMessage)?,
+                    MultiplyUpdate(_) => Err(RpcServerError::UnexpectedStartMessage)?,
+                }?;
+                Ok::<_, RpcServerError<C>>(())
+            }
+        });
+        process_stream.buffer_unordered(parallelism).for_each(|x| async move {
+            if let Err(e) = x {
+                eprintln!("error: {:?}", e);
+            }
+        }).await;
+        Ok(())
+    }
 }
 
 pub async fn smoke_test<C: ChannelTypes>(

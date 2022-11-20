@@ -1,19 +1,29 @@
+//! Memory channel implementation
+//!
+//! This is currently based on [flume], but since no flume types are exposed it can be changed to another
+//! mpmc channel implementation, like [crossbeam].
+//! 
+//! [flume]: https://docs.rs/flume/
+//! [crossbeam]: https://docs.rs/crossbeam/
 use crate::{ChannelTypes, RpcMessage};
 use core::fmt;
 use futures::{Future, FutureExt, Sink, SinkExt, StreamExt};
 use pin_project::pin_project;
-use std::{fmt::Display, pin::Pin, result, task::Poll};
+use std::{fmt::Display, pin::Pin, result, task::Poll, error};
 
+/// Error when receiving from a channel
+///
+/// This type has zero inhabitants, so it is always safe to unwrap a result with this error type.
 #[derive(Debug)]
-pub enum NoError {}
+pub enum RecvError {}
 
-impl fmt::Display for NoError {
+impl fmt::Display for RecvError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Debug::fmt(self, f)
     }
 }
 
-impl std::error::Error for NoError {}
+impl error::Error for RecvError {}
 
 pub struct RecvStream<Res: RpcMessage>(flume::r#async::RecvStream<'static, Res>);
 
@@ -24,7 +34,7 @@ impl<In: RpcMessage> Clone for RecvStream<In> {
 }
 
 impl<Res: RpcMessage> futures::Stream for RecvStream<Res> {
-    type Item = Result<Res, NoError>;
+    type Item = Result<Res, RecvError>;
 
     fn poll_next(
         mut self: Pin<&mut Self>,
@@ -65,7 +75,7 @@ impl fmt::Display for AcceptBiError {
     }
 }
 
-impl std::error::Error for AcceptBiError {}
+impl error::Error for AcceptBiError {}
 
 #[pin_project]
 pub struct OpenBiFuture<'a, In: RpcMessage, Out: RpcMessage> {
@@ -174,8 +184,6 @@ impl Display for SendError {
 
 impl std::error::Error for SendError {}
 
-pub type RecvError = NoError;
-
 #[derive(Debug)]
 pub enum OpenBiError {
     Disconnected,
@@ -189,6 +197,7 @@ impl Display for OpenBiError {
 
 impl std::error::Error for OpenBiError {}
 
+/// Types for mem channels.
 #[derive(Debug, Clone, Copy)]
 pub struct MemChannelTypes;
 
@@ -205,7 +214,7 @@ impl ChannelTypes for MemChannelTypes {
 
     type OpenBiFuture<'a, In: RpcMessage, Out: RpcMessage> = self::OpenBiFuture<'a, In, Out>;
 
-    type AcceptBiError = AcceptBiError;
+    type AcceptBiError = self::AcceptBiError;
 
     type AcceptBiFuture<'a, In: RpcMessage, Out: RpcMessage> = self::AcceptBiFuture<'a, In, Out>;
 

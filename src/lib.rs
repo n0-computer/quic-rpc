@@ -15,7 +15,8 @@ pub mod sugar;
 /// Even when just using the mem transport, we require messages to be Serializable and Deserializable.
 /// Likewise, even when using the quinn transport, we require messages to be Send.
 ///
-/// This does not seem like a big restriction
+/// This does not seem like a big restriction. If you want a pure memory channel without the possibility
+/// to also use the quinn transport, you might want to use a mpsc channel directly.
 pub trait RpcMessage: Serialize + DeserializeOwned + Send + Unpin + 'static {}
 
 impl<T> RpcMessage for T where T: Serialize + DeserializeOwned + Send + Unpin + 'static {}

@@ -1,3 +1,6 @@
+//! The higher level RPC functionality
+//!
+//! The entry points are the `ServerChannel` and `ClientChannel` structs.
 use crate::Channel;
 use crate::ChannelTypes;
 use crate::Service;
@@ -7,11 +10,11 @@ use futures::{
 };
 use pin_project::pin_project;
 use std::task::Context;
-use std::{error, fmt, marker::PhantomData, pin::Pin, result};
+use std::{error, fmt, marker::PhantomData, pin::Pin, result, fmt::Debug};
 
-pub type BoxSink<'a, T, E> = Pin<Box<dyn Sink<T, Error = E> + Send>>;
+type BoxSink<'a, T, E> = Pin<Box<dyn Sink<T, Error = E> + Send>>;
 
-/// A message for a service
+/// Defines interaction pattern, update type and return type for a RPC message
 ///
 /// For each server and each message, only one interaction pattern can be defined.
 pub trait Msg<S: Service>: Into<S::Req> + TryFrom<S::Req> + Send + 'static {
@@ -20,6 +23,7 @@ pub trait Msg<S: Service>: Into<S::Req> + TryFrom<S::Req> + Send + 'static {
     type Pattern: InteractionPattern;
 }
 
+/// Shortcut to define just the return type for the very common RPC interaction pattern
 pub trait RpcMsg<S: Service>: Into<S::Req> + TryFrom<S::Req> + Send + 'static {
     type Response: Into<S::Res> + TryFrom<S::Res> + Send + 'static;
 }
@@ -32,21 +36,36 @@ impl<S: Service, T: RpcMsg<S>> Msg<S> for T {
     type Pattern = Rpc;
 }
 
-pub trait InteractionPattern: 'static {}
+/// Trait defining interaction pattern.
+///
+/// Currently there are 4 patterns:
+/// - `RPC`: 1 request, 1 response
+/// - `ClientStreaming`: 1 request, stream of updates, 1 response
+/// - `ServerStreaming`: 1 request, stream of responses
+/// - `BidiStreaming`: 1 request, stream of updates, stream of responses
+pub trait InteractionPattern: Debug + Clone + Send + Sync + 'static {}
 
+/// RPC interaction pattern
+#[derive(Debug, Clone, Copy)]
 pub struct Rpc;
 impl InteractionPattern for Rpc {}
 
+/// Client streaming interaction pattern
+#[derive(Debug, Clone, Copy)]
 pub struct ClientStreaming;
 impl InteractionPattern for ClientStreaming {}
 
+/// Server streaming interaction pattern
+#[derive(Debug, Clone, Copy)]
 pub struct ServerStreaming;
 impl InteractionPattern for ServerStreaming {}
 
+/// Bidirectional streaming interaction pattern
+#[derive(Debug, Clone, Copy)]
 pub struct BidiStreaming;
 impl InteractionPattern for BidiStreaming {}
 
-/// Error for rpc interactions
+/// Client error. All client DSL methods return a `Result` with this error type.
 #[derive(Debug)]
 pub enum RpcClientError<C: ChannelTypes> {
     /// Unable to open a stream to the server
@@ -69,6 +88,7 @@ impl<C: ChannelTypes> fmt::Display for RpcClientError<C> {
 
 impl<C: ChannelTypes> error::Error for RpcClientError<C> {}
 
+/// Server error when accepting a bidi request
 #[derive(Debug)]
 pub enum BidiError<C: ChannelTypes> {
     /// Unable to open a stream to the server
@@ -85,6 +105,24 @@ impl<C: ChannelTypes> fmt::Display for BidiError<C> {
 
 impl<C: ChannelTypes> error::Error for BidiError<C> {}
 
+/// Server error when receiving an item for a bidi request
+#[derive(Debug)]
+pub enum BidiItemError<C: ChannelTypes> {
+    /// Unable to receive the response from the server
+    RecvError(C::RecvError),
+    /// Unexpected response from the server
+    DowncastError,
+}
+
+impl<C: ChannelTypes> fmt::Display for BidiItemError<C> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Debug::fmt(self, f)
+    }
+}
+
+impl<C: ChannelTypes> error::Error for BidiItemError<C> {}
+
+/// Server error when accepting a client streaming request
 #[derive(Debug)]
 pub enum ClientStreamingError<C: ChannelTypes> {
     /// Unable to open a stream to the server
@@ -101,6 +139,7 @@ impl<C: ChannelTypes> fmt::Display for ClientStreamingError<C> {
 
 impl<C: ChannelTypes> error::Error for ClientStreamingError<C> {}
 
+/// Server error when receiving an item for a client streaming request
 #[derive(Debug)]
 pub enum ClientStreamingItemError<C: ChannelTypes> {
     EarlyClose,
@@ -118,6 +157,7 @@ impl<C: ChannelTypes> fmt::Display for ClientStreamingItemError<C> {
 
 impl<C: ChannelTypes> error::Error for ClientStreamingItemError<C> {}
 
+/// Server error when accepting a server streaming request
 #[derive(Debug)]
 pub enum StreamingResponseError<C: ChannelTypes> {
     /// Unable to open a stream to the server
@@ -134,6 +174,7 @@ impl<C: ChannelTypes> fmt::Display for StreamingResponseError<C> {
 
 impl<C: ChannelTypes> error::Error for StreamingResponseError<C> {}
 
+/// Client error when handling responses from a server streaming request
 #[derive(Debug)]
 pub enum StreamingResponseItemError<C: ChannelTypes> {
     /// Unable to receive the response from the server
@@ -150,22 +191,9 @@ impl<C: ChannelTypes> fmt::Display for StreamingResponseItemError<C> {
 
 impl<C: ChannelTypes> error::Error for StreamingResponseItemError<C> {}
 
-#[derive(Debug)]
-pub enum BidiItemError<C: ChannelTypes> {
-    /// Unable to receive the response from the server
-    RecvError(C::RecvError),
-    /// Unexpected response from the server
-    DowncastError,
-}
-
-impl<C: ChannelTypes> fmt::Display for BidiItemError<C> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fmt::Debug::fmt(self, f)
-    }
-}
-
-impl<C: ChannelTypes> error::Error for BidiItemError<C> {}
-
+/// A client channel for a specific service
+///
+/// This is a wrapper around a [crate::Channel] that serves as the entry point for the client DSL.
 #[derive(Debug)]
 pub struct ClientChannel<S: Service, C: ChannelTypes> {
     channel: C::Channel<S::Res, S::Req>,
@@ -232,7 +260,7 @@ impl<S: Service, C: ChannelTypes> ClientChannel<S, C> {
             Err(e) => Err(StreamingResponseItemError::RecvError(e)),
         });
         // keep send alive so the request on the server side does not get cancelled
-        let recv = KeepaliveStream(recv, send).boxed();
+        let recv = DeferDrop(recv, send).boxed();
         Ok(recv)
     }
 
@@ -305,7 +333,7 @@ impl<S: Service, C: ChannelTypes> ClientChannel<S, C> {
     }
 }
 
-/// All the things that can go wrong on the server side
+/// Server error. All server DSL methods return a `Result` with this error type.
 pub enum RpcServerError<C: ChannelTypes> {
     /// Unable to open a new channel
     AcceptBiError(C::AcceptBiError),
@@ -342,6 +370,9 @@ impl<C: ChannelTypes> fmt::Display for RpcServerError<C> {
 
 impl<C: ChannelTypes> error::Error for RpcServerError<C> {}
 
+/// A server channel for a specific service
+///
+/// This is a wrapper around a [crate::Channel] that serves as the entry point for the server DSL.
 #[derive(Debug)]
 pub struct ServerChannel<S: Service, C: ChannelTypes> {
     channel: C::Channel<S::Req, S::Res>,
@@ -532,9 +563,9 @@ impl<S: Service, C: ChannelTypes> ServerChannel<S, C> {
 
 /// Wrap a stream with an additional item that is kept alive until the stream is dropped
 #[pin_project]
-pub struct KeepaliveStream<S: Stream, X>(#[pin] S, X);
+struct DeferDrop<S: Stream, X>(#[pin] S, X);
 
-impl<S: Stream, X> Stream for KeepaliveStream<S, X> {
+impl<S: Stream, X> Stream for DeferDrop<S, X> {
     type Item = S::Item;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
@@ -542,6 +573,10 @@ impl<S: Stream, X> Stream for KeepaliveStream<S, X> {
     }
 }
 
+/// A stream of updates
+///
+/// If there is any error with receiving or with decoding the updates, the stream will stall and the error will
+/// cause a termination of the RPC call.
 #[pin_project]
 pub struct UpdateStream<S: Service, C: ChannelTypes, M: Msg<S>>(
     #[pin] C::RecvStream<S::Req>,
@@ -550,24 +585,10 @@ pub struct UpdateStream<S: Service, C: ChannelTypes, M: Msg<S>>(
 );
 
 impl<S: Service, C: ChannelTypes, M: Msg<S>> UpdateStream<S, C, M> {
-    fn new(recv: C::RecvStream<S::Req>) -> (Self, impl Future<Output = RpcServerError<C>>) {
+    fn new(recv: C::RecvStream<S::Req>) -> (Self, UnwrapToPending<RpcServerError<C>>) {
         let (error_send, error_recv) = oneshot::channel();
         let error_recv = UnwrapToPending(error_recv);
         (Self(recv, Some(error_send), PhantomData), error_recv)
-    }
-}
-
-pub struct UnwrapToPending<T>(oneshot::Receiver<T>);
-
-impl<T> Future for UnwrapToPending<T> {
-    type Output = T;
-
-    fn poll(mut self: Pin<&mut Self>, cx: &mut task::Context<'_>) -> Poll<Self::Output> {
-        match self.0.poll_unpin(cx) {
-            Poll::Ready(Ok(x)) => Poll::Ready(x),
-            Poll::Ready(Err(_)) => Poll::Pending,
-            Poll::Pending => Poll::Pending,
-        }
     }
 }
 
@@ -597,6 +618,21 @@ impl<S: Service, C: ChannelTypes, M: Msg<S>> Stream for UpdateStream<S, C, M> {
                 }
             },
             Poll::Ready(None) => Poll::Ready(None),
+            Poll::Pending => Poll::Pending,
+        }
+    }
+}
+
+/// Take an oneshot receiver and just return Pending the underlying future returns `Err(oneshot::Canceled)`
+struct UnwrapToPending<T>(oneshot::Receiver<T>);
+
+impl<T> Future for UnwrapToPending<T> {
+    type Output = T;
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut task::Context<'_>) -> Poll<Self::Output> {
+        match self.0.poll_unpin(cx) {
+            Poll::Ready(Ok(x)) => Poll::Ready(x),
+            Poll::Ready(Err(_)) => Poll::Pending,
             Poll::Pending => Poll::Pending,
         }
     }

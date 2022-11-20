@@ -1,3 +1,4 @@
+//! QUIC channel implementation based on quinn
 use crate::{ChannelTypes, RpcMessage};
 use futures::{future::BoxFuture, FutureExt, Sink, SinkExt, Stream, StreamExt};
 use pin_project::pin_project;
@@ -70,10 +71,15 @@ impl<In: DeserializeOwned> Stream for RecvStream<In> {
     }
 }
 
+/// Error for open_bi. Currently just a quinn::ConnectionError
 pub type OpenBiError = quinn::ConnectionError;
 
+/// Error for accept_bi. Currently just a quinn::ConnectionError
 pub type AcceptBiError = quinn::ConnectionError;
 
+/// Types for quinn channels.
+///
+/// This exposes the types from quinn directly without attempting to wrap them.
 #[derive(Debug, Clone, Copy)]
 pub struct QuinnChannelTypes;
 
