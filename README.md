@@ -2,12 +2,15 @@
 
 A streaming rpc system based on quic
 
-[![Latest Version]][crates.io] [![Docs Badge]][docs.rs] ![Crates.io](https://img.shields.io/crates/l/quic-rpc) [![build status](https://github.com/n0-computer/quic-rpc/actions/workflows/rust.yml/badge.svg)](https://github.com/n0-computer/quic-rpc/actions/workflows/rust.yml)
+[![Latest Version]][crates.io] [![Docs Badge]][docs.rs] ![license badge] [![status badge]][status link]
 
 [Latest Version]: https://img.shields.io/crates/v/quic-rpc.svg
 [crates.io]: https://crates.io/crates/quic-rpc
 [Docs Badge]: https://img.shields.io/badge/docs-docs.rs-green
 [docs.rs]: https://docs.rs/quic-rpc
+[license badge]: https://img.shields.io/crates/l/quic-rpc
+[status badge]: https://github.com/n0-computer/quic-rpc/actions/workflows/rust.yml/badge.svg
+[status link]: https://github.com/n0-computer/quic-rpc/actions/workflows/rust.yml
 
 ## Goals
 
