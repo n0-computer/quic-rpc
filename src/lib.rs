@@ -64,6 +64,7 @@ use std::{
 };
 pub mod client;
 pub mod combined;
+pub mod macros;
 pub mod mem;
 pub mod message;
 pub mod quinn;
