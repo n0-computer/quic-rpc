@@ -106,12 +106,12 @@ impl Store {
 async fn main() -> anyhow::Result<()> {
     let (client, server) = mem::connection::<StoreResponse, StoreRequest>(1);
     let mut client = RpcClient::<StoreService, MemChannelTypes>::new(client);
-    let context = Store;
+    let target = Store;
     let server_handle = spawn_server_loop(
         StoreService,
         MemChannelTypes,
         server,
-        context,
+        target,
         store_rpc::dispatch_request,
     )
     .await;

@@ -313,27 +313,27 @@ async fn race2<T, A: Future<Output = T>, B: Future<Output = T>>(f1: A, f2: B) ->
 }
 
 /// Spawn a server loop, invoking a handler callback for each request.
-pub async fn spawn_server_loop<C, S, F, Fut, Ctx>(
+pub async fn spawn_server_loop<C, S, F, Fut, T>(
     _service_type: S,
     _channel_type: C,
     server: C::Channel<S::Req, S::Res>,
-    context: Ctx,
+    target: T,
     mut handler: F,
 ) ->
     JoinHandle<Result<(), RpcServerError<C>>>
 where
     S: Service,
     C: ChannelTypes,
-    F: FnMut(RpcServer<S, C>, Ctx) -> Fut + Send + 'static,
+    F: FnMut(RpcServer<S, C>, T) -> Fut + Send + 'static,
     Fut: Future<Output = Result<RpcServer<S,C>, RpcServerError<C>>> + Send + 'static,
-    Ctx: Clone + Send + 'static,
+    T: Clone + Send + 'static,
 {
     let mut server = RpcServer::<S, C>::new(server);
     tokio::task::spawn({
         async move {
             loop {
-                let context = context.clone();
-                server = handler(server, context).await?;
+                let target = target.clone();
+                server = handler(server, target).await?;
             }
         }
     })
