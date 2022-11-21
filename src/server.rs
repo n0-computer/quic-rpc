@@ -1,4 +1,4 @@
-//! [RpcServer] and related types
+//! [RpcServer] and support types
 //!
 //! This defines the RPC server DSL
 use crate::message::BidiStreaming;

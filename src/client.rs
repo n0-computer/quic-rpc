@@ -1,4 +1,4 @@
-//! [RpcClient] and related types
+//! [RpcClient] and support types
 //!
 //! This defines the RPC client DSL
 use std::{

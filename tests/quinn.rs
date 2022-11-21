@@ -1,4 +1,7 @@
-use std::{net::SocketAddr, sync::Arc};
+use std::{
+    net::{Ipv4Addr, SocketAddr, SocketAddrV4},
+    sync::Arc,
+};
 
 use anyhow::Context;
 use quic_rpc::{quinn::QuinnChannelTypes, RpcClient, RpcServer};
@@ -78,7 +81,7 @@ pub struct Endpoints {
 }
 
 pub fn make_endpoints() -> anyhow::Result<Endpoints> {
-    let server_addr: SocketAddr = "127.0.0.1:12345".parse()?;
+    let server_addr: SocketAddr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 12345));
     let (server, server_certs) = make_server_endpoint(server_addr)?;
     let client = make_client_endpoint("0.0.0.0:0".parse()?, &[&server_certs])?;
     Ok(Endpoints {
@@ -117,6 +120,7 @@ async fn quinn_channel_bench() -> anyhow::Result<()> {
 }
 
 #[tokio::test]
+#[ignore]
 async fn quinn_channel_smoke() -> anyhow::Result<()> {
     type C = QuinnChannelTypes;
     let Endpoints {

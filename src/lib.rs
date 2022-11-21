@@ -90,7 +90,7 @@ pub trait RpcError: Debug + Display + Send + Sync + Unpin + 'static {}
 impl<T> RpcError for T where T: Debug + Display + Send + Sync + Unpin + 'static {}
 
 /// A service
-pub trait Service: Send + Sync + Clone + 'static {
+pub trait Service: Send + Sync + Debug + Clone + 'static {
     /// Type of request messages
     type Req: RpcMessage;
     /// Type of response messages
