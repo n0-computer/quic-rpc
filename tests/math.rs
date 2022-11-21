@@ -14,6 +14,7 @@ use std::{
     io::{self, Write},
     result,
 };
+use thousands::Separable;
 
 /// compute the square of a number
 #[derive(Debug, Serialize, Deserialize)]
@@ -261,11 +262,9 @@ where
                 io::stdout().flush()?;
             }
         }
-        println!(
-            "\nRPC seq {} {} rps",
-            sum,
-            (n as f64) / t0.elapsed().as_secs_f64()
-        );
+        let rps = ((n as f64) / t0.elapsed().as_secs_f64()).round();
+        assert_eq!(sum, sum_of_squares(n));
+        println!("\nRPC seq {} rps", rps.separate_with_underscores(),);
     }
     // parallel RPCs
     {
@@ -283,11 +282,9 @@ where
             .try_collect::<Vec<_>>()
             .await?;
         let sum = resp.into_iter().sum::<u128>();
-        println!(
-            "\nRPC par {} {} rps",
-            sum,
-            (n as f64) / t0.elapsed().as_secs_f64()
-        );
+        let rps = ((n as f64) / t0.elapsed().as_secs_f64()).round();
+        assert_eq!(sum, sum_of_squares(n));
+        println!("\nRPC par {} rps", rps.separate_with_underscores(),);
     }
     // sequential streaming
     {
@@ -309,13 +306,15 @@ where
             }
             i += 1;
         }
-        println!(
-            "\nbidi seq {} {} rps",
-            sum,
-            (n as f64) / t0.elapsed().as_secs_f64()
-        );
+        assert_eq!(sum, (0..n as u128).map(|x| x * 2).sum());
+        let rps = ((n as f64) / t0.elapsed().as_secs_f64()).round();
+        println!("\nbidi seq {} rps", rps.separate_with_underscores(),);
 
         handle.await??;
     }
     Ok(())
+}
+
+fn sum_of_squares(n: u64) -> u128 {
+    (0..n).map(|x| (x * x) as u128).sum()
 }

@@ -4,11 +4,11 @@ use std::{
     fmt::{Debug, Display},
     result,
 };
+pub mod combined;
 pub mod mem;
-pub mod mem_and_quinn;
-pub mod mem_or_quinn;
 pub mod quinn;
 pub mod sugar;
+pub use sugar::{ClientChannel, ServerChannel};
 
 /// requirements for a RPC message
 ///

@@ -5,14 +5,12 @@ use crate::Channel;
 use crate::ChannelTypes;
 use crate::Service;
 use futures::{
-    channel::oneshot, future, future::BoxFuture, stream::BoxStream, task, task::Poll, Future,
-    FutureExt, Sink, SinkExt, Stream, StreamExt, TryFutureExt,
+    channel::oneshot, future::BoxFuture, stream::BoxStream, task, task::Poll, Future, FutureExt,
+    Sink, SinkExt, Stream, StreamExt, TryFutureExt,
 };
 use pin_project::pin_project;
 use std::task::Context;
 use std::{error, fmt, fmt::Debug, marker::PhantomData, pin::Pin, result};
-
-type BoxSink<'a, T, E> = Pin<Box<dyn Sink<T, Error = E> + Send>>;
 
 /// Defines interaction pattern, update type and return type for a RPC message
 ///
@@ -209,6 +207,34 @@ impl<S: Service, C: ChannelTypes> Clone for ClientChannel<S, C> {
     }
 }
 
+#[pin_project]
+#[derive(Debug)]
+pub struct UpdateSink<S: Service, C: ChannelTypes, M: Msg<S>>(
+    #[pin] C::SendSink<S::Req>,
+    PhantomData<M>,
+);
+
+impl<S: Service, C: ChannelTypes, M: Msg<S>> Sink<M::Update> for UpdateSink<S, C, M> {
+    type Error = C::SendError;
+
+    fn poll_ready(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.project().0.poll_ready_unpin(cx)
+    }
+
+    fn start_send(self: Pin<&mut Self>, item: M::Update) -> Result<(), Self::Error> {
+        let req: S::Req = item.into();
+        self.project().0.start_send_unpin(req)
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.project().0.poll_flush_unpin(cx)
+    }
+
+    fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.project().0.poll_close_unpin(cx)
+    }
+}
+
 impl<S: Service, C: ChannelTypes> ClientChannel<S, C> {
     pub fn new(channel: C::Channel<S::Res, S::Req>) -> Self {
         Self {
@@ -270,7 +296,7 @@ impl<S: Service, C: ChannelTypes> ClientChannel<S, C> {
         msg: M,
     ) -> result::Result<
         (
-            BoxSink<'static, M::Update, C::SendError>,
+            UpdateSink<S, C, M>,
             BoxFuture<'static, result::Result<M::Response, ClientStreamingItemError<C>>>,
         ),
         ClientStreamingError<C>,
@@ -285,8 +311,7 @@ impl<S: Service, C: ChannelTypes> ClientChannel<S, C> {
             .map_err(ClientStreamingError::Open)
             .await?;
         send.send(msg).map_err(ClientStreamingError::Send).await?;
-        let send = send.with(|x: M::Update| future::ok::<S::Req, C::SendError>(x.into()));
-        let send = Box::pin(send);
+        let send = UpdateSink::<S, C, M>(send, PhantomData);
         let recv = async move {
             let item = recv
                 .next()
@@ -310,7 +335,7 @@ impl<S: Service, C: ChannelTypes> ClientChannel<S, C> {
         msg: M,
     ) -> result::Result<
         (
-            BoxSink<'static, M::Update, C::SendError>,
+            UpdateSink<S, C, M>,
             BoxStream<'static, result::Result<M::Response, BidiItemError<C>>>,
         ),
         BidiError<C>,
@@ -321,8 +346,7 @@ impl<S: Service, C: ChannelTypes> ClientChannel<S, C> {
         let msg = msg.into();
         let (mut send, recv) = self.channel.open_bi().await.map_err(BidiError::Open)?;
         send.send(msg).await.map_err(BidiError::Send)?;
-        let send = send.with(|x: M::Update| future::ok::<S::Req, C::SendError>(x.into()));
-        let send = Box::pin(send);
+        let send = UpdateSink(send, PhantomData);
         let recv = recv
             .map(|x| match x {
                 Ok(x) => M::Response::try_from(x).map_err(|_| BidiItemError::DowncastError),
