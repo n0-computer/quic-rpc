@@ -2,6 +2,14 @@
 
 A streaming rpc system based on quic
 
+[![Latest Version]][crates.io] [![Docs Badge]][docs.rs] ![Crates.io](https://img.shields.io/crates/l/quic-rpc)
+
+[Latest Version]: https://img.shields.io/crates/v/quic-rpc.svg
+[crates.io]: https://crates.io/crates/quic-rpc
+[Docs Badge]: https://img.shields.io/badge/docs-docs.rs-green
+[docs.rs]: https://docs.rs/quic-rpc
+
+
 ## Goals
 
 ### Interaction patterns
@@ -17,7 +25,7 @@ It is still a RPC system in the sense that interactions get initiated by the cli
 
 ### Transports
 
-- memory transport with very low overhead. In particular, no ser/deser, using mpsc channels from [futures]
+- memory transport with very low overhead. In particular, no ser/deser, currently using [flume]
 - quic transport via the [quinn] crate
 - transparent combination of the above
 
@@ -37,5 +45,5 @@ It is still a RPC system in the sense that interactions get initiated by the cli
 [computation service](https://github.com/n0-computer/quic-rpc/blob/main/tests/math.rs)
 
 [quinn]: https://docs.rs/quinn/
-[futures]: https://docs.rs/futures/
+[flume]: https://docs.rs/flume/
 [grpc]: https://grpc.io/
