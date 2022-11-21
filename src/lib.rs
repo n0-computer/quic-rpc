@@ -1,3 +1,6 @@
+//!
+#![deny(missing_docs)]
+#![deny(rustdoc::broken_intra_doc_links)]
 use futures::{Future, Sink, Stream};
 use serde::{de::DeserializeOwned, Serialize};
 use std::{
@@ -30,11 +33,16 @@ impl<T> RpcError for T where T: Debug + Display + Send + Sync + Unpin + 'static 
 
 /// A service
 pub trait Service: Send + Sync + Clone + 'static {
+    /// Type of request messages
     type Req: RpcMessage;
+    /// Type of response messages
     type Res: RpcMessage;
 }
 
-/// A module that defines a set of channel types
+/// Defines a set of types for a kind of channel
+///
+/// Every distinct kind of channel has its own ChannelType. See e.g.
+/// [crate::mem::MemChannelTypes] and [crate::quinn::QuinnChannelTypes].
 pub trait ChannelTypes: Debug + Sized + Send + Sync + Unpin + Clone + 'static {
     /// The sink used for sending either requests or responses on this channel
     type SendSink<M: RpcMessage>: Sink<M, Error = Self::SendError> + Send + Unpin + 'static;
@@ -70,14 +78,15 @@ pub trait ChannelTypes: Debug + Sized + Send + Sync + Unpin + Clone + 'static {
     where
         Self: 'a;
 
+    /// Channel type
     type Channel<In: RpcMessage, Out: RpcMessage>: crate::Channel<In, Out, Self>;
 }
 
-/// An abstract channel to a service
+/// An abstract channel with typed input and output
 ///
 /// This assumes cheap streams, so every interaction uses a new stream.
 ///
-/// Heavily inspired by quinn, but uses concrete Req and Res types instead of bytes. The reason for this is that
+/// Heavily inspired by quinn, but uses concrete `In` and `Out` types instead of bytes. The reason for this is that
 /// we want to be able to write a memory channel that does not serialize and deserialize.
 pub trait Channel<In: RpcMessage, Out: RpcMessage, T: ChannelTypes>:
     Send + Sync + Clone + 'static

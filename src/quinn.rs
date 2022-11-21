@@ -1,5 +1,5 @@
 //! QUIC channel implementation based on quinn
-use crate::{ChannelTypes, RpcMessage};
+use crate::RpcMessage;
 use futures::{Future, FutureExt, Sink, SinkExt, Stream, StreamExt};
 use pin_project::pin_project;
 use serde::{de::DeserializeOwned, Serialize};
@@ -9,10 +9,12 @@ use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
 
 type Socket<In, Out> = (SendSink<Out>, RecvStream<In>);
 
+/// A channel using a quinn connection
 #[derive(Debug)]
 pub struct Channel<In: RpcMessage, Out: RpcMessage>(quinn::Connection, PhantomData<(In, Out)>);
 
 impl<In: RpcMessage, Out: RpcMessage> Channel<In, Out> {
+    /// Create a new channel
     pub fn new(conn: quinn::Connection) -> Self {
         Self(conn, PhantomData)
     }
@@ -98,6 +100,7 @@ pub type AcceptBiError = quinn::ConnectionError;
 #[derive(Debug, Clone, Copy)]
 pub struct QuinnChannelTypes;
 
+/// Future returned by open_bi
 #[pin_project]
 pub struct OpenBiFuture<'a, In, Out>(#[pin] quinn::OpenBi<'a>, PhantomData<(In, Out)>);
 
@@ -124,6 +127,7 @@ impl<'a, In, Out> Future for OpenBiFuture<'a, In, Out> {
     }
 }
 
+/// Future returned by accept_bi
 #[pin_project]
 pub struct AcceptBiFuture<'a, In, Out>(#[pin] quinn::AcceptBi<'a>, PhantomData<(In, Out)>);
 
@@ -153,7 +157,7 @@ impl<'a, In, Out> Future for AcceptBiFuture<'a, In, Out> {
 // pub type AcceptBiFuture<'a, In, Out> =
 //     BoxFuture<'a, result::Result<self::Socket<In, Out>, self::AcceptBiError>>;
 
-impl ChannelTypes for QuinnChannelTypes {
+impl crate::ChannelTypes for QuinnChannelTypes {
     type SendSink<M: RpcMessage> = self::SendSink<M>;
 
     type RecvStream<M: RpcMessage> = self::RecvStream<M>;

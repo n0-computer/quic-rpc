@@ -5,7 +5,7 @@
 //!
 //! [flume]: https://docs.rs/flume/
 //! [crossbeam]: https://docs.rs/crossbeam/
-use crate::{ChannelTypes, RpcMessage};
+use crate::RpcMessage;
 use core::fmt;
 use futures::{Future, FutureExt, Sink, SinkExt, StreamExt};
 use pin_project::pin_project;
@@ -25,6 +25,7 @@ impl fmt::Display for RecvError {
 
 impl error::Error for RecvError {}
 
+/// RecvStream for mem channels
 pub struct RecvStream<Res: RpcMessage>(flume::r#async::RecvStream<'static, Res>);
 
 impl<In: RpcMessage> Clone for RecvStream<In> {
@@ -50,6 +51,7 @@ impl<Res: RpcMessage> futures::Stream for RecvStream<Res> {
 
 type Socket<In, Out> = (self::SendSink<Out>, self::RecvStream<In>);
 
+/// A mem channel
 pub struct Channel<In: RpcMessage, Out: RpcMessage> {
     stream: flume::Receiver<Socket<In, Out>>,
     sink: flume::Sender<Socket<Out, In>>,
@@ -64,9 +66,13 @@ impl<In: RpcMessage, Out: RpcMessage> Clone for Channel<In, Out> {
     }
 }
 
+/// AcceptBiError for mem channels.
+///
+/// There is not much that can go wrong with mem channels.
 #[derive(Debug)]
 pub enum AcceptBiError {
-    SenderDropped,
+    /// The remote side of the channel was dropped
+    RemoteDropped,
 }
 
 impl fmt::Display for AcceptBiError {
@@ -77,6 +83,7 @@ impl fmt::Display for AcceptBiError {
 
 impl error::Error for AcceptBiError {}
 
+/// Future returned by accept_bi
 #[pin_project]
 pub struct OpenBiFuture<'a, In: RpcMessage, Out: RpcMessage> {
     #[pin]
@@ -107,12 +114,13 @@ impl<'a, In: RpcMessage, Out: RpcMessage> Future for OpenBiFuture<'a, In, Out> {
                 .take()
                 .map(|x| Poll::Ready(Ok(x)))
                 .unwrap_or(Poll::Pending),
-            Poll::Ready(Err(_)) => Poll::Ready(Err(self::OpenBiError::Disconnected)),
+            Poll::Ready(Err(_)) => Poll::Ready(Err(self::OpenBiError::RemoteDropped)),
             Poll::Pending => Poll::Pending,
         }
     }
 }
 
+/// Future returned by accept_bi
 pub struct AcceptBiFuture<'a, In: RpcMessage, Out: RpcMessage>(
     flume::r#async::RecvFut<'a, Socket<In, Out>>,
 );
@@ -126,12 +134,13 @@ impl<'a, In: RpcMessage, Out: RpcMessage> Future for AcceptBiFuture<'a, In, Out>
     ) -> std::task::Poll<Self::Output> {
         match self.0.poll_unpin(cx) {
             Poll::Ready(Ok(socket)) => Poll::Ready(Ok(socket)),
-            Poll::Ready(Err(_)) => Poll::Ready(Err(AcceptBiError::SenderDropped)),
+            Poll::Ready(Err(_)) => Poll::Ready(Err(AcceptBiError::RemoteDropped)),
             Poll::Pending => Poll::Pending,
         }
     }
 }
 
+/// SendSink for mem channels
 pub struct SendSink<Out: RpcMessage>(flume::r#async::SendSink<'static, Out>);
 
 impl<Out: RpcMessage> Sink<Out> for SendSink<Out> {
@@ -143,13 +152,13 @@ impl<Out: RpcMessage> Sink<Out> for SendSink<Out> {
     ) -> Poll<Result<(), Self::Error>> {
         self.0
             .poll_ready_unpin(cx)
-            .map_err(|_| SendError::Disconnected)
+            .map_err(|_| SendError::ReceiverDropped)
     }
 
     fn start_send(mut self: Pin<&mut Self>, item: Out) -> Result<(), Self::Error> {
         self.0
             .start_send_unpin(item)
-            .map_err(|_| SendError::Disconnected)
+            .map_err(|_| SendError::ReceiverDropped)
     }
 
     fn poll_flush(
@@ -158,7 +167,7 @@ impl<Out: RpcMessage> Sink<Out> for SendSink<Out> {
     ) -> Poll<Result<(), Self::Error>> {
         self.0
             .poll_flush_unpin(cx)
-            .map_err(|_| SendError::Disconnected)
+            .map_err(|_| SendError::ReceiverDropped)
     }
 
     fn poll_close(
@@ -167,13 +176,17 @@ impl<Out: RpcMessage> Sink<Out> for SendSink<Out> {
     ) -> Poll<Result<(), Self::Error>> {
         self.0
             .poll_close_unpin(cx)
-            .map_err(|_| SendError::Disconnected)
+            .map_err(|_| SendError::ReceiverDropped)
     }
 }
 
+/// SendError for mem channels.
+///
+/// There is not much that can go wrong with mem channels.
 #[derive(Debug)]
 pub enum SendError {
-    Disconnected,
+    /// Receiver was dropped
+    ReceiverDropped,
 }
 
 impl Display for SendError {
@@ -184,9 +197,11 @@ impl Display for SendError {
 
 impl std::error::Error for SendError {}
 
+/// OpenBiError for mem channels.
 #[derive(Debug)]
 pub enum OpenBiError {
-    Disconnected,
+    /// The remote side of the channel was dropped
+    RemoteDropped,
 }
 
 impl Display for OpenBiError {
@@ -201,7 +216,7 @@ impl std::error::Error for OpenBiError {}
 #[derive(Debug, Clone, Copy)]
 pub struct MemChannelTypes;
 
-impl ChannelTypes for MemChannelTypes {
+impl crate::ChannelTypes for MemChannelTypes {
     type SendSink<M: RpcMessage> = self::SendSink<M>;
 
     type RecvStream<M: RpcMessage> = self::RecvStream<M>;
@@ -240,6 +255,9 @@ impl<In: RpcMessage, Out: RpcMessage> crate::Channel<In, Out, MemChannelTypes>
     }
 }
 
+/// Create a channel pair (server, client) for mem channels
+///
+/// `buffer` the size of the buffer for each channel. Keep this at a low value to get backpressure
 pub fn connection<Req: RpcMessage, Res: RpcMessage>(
     buffer: usize,
 ) -> (Channel<Req, Res>, Channel<Res, Req>) {

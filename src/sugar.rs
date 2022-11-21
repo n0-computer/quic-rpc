@@ -16,13 +16,24 @@ use std::{error, fmt, fmt::Debug, marker::PhantomData, pin::Pin, result};
 ///
 /// For each server and each message, only one interaction pattern can be defined.
 pub trait Msg<S: Service>: Into<S::Req> + TryFrom<S::Req> + Send + 'static {
+    /// The type for request updates
+    ///
+    /// For a request that does not support updates, this can be safely set to any type, including
+    /// the message type itself. Any update for such a request will result in an error.
     type Update: Into<S::Req> + TryFrom<S::Req> + Send + 'static;
+
+    /// The type for the response
     type Response: Into<S::Res> + TryFrom<S::Res> + Send + 'static;
+
+    /// The interaction pattern for this message with this service.
     type Pattern: InteractionPattern;
 }
 
 /// Shortcut to define just the return type for the very common RPC interaction pattern
 pub trait RpcMsg<S: Service>: Into<S::Req> + TryFrom<S::Req> + Send + 'static {
+    /// The type for the response
+    ///
+    /// This is the only type that is required for the RPC interaction pattern.
     type Response: Into<S::Res> + TryFrom<S::Res> + Send + 'static;
 }
 
@@ -140,6 +151,7 @@ impl<C: ChannelTypes> error::Error for ClientStreamingError<C> {}
 /// Server error when receiving an item for a client streaming request
 #[derive(Debug)]
 pub enum ClientStreamingItemError<C: ChannelTypes> {
+    /// Connection was closed before receiving the first message
     EarlyClose,
     /// Unable to receive the response from the server
     RecvError(C::RecvError),
@@ -207,6 +219,8 @@ impl<S: Service, C: ChannelTypes> Clone for ClientChannel<S, C> {
     }
 }
 
+/// Sink that can be used to send updates to the server for the two interaction patterns
+/// that support it, `ClientStreaming` and `BidiStreaming`.
 #[pin_project]
 #[derive(Debug)]
 pub struct UpdateSink<S: Service, C: ChannelTypes, M: Msg<S>>(
@@ -236,6 +250,7 @@ impl<S: Service, C: ChannelTypes, M: Msg<S>> Sink<M::Update> for UpdateSink<S, C
 }
 
 impl<S: Service, C: ChannelTypes> ClientChannel<S, C> {
+    /// Create a new client channel from a channel and a service type
     pub fn new(channel: C::Channel<S::Res, S::Req>) -> Self {
         Self {
             channel,
@@ -413,6 +428,7 @@ impl<S: Service, C: ChannelTypes> Clone for ServerChannel<S, C> {
 }
 
 impl<S: Service, C: ChannelTypes> ServerChannel<S, C> {
+    /// Create a new server channel from a channel and a service type
     pub fn new(channel: C::Channel<S::Req, S::Res>) -> Self {
         Self {
             channel,
