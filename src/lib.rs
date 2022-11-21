@@ -1,5 +1,9 @@
 //! A streaming rpc system based on quic
 //!
+//! # Motivation
+//!
+//! See the [README](https://github.com/n0-computer/quic-rpc/blob/main/README.md)
+//!
 //! # Example
 //! ```
 //! # async fn example() -> anyhow::Result<()> {
