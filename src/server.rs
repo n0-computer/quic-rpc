@@ -1,14 +1,10 @@
 //! [RpcServer] and support types
 //!
 //! This defines the RPC server DSL
-use crate::message::BidiStreaming;
-use crate::message::ClientStreaming;
-use crate::message::Msg;
-use crate::message::Rpc;
-use crate::message::ServerStreaming;
-use crate::Channel;
-use crate::ChannelTypes;
-use crate::Service;
+use crate::{
+    message::{BidiStreaming, ClientStreaming, Msg, Rpc, ServerStreaming},
+    Channel, ChannelTypes, Service,
+};
 use futures::{channel::oneshot, task, task::Poll, Future, FutureExt, SinkExt, Stream, StreamExt};
 use pin_project::pin_project;
 use std::{error, fmt, fmt::Debug, marker::PhantomData, pin::Pin, result};

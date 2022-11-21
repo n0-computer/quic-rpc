@@ -1,22 +1,20 @@
 //! [RpcClient] and support types
 //!
 //! This defines the RPC client DSL
+use crate::{
+    message::{BidiStreaming, ClientStreaming, Msg, Rpc, ServerStreaming},
+    Channel, ChannelTypes, Service,
+};
+use futures::{
+    future::BoxFuture, stream::BoxStream, FutureExt, Sink, SinkExt, Stream, StreamExt, TryFutureExt,
+};
+use pin_project::pin_project;
 use std::{
     error, fmt,
     marker::PhantomData,
     pin::Pin,
     result,
     task::{Context, Poll},
-};
-
-use futures::{
-    future::BoxFuture, stream::BoxStream, FutureExt, Sink, SinkExt, Stream, StreamExt, TryFutureExt,
-};
-use pin_project::pin_project;
-
-use crate::{
-    message::{BidiStreaming, ClientStreaming, Msg, Rpc, ServerStreaming},
-    Channel, ChannelTypes, Service,
 };
 
 /// A client for a specific service
