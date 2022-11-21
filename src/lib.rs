@@ -1,4 +1,55 @@
 //! A streaming rpc system based on quic
+//!
+//! # Example
+//! ```
+//! # async fn example() -> anyhow::Result<()> {
+//! use quic_rpc::{message::RpcMsg, Service, RpcClient, mem::MemChannelTypes};
+//! use serde::{Serialize, Deserialize};
+//! use derive_more::{From, TryInto};
+//!
+//! // Define your messages
+//! #[derive(Debug, Serialize, Deserialize)]
+//! struct Ping;
+//!
+//! #[derive(Debug, Serialize, Deserialize)]
+//! struct Pong;
+//!
+//! // Define your RPC service and its request/response types
+//!
+//! #[derive(Debug, Serialize, Deserialize, From, TryInto)]
+//! enum PingRequest {
+//!     Ping(Ping),
+//! }
+//!
+//! #[derive(Debug, Serialize, Deserialize, From, TryInto)]
+//! enum PingResponse {
+//!     Pong(Pong),
+//! }
+//!
+//! #[derive(Debug, Clone)]
+//! struct PingService;
+//!
+//! impl Service for PingService {
+//!   type Req = PingRequest;
+//!   type Res = PingResponse;
+//! }
+//!
+//! // Define interaction patterns for each request type
+//! impl RpcMsg<PingService> for Ping {
+//!   type Response = Pong;
+//! }
+//!
+//! // create a transport channel
+//! let (server, client) = quic_rpc::mem::connection::<PingRequest, PingResponse>(1);
+//!
+//! // create the rpc client given the channel and the service type
+//! let client = RpcClient::<PingService, MemChannelTypes>::new(client);
+//!
+//! // call the service
+//! let res = client.rpc(Ping).await?;
+//! # Ok(())
+//! # }
+//! ```
 #![deny(missing_docs)]
 #![deny(rustdoc::broken_intra_doc_links)]
 use futures::{Future, Sink, Stream};
@@ -12,9 +63,9 @@ pub mod combined;
 pub mod mem;
 pub mod message;
 pub mod quinn;
-pub use client::ClientChannel;
+pub use client::RpcClient;
 pub mod server;
-pub use server::ServerChannel;
+pub use server::RpcServer;
 
 /// requirements for a RPC message
 ///

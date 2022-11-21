@@ -7,7 +7,7 @@ use math::*;
 use quic_rpc::{
     message::{BidiStreaming, ClientStreaming, Msg, RpcMsg, ServerStreaming},
     server::RpcServerError,
-    ChannelTypes, ServerChannel, Service,
+    ChannelTypes, RpcServer, Service,
 };
 
 #[derive(Debug, Clone)]
@@ -92,7 +92,7 @@ impl ComputeService {
     }
 
     pub async fn server<C: ChannelTypes>(
-        server: ServerChannel<ComputeService, C>,
+        server: RpcServer<ComputeService, C>,
     ) -> result::Result<(), RpcServerError<C>> {
         let mut s = server;
         let service = ComputeService;

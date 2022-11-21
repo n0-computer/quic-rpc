@@ -1,4 +1,4 @@
-//! [ClientChannel] and related types
+//! [RpcClient] and related types
 //!
 //! This defines the RPC client DSL
 use std::{
@@ -19,16 +19,17 @@ use crate::{
     Channel, ChannelTypes, Service,
 };
 
-/// A client channel for a specific service
+/// A client for a specific service
 ///
 /// This is a wrapper around a [crate::Channel] that serves as the entry point for the client DSL.
+/// `S` is the service type, `C` is the channel type.
 #[derive(Debug)]
-pub struct ClientChannel<S: Service, C: ChannelTypes> {
+pub struct RpcClient<S: Service, C: ChannelTypes> {
     channel: C::Channel<S::Res, S::Req>,
     _s: PhantomData<S>,
 }
 
-impl<S: Service, C: ChannelTypes> Clone for ClientChannel<S, C> {
+impl<S: Service, C: ChannelTypes> Clone for RpcClient<S, C> {
     fn clone(&self) -> Self {
         Self {
             channel: self.channel.clone(),
@@ -38,7 +39,7 @@ impl<S: Service, C: ChannelTypes> Clone for ClientChannel<S, C> {
 }
 
 /// Sink that can be used to send updates to the server for the two interaction patterns
-/// that support it, `ClientStreaming` and `BidiStreaming`.
+/// that support it, [ClientStreaming] and [BidiStreaming].
 #[pin_project]
 #[derive(Debug)]
 pub struct UpdateSink<S: Service, C: ChannelTypes, M: Msg<S>>(
@@ -67,7 +68,7 @@ impl<S: Service, C: ChannelTypes, M: Msg<S>> Sink<M::Update> for UpdateSink<S, C
     }
 }
 
-impl<S: Service, C: ChannelTypes> ClientChannel<S, C> {
+impl<S: Service, C: ChannelTypes> RpcClient<S, C> {
     /// Create a new client channel from a channel and a service type
     pub fn new(channel: C::Channel<S::Res, S::Req>) -> Self {
         Self {
@@ -77,7 +78,7 @@ impl<S: Service, C: ChannelTypes> ClientChannel<S, C> {
     }
 
     /// RPC call to the server, single request, single response
-    pub async fn rpc<M>(&mut self, msg: M) -> result::Result<M::Response, RpcClientError<C>>
+    pub async fn rpc<M>(&self, msg: M) -> result::Result<M::Response, RpcClientError<C>>
     where
         M: Msg<S, Pattern = Rpc> + Into<S::Req>,
     {

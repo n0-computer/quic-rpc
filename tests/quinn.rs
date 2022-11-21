@@ -1,7 +1,7 @@
 use std::{net::SocketAddr, sync::Arc};
 
 use anyhow::Context;
-use quic_rpc::{quinn::QuinnChannelTypes, ClientChannel, ServerChannel};
+use quic_rpc::{quinn::QuinnChannelTypes, RpcClient, RpcServer};
 use quinn::{ClientConfig, Endpoint, ServerConfig};
 use tokio::task::JoinHandle;
 
@@ -92,7 +92,7 @@ fn run_server(server: quinn::Endpoint) -> JoinHandle<anyhow::Result<()>> {
     tokio::task::spawn(async move {
         let connection =
             quic_rpc::quinn::Channel::new(server.accept().await.context("accept failed")?.await?);
-        let server = ServerChannel::<ComputeService, QuinnChannelTypes>::new(connection);
+        let server = RpcServer::<ComputeService, QuinnChannelTypes>::new(connection);
         ComputeService::server(server).await?;
         anyhow::Ok(())
     })
@@ -109,7 +109,7 @@ async fn quinn_channel_bench() -> anyhow::Result<()> {
     let server_handle = run_server(server);
     let client = client.connect(server_addr, "localhost")?.await?;
     let client = quic_rpc::quinn::Channel::new(client);
-    let client = ClientChannel::<ComputeService, C>::new(client);
+    let client = RpcClient::<ComputeService, C>::new(client);
     bench(client, 50000).await?;
     println!("waiting for server");
     check_termination_anyhow::<C>(server_handle).await?;

@@ -1,4 +1,4 @@
-//! [ServerChannel] and related types
+//! [RpcServer] and related types
 //!
 //! This defines the RPC server DSL
 use crate::message::BidiStreaming;
@@ -16,13 +16,14 @@ use std::{error, fmt, fmt::Debug, marker::PhantomData, pin::Pin, result};
 /// A server channel for a specific service
 ///
 /// This is a wrapper around a [crate::Channel] that serves as the entry point for the server DSL.
+/// `S` is the service type, `C` is the channel type.
 #[derive(Debug)]
-pub struct ServerChannel<S: Service, C: ChannelTypes> {
+pub struct RpcServer<S: Service, C: ChannelTypes> {
     channel: C::Channel<S::Req, S::Res>,
     _s: std::marker::PhantomData<(S, C)>,
 }
 
-impl<S: Service, C: ChannelTypes> Clone for ServerChannel<S, C> {
+impl<S: Service, C: ChannelTypes> Clone for RpcServer<S, C> {
     fn clone(&self) -> Self {
         Self {
             channel: self.channel.clone(),
@@ -31,7 +32,7 @@ impl<S: Service, C: ChannelTypes> Clone for ServerChannel<S, C> {
     }
 }
 
-impl<S: Service, C: ChannelTypes> ServerChannel<S, C> {
+impl<S: Service, C: ChannelTypes> RpcServer<S, C> {
     /// Create a new server channel from a channel and a service type
     pub fn new(channel: C::Channel<S::Req, S::Res>) -> Self {
         Self {
@@ -41,7 +42,7 @@ impl<S: Service, C: ChannelTypes> ServerChannel<S, C> {
     }
 }
 
-impl<S: Service, C: ChannelTypes> ServerChannel<S, C> {
+impl<S: Service, C: ChannelTypes> RpcServer<S, C> {
     /// Accept one channel from the client, pull out the first request, and return both the first
     /// message and the channel for further processing.
     pub async fn accept_one(

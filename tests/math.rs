@@ -5,7 +5,7 @@ use futures::{SinkExt, Stream, StreamExt, TryStreamExt};
 use quic_rpc::{
     message::{BidiStreaming, ClientStreaming, Msg, RpcMsg, ServerStreaming},
     server::RpcServerError,
-    ChannelTypes, ClientChannel, ServerChannel, Service,
+    ChannelTypes, RpcClient, RpcServer, Service,
 };
 use serde::{Deserialize, Serialize};
 use std::{
@@ -143,7 +143,7 @@ impl ComputeService {
     }
 
     pub async fn server<C: ChannelTypes>(
-        server: ServerChannel<ComputeService, C>,
+        server: RpcServer<ComputeService, C>,
     ) -> result::Result<(), RpcServerError<C>> {
         let mut s = server;
         let service = ComputeService;
@@ -164,7 +164,7 @@ impl ComputeService {
     }
 
     pub async fn server_par<C: ChannelTypes>(
-        server: ServerChannel<ComputeService, C>,
+        server: RpcServer<ComputeService, C>,
         parallelism: usize,
     ) -> result::Result<(), RpcServerError<C>> {
         let s = server.clone();
@@ -208,7 +208,7 @@ impl ComputeService {
 pub async fn smoke_test<C: ChannelTypes>(
     client: C::Channel<ComputeResponse, ComputeRequest>,
 ) -> anyhow::Result<()> {
-    let mut client = ClientChannel::<ComputeService, C>::new(client);
+    let mut client = RpcClient::<ComputeService, C>::new(client);
     // a rpc call
     let res = client.rpc(Sqr(1234)).await?;
     assert_eq!(res, SqrResponse(1522756));
@@ -243,7 +243,7 @@ pub async fn smoke_test<C: ChannelTypes>(
 }
 
 pub async fn bench<C: ChannelTypes>(
-    mut client: ClientChannel<ComputeService, C>,
+    mut client: RpcClient<ComputeService, C>,
     n: u64,
 ) -> anyhow::Result<()>
 where
@@ -270,7 +270,7 @@ where
         let reqs = futures::stream::iter((0..n).map(Sqr));
         let resp = reqs
             .map(|x| {
-                let mut client = client.clone();
+                let client = client.clone();
                 async move {
                     let res = client.rpc(x).await?.0;
                     anyhow::Ok(res)

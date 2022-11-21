@@ -179,7 +179,7 @@ impl Store {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     async fn server_future(
-        server: ServerChannel<StoreService, MemChannelTypes>,
+        server: RpcServer<StoreService, MemChannelTypes>,
     ) -> result::Result<(), RpcServerError<MemChannelTypes>> {
         let mut s = server;
         let store = Store;
@@ -201,8 +201,8 @@ async fn main() -> anyhow::Result<()> {
     }
 
     let (client, server) = mem::connection::<StoreResponse, StoreRequest>(1);
-    let mut client = ClientChannel::<StoreService, MemChannelTypes>::new(client);
-    let server = ServerChannel::<StoreService, MemChannelTypes>::new(server);
+    let mut client = RpcClient::<StoreService, MemChannelTypes>::new(client);
+    let server = RpcServer::<StoreService, MemChannelTypes>::new(server);
     let server_handle = tokio::task::spawn(server_future(server));
 
     // a rpc call
