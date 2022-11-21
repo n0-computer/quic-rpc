@@ -1,10 +1,7 @@
 use std::{net::SocketAddr, sync::Arc};
 
 use anyhow::Context;
-use quic_rpc::{
-    quinn::QuinnChannelTypes,
-    sugar::{ClientChannel, ServerChannel},
-};
+use quic_rpc::{quinn::QuinnChannelTypes, ClientChannel, ServerChannel};
 use quinn::{ClientConfig, Endpoint, ServerConfig};
 use tokio::task::JoinHandle;
 

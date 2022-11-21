@@ -2,14 +2,15 @@
 use async_stream::stream;
 use derive_more::{From, TryInto};
 use futures::{SinkExt, Stream, StreamExt};
+use message::RpcMsg;
 use quic_rpc::{
     mem::MemChannelTypes,
-    sugar::{BidiStreaming, ClientStreaming, Msg, RpcServerError, ServerChannel, ServerStreaming},
+    message::{BidiStreaming, ClientStreaming, Msg, ServerStreaming},
+    server::RpcServerError,
     Channel, *,
 };
 use serde::{Deserialize, Serialize};
 use std::{fmt::Debug, result};
-use sugar::{ClientChannel, RpcMsg};
 
 type Cid = [u8; 32];
 #[derive(Debug, Serialize, Deserialize)]

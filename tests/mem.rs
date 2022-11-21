@@ -2,7 +2,8 @@ mod math;
 use math::*;
 use quic_rpc::{
     mem::{self, MemChannelTypes},
-    sugar::{ClientChannel, RpcServerError, ServerChannel},
+    server::RpcServerError,
+    ClientChannel, ServerChannel,
 };
 
 #[tokio::test]

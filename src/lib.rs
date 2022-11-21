@@ -1,4 +1,4 @@
-//!
+//! A streaming rpc system based on quic
 #![deny(missing_docs)]
 #![deny(rustdoc::broken_intra_doc_links)]
 use futures::{Future, Sink, Stream};
@@ -7,11 +7,14 @@ use std::{
     fmt::{Debug, Display},
     result,
 };
+pub mod client;
 pub mod combined;
 pub mod mem;
+pub mod message;
 pub mod quinn;
-pub mod sugar;
-pub use sugar::{ClientChannel, ServerChannel};
+pub use client::ClientChannel;
+pub mod server;
+pub use server::ServerChannel;
 
 /// requirements for a RPC message
 ///

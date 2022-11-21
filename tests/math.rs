@@ -3,11 +3,9 @@ use async_stream::stream;
 use derive_more::{From, TryInto};
 use futures::{SinkExt, Stream, StreamExt, TryStreamExt};
 use quic_rpc::{
-    sugar::{
-        BidiStreaming, ClientChannel, ClientStreaming, Msg, RpcMsg, RpcServerError, ServerChannel,
-        ServerStreaming,
-    },
-    ChannelTypes, Service,
+    message::{BidiStreaming, ClientStreaming, Msg, RpcMsg, ServerStreaming},
+    server::RpcServerError,
+    ChannelTypes, ClientChannel, ServerChannel, Service,
 };
 use serde::{Deserialize, Serialize};
 use std::{
