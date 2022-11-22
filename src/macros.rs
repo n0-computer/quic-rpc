@@ -144,13 +144,16 @@ macro_rules! derive_rpc_service {
 
         $($m_pattern:ident $m_name:ident = $m_input:ident, $m_update:tt -> $m_output:ident);+$(;)?
     ) => {
+
         $crate::__request_enum! {
+            $service,
             $request {
                 $($m_input,)*
                 $($m_update,)*
             }
         }
 
+        #[doc=concat!("Response messages for ", stringify!($service))]
         #[allow(clippy::enum_variant_names)]
         #[derive(::std::fmt::Debug, ::derive_more::From, ::derive_more::TryInto, ::serde::Serialize, ::serde::Deserialize)]
         pub enum $response {
@@ -161,6 +164,7 @@ macro_rules! derive_rpc_service {
             $crate::__rpc_message!($service, $m_pattern, $m_input, $m_update, $m_output);
         )*
 
+        #[doc=concat!("RPC service ", stringify!($service))]
         #[derive(::std::clone::Clone, ::std::fmt::Debug)]
         pub struct $service;
 
@@ -199,11 +203,7 @@ macro_rules! __derive_create_dispatch {
         $create_dispatch:ident,
         [ $($m_pattern:ident $m_name:ident = $m_input:ident, $m_update:tt -> $m_output:ident);+ ]
     ) => {
-        /// Create a dispatch function that forwards RPC call to a method on a target struct.
-        ///
-        /// The created function can be passed into [quic-rpc::server::spawn_server] directly.
-        ///
-        /// See the docs for [derive_rpc_service] for details.
+        #[doc = concat!("Create an RPC request dispatch function for ", stringify!($service), "\n\nSee the docs for [quic_rpc::derive_rpc_service] for usage docs.")]
         #[macro_export]
         macro_rules! $create_dispatch {
             ($target:ident, $handler:ident) => {
@@ -231,23 +231,24 @@ macro_rules! __derive_create_dispatch {
 #[macro_export]
 macro_rules! __request_enum {
     // User entry points.
-    ($enum_name:ident { $variant_name:ident $($tt:tt)* }) => {
-        $crate::__request_enum!(@ {[$enum_name] [$variant_name]} $($tt)*);
+    ($service:ident, $enum_name:ident { $variant_name:ident $($tt:tt)* }) => {
+        $crate::__request_enum!(@ {[$service $enum_name] [$variant_name]} $($tt)*);
     };
 
     // Internal rules to categorize each value
     // This also filters out _ placeholders from non-streaming methods.
-    (@ {[$enum_name:ident] [$($agg:ident)*]} $(,)? $(_$(,)?)* $variant_name:ident $($tt:tt)*) => {
-        $crate::__request_enum!(@ {[$enum_name] [$($agg)* $variant_name]} $($tt)*);
+    (@ {[$service:ident $enum_name:ident] [$($agg:ident)*]} $(,)? $(_$(,)?)* $variant_name:ident $($tt:tt)*) => {
+        $crate::__request_enum!(@ {[$service $enum_name] [$($agg)* $variant_name]} $($tt)*);
     };
 
     // Internal rules to categorize each value
-    (@ {[$enum_name:ident] [$($agg:ident)*]} $(,)? $variant_name:ident $($tt:tt)*) => {
-        $crate::__request_enum!(@ {[$enum_name] [$($agg)* $variant_name]} $($tt)*);
+    (@ {[$service:ident $enum_name:ident] [$($agg:ident)*]} $(,)? $variant_name:ident $($tt:tt)*) => {
+        $crate::__request_enum!(@ {[$service $enum_name] [$($agg)* $variant_name]} $($tt)*);
     };
 
     // Final internal rule that generates the enum from the categorized input
-    (@ {[$enum_name:ident] [$($n:ident)*]} $(,)? $(_$(,)?)*) => {
+    (@ {[$service:ident $enum_name:ident] [$($n:ident)*]} $(,)? $(_$(,)?)*) => {
+        #[doc=concat!("Request messages for ", stringify!($service))]
         #[derive(::std::fmt::Debug, ::derive_more::From, ::derive_more::TryInto, ::serde::Serialize, ::serde::Deserialize)]
         pub enum $enum_name {
             $($n($n),)*
@@ -315,11 +316,7 @@ macro_rules! __derive_create_client{
         $create_client:tt,
         [ $($m_pattern:ident $m_name:ident = $m_input:ident, $m_update:tt -> $m_output:ident);+ ]
     ) => {
-        /// Create a dispatch function that forwards RPC call to a method on a target struct.
-        ///
-        /// The created function can be passed into [quic-rpc::server::spawn_server] directly.
-        ///
-        /// See the docs for [derive_rpc_service] for details.
+        #[doc = concat!("Create an RPC client for ", stringify!($service), "\n\nSee the docs for [quic_rpc::derive_rpc_service] for usage docs.")]
         #[macro_export]
         macro_rules! $create_client {
             ($struct:ident) => {
