@@ -3,16 +3,19 @@
 /// Derive a set of RPC types and message implementation from a declaration.
 ///
 /// The macros are completely optional. They generate the request and response
-/// message enums, the service zerosized struct.
+/// message enums and the service zerosized struct.
 /// Optionally, a function can be created to dispatch RPC calls to methods
 /// on a struct of your choice.
-/// Finally, it can also create a type-safe RPC client for the service.
+/// It can also create a type-safe RPC client for the service.
 ///
 /// Usage is as follows:
 ///
 /// ```no_run
 /// # use serde::{Serialize,Deserialize};
 /// # use quic_rpc::*;
+///
+/// // Define your message types
+///
 /// #[derive(Debug, Serialize, Deserialize)]
 /// struct Add(pub i32, pub i32);
 /// #[derive(Debug, Serialize, Deserialize)]
@@ -23,6 +26,8 @@
 /// pub struct MultiplyUpdate(pub i32);
 /// #[derive(Debug, Serialize, Deserialize)]
 /// pub struct MultiplyOutput(pub i32);
+///
+/// // Derive the RPC types.
 ///
 /// derive_rpc_service! {
 ///     // Name of the created request enum.
@@ -52,7 +57,6 @@
 /// takes a client channel and exposes typesafe methods for each RPC method.
 ///
 /// ```ignore
-/// # use quic_rpc::{*, quin::*, client::*};
 /// create_store_client!(MyClient);
 /// let client = quic_rpc::quinn::Channel::new(client);
 /// let client = quic_rpc::client::RpcClient::<MyService, QuinnChannelTypes>::new(client);
@@ -70,8 +74,6 @@
 /// to dispatch the RPC calls to the methods on your target struct.
 ///
 /// ```ignore
-/// # use futures::stream::{Stream, StreamExt};
-/// # use async_stream::stream;
 /// #[derive(Clone)]
 /// pub struct Calculator;
 /// impl Calculator {
