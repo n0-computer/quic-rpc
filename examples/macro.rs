@@ -34,20 +34,17 @@ mod store_rpc {
     #[derive(Debug, Serialize, Deserialize)]
     pub struct ConvertFileResponse(pub Vec<u8>);
 
-    use super::Store;
     derive_rpc_service! {
-        service Store {
-            Request = StoreRequest;
-            Response = StoreResponse;
-            Service = StoreService;
-            RequestHandler = dispatch_request;
+        Request = StoreRequest;
+        Response = StoreResponse;
+        Service = StoreService;
+        CreateDispatch = create_store_dispatch;
 
-            Rpc put = Put, _ -> PutResponse;
-            Rpc get = Get, _ -> GetResponse;
-            ClientStreaming put_file = PutFile, PutFileUpdate -> PutFileResponse;
-            ServerStreaming get_file = GetFile, _ -> GetFileResponse;
-            BidiStreaming convert_file = ConvertFile, ConvertFileUpdate -> ConvertFileResponse;
-        }
+        Rpc put = Put, _ -> PutResponse;
+        Rpc get = Get, _ -> GetResponse;
+        ClientStreaming put_file = PutFile, PutFileUpdate -> PutFileResponse;
+        ServerStreaming get_file = GetFile, _ -> GetFileResponse;
+        BidiStreaming convert_file = ConvertFile, ConvertFileUpdate -> ConvertFileResponse;
     }
 }
 
@@ -102,6 +99,8 @@ impl Store {
     }
 }
 
+create_store_dispatch!(Store, dispatch_store_request);
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let (client, server) = mem::connection::<StoreResponse, StoreRequest>(1);
@@ -112,9 +111,8 @@ async fn main() -> anyhow::Result<()> {
         MemChannelTypes,
         server,
         target,
-        store_rpc::dispatch_request,
-    )
-    .await;
+        dispatch_store_request,
+    );
 
     // a rpc call
     for i in 0..3 {

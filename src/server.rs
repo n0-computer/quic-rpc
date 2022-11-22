@@ -315,7 +315,7 @@ async fn race2<T, A: Future<Output = T>, B: Future<Output = T>>(f1: A, f2: B) ->
 /// Spawn a server loop, invoking a handler callback for each request.
 ///
 /// Requests will be handled sequentially.
-pub async fn spawn_server<S, C, T, F, Fut>(
+pub fn spawn_server<S, C, T, F, Fut>(
     _service_type: S,
     _channel_type: C,
     conn: C::Channel<S::Req, S::Res>,

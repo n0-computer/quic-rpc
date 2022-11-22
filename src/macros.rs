@@ -6,13 +6,12 @@
 #[macro_export]
 macro_rules! derive_rpc_service {
     (
-        service $target:ident {
-            Request = $request:ident;
-            Response = $response:ident;
-            Service = $service:ident;
-            RequestHandler = $handler:ident;
-            $($m_pattern:ident $m_name:ident = $m_input:ident, $m_update:tt -> $m_output:ident);+$(;)?
-        }
+        Request = $request:ident;
+        Response = $response:ident;
+        Service = $service:ident;
+        CreateDispatch = $create_dispatch:ident;
+
+        $($m_pattern:ident $m_name:ident = $m_input:ident, $m_update:tt -> $m_output:ident);+$(;)?
     ) => {
         $crate::__request_enum! {
             $request {
@@ -39,19 +38,29 @@ macro_rules! derive_rpc_service {
             type Res = $response;
         }
 
-        pub async fn $handler<C: $crate::ChannelTypes>(
-            server: $crate::server::RpcServer<$service, C>,
-            msg: <$service as $crate::Service>::Req,
-            chan: (C::SendSink<<$service as $crate::Service>::Res>, C::RecvStream<<$service as $crate::Service>::Req>),
-            target: $target,
-        ) -> Result<$crate::server::RpcServer<$service, C>, $crate::server::RpcServerError<C>> {
-            match msg {
-                $(
-                    $request::$m_input(msg) => { $crate::__rpc_invoke!($m_pattern, $m_name, $target, server, msg, chan, target) },
-                )*
-                _ => Err($crate::server::RpcServerError::<C>::UnexpectedStartMessage)?,
-            }?;
-            Ok(server)
+        /// Create a dispatch function that forwards RPC call to a method on a target struct.
+        ///
+        /// The created function can be passed into [quic-rpc::server::spawn_server] directly.
+        ///
+        /// See [./examples/macro.rs](examples/macro.rs) for a usage example.
+        #[macro_export]
+        macro_rules! $create_dispatch {
+            ($target:ident, $handler:ident) => {
+                pub async fn $handler<C: $crate::ChannelTypes>(
+                    server: $crate::server::RpcServer<$service, C>,
+                    msg: <$service as $crate::Service>::Req,
+                    chan: (C::SendSink<<$service as $crate::Service>::Res>, C::RecvStream<<$service as $crate::Service>::Req>),
+                    target: $target,
+                ) -> Result<$crate::server::RpcServer<$service, C>, $crate::server::RpcServerError<C>> {
+                    match msg {
+                        $(
+                            $request::$m_input(msg) => { $crate::__rpc_invoke!($m_pattern, $m_name, $target, server, msg, chan, target) },
+                        )*
+                        _ => Err($crate::server::RpcServerError::<C>::UnexpectedStartMessage)?,
+                    }?;
+                    Ok(server)
+                }
+            }
         }
     };
 }
