@@ -3,6 +3,56 @@
 /// Derive a set of RPC types and message implementation from a declaration.
 ///
 /// See [./examples/macro.rs](examples/macro.rs) for an example.
+///
+/// Use as follows:
+/// ```no_run
+/// derive_rpc_service! {
+///     Request = MyRequest;
+///     Response = MyResponse;
+///     Service = MyService;
+///     CreateDispatch = create_my_dispatch;
+///     CreateClient = create_my_client;
+///
+///     Rpc add = Add, _ = Sum
+///     ClientStreaming stream = Input, Update = Output
+/// }
+/// ```
+///
+/// This will generate a request enum `MyRequest`, a response enum `MyRespone`
+/// and a service declaration `MyService`.
+///
+/// It will also generate two macros to create an RPC client and a dispatch function.
+///
+/// To use the client, invoke the macro with a name. The macro will generate a struct that
+/// takes a client channel and exposes typesafe methods for each RPC method.
+///
+/// ```no_run
+/// create_store_client!(MyClient);
+/// let client = quic_rpc::quinn::Channel::new(client);
+/// let client = quic_rpc::client::RpcClient::<MyService, QuinnChannelTypes>::new(client);
+/// let mut client = MyClient(client);
+/// let sum = client.add(Add(3, 4)).await?;
+/// ```
+///
+/// To use the dispatch function, invoke the macro with a struct that implements your RPC
+/// methods and the name of the generated function. You can then use this dispatch function
+/// to dispatch the RPC calls to the methods on your target struct.
+/// See [./examples/macro.rs](examples/macro.rs) for a full example.
+///
+/// The generation of these macros is optional. If you don't need them, pass `_` instead:
+/// ```no_run
+/// derive_rpc_service! {
+///     Request = MyRequest;
+///     Response = MyResponse;
+///     Service = MyService;
+///     CreateDispatch = _;
+///     CreateClient = _;
+///
+///     Rpc add = Add, _ = Sum
+///     ClientStreaming stream = Input, Update = Output
+/// }
+/// ```
+/// `
 #[macro_export]
 macro_rules! derive_rpc_service {
     (
