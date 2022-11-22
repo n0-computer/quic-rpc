@@ -7,8 +7,8 @@ use crate::{
 };
 use futures::{channel::oneshot, task, task::Poll, Future, FutureExt, SinkExt, Stream, StreamExt};
 use pin_project::pin_project;
-use tokio::task::JoinHandle;
 use std::{error, fmt, fmt::Debug, marker::PhantomData, pin::Pin, result};
+use tokio::task::JoinHandle;
 
 /// A server channel for a specific service
 ///
@@ -321,19 +321,15 @@ pub async fn spawn_server<S, C, T, F, Fut>(
     conn: C::Channel<S::Req, S::Res>,
     target: T,
     mut handler: F,
-) ->
-    JoinHandle<Result<(), RpcServerError<C>>>
+) -> JoinHandle<Result<(), RpcServerError<C>>>
 where
     S: Service,
     C: ChannelTypes,
     T: Clone + Send + 'static,
-    F: FnMut(
-        RpcServer<S, C>,
-        S::Req,
-        (C::SendSink<S::Res>, C::RecvStream<S::Req>),
-        T
-    ) -> Fut + Send + 'static,
-    Fut: Future<Output = Result<RpcServer<S,C>, RpcServerError<C>>> + Send + 'static,
+    F: FnMut(RpcServer<S, C>, S::Req, (C::SendSink<S::Res>, C::RecvStream<S::Req>), T) -> Fut
+        + Send
+        + 'static,
+    Fut: Future<Output = Result<RpcServer<S, C>, RpcServerError<C>>> + Send + 'static,
 {
     let mut server = RpcServer::<S, C>::new(conn);
     tokio::task::spawn({

@@ -53,9 +53,9 @@ mod store_rpc {
 
 use async_stream::stream;
 use futures::{SinkExt, Stream, StreamExt};
+use quic_rpc::client::RpcClient;
 use quic_rpc::mem::{self, MemChannelTypes};
 use quic_rpc::server::spawn_server;
-use quic_rpc::client::RpcClient;
 use store_rpc::*;
 
 #[derive(Clone)]
@@ -113,7 +113,8 @@ async fn main() -> anyhow::Result<()> {
         server,
         target,
         store_rpc::dispatch_request,
-    ).await;
+    )
+    .await;
 
     // a rpc call
     for i in 0..3 {

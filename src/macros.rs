@@ -21,6 +21,7 @@ macro_rules! derive_rpc_service {
             }
         }
 
+        #[allow(clippy::enum_variant_names)]
         #[derive(::std::fmt::Debug, ::derive_more::From, ::derive_more::TryInto, ::serde::Serialize, ::serde::Deserialize)]
         pub enum $response {
             $($m_output($m_output),)*
@@ -114,13 +115,18 @@ macro_rules! __rpc_invoke {
         $server.rpc($msg, $chan, $target, $target_ty::$m_name).await
     };
     (ClientStreaming, $m_name:ident, $target_ty:ident, $server:ident, $msg:ident, $chan:ident, $target:ident) => {
-        $server.client_streaming($msg, $chan, $target, $target_ty::$m_name).await
+        $server
+            .client_streaming($msg, $chan, $target, $target_ty::$m_name)
+            .await
     };
     (ServerStreaming, $m_name:ident, $target_ty:ident, $server:ident, $msg:ident, $chan:ident, $target:ident) => {
-        $server.server_streaming($msg, $chan, $target, $target_ty::$m_name).await
+        $server
+            .server_streaming($msg, $chan, $target, $target_ty::$m_name)
+            .await
     };
     (BidiStreaming, $m_name:ident, $target_ty:ident, $server:ident, $msg:ident, $chan:ident, $target:ident) => {
-        $server.bidi_streaming($msg, $chan, $target, $target_ty::$m_name).await
+        $server
+            .bidi_streaming($msg, $chan, $target, $target_ty::$m_name)
+            .await
     };
 }
-
