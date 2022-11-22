@@ -66,6 +66,15 @@ impl<In: RpcMessage, Out: RpcMessage> Clone for Channel<In, Out> {
     }
 }
 
+impl<In: RpcMessage, Out: RpcMessage> fmt::Debug for Channel<In, Out> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Channel")
+            .field("stream", &self.stream)
+            .field("sink", &self.sink)
+            .finish()
+    }
+}
+
 /// AcceptBiError for mem channels.
 ///
 /// There is not much that can go wrong with mem channels.

@@ -46,6 +46,17 @@ impl<A: ChannelTypes, B: ChannelTypes, In: RpcMessage, Out: RpcMessage> Clone
     }
 }
 
+impl<A: ChannelTypes, B: ChannelTypes, In: RpcMessage, Out: RpcMessage> Debug
+    for Channel<A, B, In, Out>
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Channel")
+            .field("a", &self.a)
+            .field("b", &self.b)
+            .finish()
+    }
+}
+
 /// SendSink for combined channels
 #[pin_project(project = SendSinkProj)]
 pub enum SendSink<A: ChannelTypes, B: ChannelTypes, Out: RpcMessage> {

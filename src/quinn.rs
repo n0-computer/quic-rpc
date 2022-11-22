@@ -3,20 +3,28 @@ use crate::RpcMessage;
 use futures::{Future, FutureExt, Sink, SinkExt, Stream, StreamExt};
 use pin_project::pin_project;
 use serde::{de::DeserializeOwned, Serialize};
-use std::{io, marker::PhantomData, pin::Pin, result};
+use std::{fmt, io, marker::PhantomData, pin::Pin, result};
 use tokio_serde::{formats::SymmetricalBincode, SymmetricallyFramed};
 use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
 
 type Socket<In, Out> = (SendSink<Out>, RecvStream<In>);
 
 /// A channel using a quinn connection
-#[derive(Debug)]
 pub struct Channel<In: RpcMessage, Out: RpcMessage>(quinn::Connection, PhantomData<(In, Out)>);
 
 impl<In: RpcMessage, Out: RpcMessage> Channel<In, Out> {
     /// Create a new channel
     pub fn new(conn: quinn::Connection) -> Self {
         Self(conn, PhantomData)
+    }
+}
+
+impl<In: RpcMessage, Out: RpcMessage> fmt::Debug for Channel<In, Out> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("Channel")
+            .field(&self.0)
+            .field(&self.1)
+            .finish()
     }
 }
 
