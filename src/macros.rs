@@ -9,7 +9,8 @@ macro_rules! derive_rpc_service {
         Request = $request:ident;
         Response = $response:ident;
         Service = $service:ident;
-        CreateDispatch = $create_dispatch:ident;
+        CreateDispatch = $create_dispatch:tt;
+        CreateClient = $create_client:tt;
 
         $($m_pattern:ident $m_name:ident = $m_input:ident, $m_update:tt -> $m_output:ident);+$(;)?
     ) => {
@@ -38,6 +39,36 @@ macro_rules! derive_rpc_service {
             type Res = $response;
         }
 
+        $crate::__derive_create_dispatch!(
+            $service,
+            $request,
+            $create_dispatch,
+            [ $($m_pattern $m_name = $m_input, $m_update -> $m_output);+ ]
+        );
+
+        $crate::__derive_create_client!(
+            $service,
+            $create_client,
+            [ $($m_pattern $m_name = $m_input, $m_update -> $m_output);+ ]
+        );
+    };
+}
+
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __derive_create_dispatch {
+    (
+        $service:ident,
+        $request:ident,
+        _,
+        [ $($tt:tt)* ]
+    ) => {};
+    (
+        $service:ident,
+        $request:ident,
+        $create_dispatch:ident,
+        [ $($m_pattern:ident $m_name:ident = $m_input:ident, $m_update:tt -> $m_output:ident);+ ]
+    ) => {
         /// Create a dispatch function that forwards RPC call to a method on a target struct.
         ///
         /// The created function can be passed into [quic-rpc::server::spawn_server] directly.
@@ -52,12 +83,13 @@ macro_rules! derive_rpc_service {
                     chan: (C::SendSink<<$service as $crate::Service>::Res>, C::RecvStream<<$service as $crate::Service>::Req>),
                     target: $target,
                 ) -> Result<$crate::server::RpcServer<$service, C>, $crate::server::RpcServerError<C>> {
-                    match msg {
+                    let res = match msg {
                         $(
                             $request::$m_input(msg) => { $crate::__rpc_invoke!($m_pattern, $m_name, $target, server, msg, chan, target) },
                         )*
-                        _ => Err($crate::server::RpcServerError::<C>::UnexpectedStartMessage)?,
-                    }?;
+                        _ => Err($crate::server::RpcServerError::<C>::UnexpectedStartMessage),
+                    };
+                    res?;
                     Ok(server)
                 }
             }
@@ -139,3 +171,87 @@ macro_rules! __rpc_invoke {
             .await
     };
 }
+
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __derive_create_client{
+    (
+        $service:ident,
+        _,
+        [ $($tt:tt)* ]
+    ) => {};
+    (
+        $service:ident,
+        $create_client:tt,
+        [ $($m_pattern:ident $m_name:ident = $m_input:ident, $m_update:tt -> $m_output:ident);+ ]
+    ) => {
+        /// Create a dispatch function that forwards RPC call to a method on a target struct.
+        ///
+        /// The created function can be passed into [quic-rpc::server::spawn_server] directly.
+        ///
+        /// See [./examples/macro.rs](examples/macro.rs) for a usage example.
+        #[macro_export]
+        macro_rules! $create_client {
+            ($struct:ident) => {
+                #[derive(::std::clone::Clone)]
+                pub struct $struct<C: $crate::ChannelTypes>(pub $crate::client::RpcClient<$service, C>);
+
+                impl<C: $crate::ChannelTypes> $struct<C> {
+                    $(
+                        $crate::__rpc_method!($m_pattern, $service, $m_name, $m_input, $m_output, $m_update);
+                    )*
+                }
+            };
+        }
+    };
+}
+
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __rpc_method {
+    (Rpc, $service:ident, $m_name:ident, $m_input:ident, $m_output:ident, _) => {
+        pub async fn $m_name(&mut self, input: $m_input) -> ::std::result::Result<$m_output, $crate::client::RpcClientError<C>> {
+            self.0.rpc(input).await
+        }
+    };
+    (ClientStreaming, $service:ident, $m_name:ident, $m_input:ident, $m_output:ident, $m_update:ident) => {
+        pub async fn $m_name(
+            &mut self,
+            input: $m_input
+    ) -> ::std::result::Result<
+        (
+            $crate::client::UpdateSink<$service, C, $m_input>,
+            ::futures::future::BoxFuture<'static, ::std::result::Result<$m_output, $crate::client::ClientStreamingItemError<C>>>,
+        ),
+        $crate::client::ClientStreamingError<C>
+    > {
+            self.0.client_streaming(input).await
+        }
+    };
+    (ServerStreaming, $service:ident, $m_name:ident, $m_input:ident, $m_output:ident, _) => {
+        pub async fn $m_name(
+            &mut self,
+            input: $m_input
+    ) -> ::std::result::Result<
+        ::futures::stream::BoxStream<'static, ::std::result::Result<$m_output, $crate::client::StreamingResponseItemError<C>>>,
+        $crate::client::StreamingResponseError<C>
+    > {
+            self.0.server_streaming(input).await
+        }
+    };
+    (BidiStreaming, $service:ident, $m_name:ident, $m_input:ident, $m_output:ident, $m_update:ident) => {
+        pub async fn $m_name(
+            &mut self,
+            input: $m_input
+    ) -> ::std::result::Result<
+        (
+            $crate::client::UpdateSink<$service, C, $m_input>,
+            ::futures::stream::BoxStream<'static, ::std::result::Result<$m_output, $crate::client::BidiItemError<C>>>,
+        ),
+        $crate::client::BidiError<C>
+    > {
+            self.0.bidi(input).await
+        }
+     };
+ }
+

@@ -975,6 +975,7 @@ name = "types"
 version = "0.1.0"
 dependencies = [
  "derive_more",
+ "futures",
  "quic-rpc",
  "serde",
 ]

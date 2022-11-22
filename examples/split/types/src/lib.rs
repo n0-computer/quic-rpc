@@ -39,6 +39,7 @@ pub mod store {
         Response = StoreResponse;
         Service = StoreService;
         CreateDispatch = create_store_dispatch;
+        CreateClient = create_store_client;
 
         Rpc put = Put, _ -> PutResponse;
         Rpc get = Get, _ -> GetResponse;

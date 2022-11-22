@@ -39,6 +39,7 @@ mod store_rpc {
         Response = StoreResponse;
         Service = StoreService;
         CreateDispatch = create_store_dispatch;
+        CreateClient = create_store_client;
 
         Rpc put = Put, _ -> PutResponse;
         Rpc get = Get, _ -> GetResponse;
@@ -100,11 +101,11 @@ impl Store {
 }
 
 create_store_dispatch!(Store, dispatch_store_request);
+create_store_client!(StoreClient);
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let (client, server) = mem::connection::<StoreResponse, StoreRequest>(1);
-    let mut client = RpcClient::<StoreService, MemChannelTypes>::new(client);
     let target = Store;
     let server_handle = spawn_server(
         StoreService,
@@ -113,27 +114,29 @@ async fn main() -> anyhow::Result<()> {
         target,
         dispatch_store_request,
     );
+    let client = RpcClient::<StoreService, MemChannelTypes>::new(client);
+    let mut client = StoreClient(client);
 
     // a rpc call
     for i in 0..3 {
         println!("a rpc call [{i}]");
-        let client = client.clone();
+        let mut client = client.clone();
         tokio::task::spawn(async move {
-            let res = client.rpc(Get([0u8; 32])).await;
+            let res = client.get(Get([0u8; 32])).await;
             println!("rpc res [{i}]: {:?}", res);
         });
     }
 
     // server streaming call
     println!("a server streaming call");
-    let mut s = client.server_streaming(GetFile([0u8; 32])).await?;
+    let mut s = client.get_file(GetFile([0u8; 32])).await?;
     while let Some(res) = s.next().await {
         println!("streaming res: {:?}", res);
     }
 
     // client streaming call
     println!("a client streaming call");
-    let (mut send, recv) = client.client_streaming(PutFile).await?;
+    let (mut send, recv) = client.put_file(PutFile).await?;
     tokio::task::spawn(async move {
         for i in 0..3 {
             send.send(PutFileUpdate(vec![i])).await.unwrap();
@@ -144,7 +147,7 @@ async fn main() -> anyhow::Result<()> {
 
     // bidi streaming call
     println!("a bidi streaming call");
-    let (mut send, mut recv) = client.bidi(ConvertFile).await?;
+    let (mut send, mut recv) = client.convert_file(ConvertFile).await?;
     tokio::task::spawn(async move {
         for i in 0..3 {
             send.send(ConvertFileUpdate(vec![i])).await.unwrap();
