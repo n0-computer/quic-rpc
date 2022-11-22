@@ -2,19 +2,44 @@
 
 /// Derive a set of RPC types and message implementation from a declaration.
 ///
-/// See [./examples/macro.rs](examples/macro.rs) for an example.
+/// The macros are completely optional. They generate the request and response
+/// message enums, the service zerosized struct.
+/// Optionally, a function can be created to dispatch RPC calls to methods
+/// on a struct of your choice.
+/// Finally, it can also create a type-safe RPC client for the service.
 ///
-/// Use as follows:
+/// Usage is as follows:
+///
 /// ```no_run
+/// # use serde::{Serialize,Deserialize};
+/// # use quic_rpc::*;
+/// #[derive(Debug, Serialize, Deserialize)]
+/// struct Add(pub i32, pub i32);
+/// #[derive(Debug, Serialize, Deserialize)]
+/// pub struct Sum(pub i32);
+/// #[derive(Debug, Serialize, Deserialize)]
+/// pub struct Multiply(pub i32);
+/// #[derive(Debug, Serialize, Deserialize)]
+/// pub struct MultiplyUpdate(pub i32);
+/// #[derive(Debug, Serialize, Deserialize)]
+/// pub struct MultiplyOutput(pub i32);
+///
 /// derive_rpc_service! {
+///     // Name of the created request enum.
 ///     Request = MyRequest;
+///     // Name of the created response enum.
 ///     Response = MyResponse;
+///     // Name of the created service struct enum.
 ///     Service = MyService;
+///     // Name of the macro to create a dispatch function.
+///     // Optional, if not needed pass _ (underscore) as name.
 ///     CreateDispatch = create_my_dispatch;
+///     // Name of the macro to create an RPC client.
+///     // Optional, if not needed pass _ (underscore) as name.
 ///     CreateClient = create_my_client;
 ///
-///     Rpc add = Add, _ = Sum
-///     ClientStreaming stream = Input, Update = Output
+///     Rpc add = Add, _ -> Sum;
+///     BidiStreaming multiply = Multiply, MultiplyUpdate -> MultiplyOutput
 /// }
 /// ```
 ///
@@ -26,21 +51,74 @@
 /// To use the client, invoke the macro with a name. The macro will generate a struct that
 /// takes a client channel and exposes typesafe methods for each RPC method.
 ///
-/// ```no_run
+/// ```ignore
+/// # use quic_rpc::{*, quin::*, client::*};
 /// create_store_client!(MyClient);
 /// let client = quic_rpc::quinn::Channel::new(client);
 /// let client = quic_rpc::client::RpcClient::<MyService, QuinnChannelTypes>::new(client);
 /// let mut client = MyClient(client);
 /// let sum = client.add(Add(3, 4)).await?;
+/// // Sum(7)
+/// let (send, mut recv) = client.multiply(Multiply(2));
+/// send(Update(3));
+/// let res = recv.next().await?;
+/// // Some(MultiplyOutput(6))
 /// ```
 ///
 /// To use the dispatch function, invoke the macro with a struct that implements your RPC
 /// methods and the name of the generated function. You can then use this dispatch function
 /// to dispatch the RPC calls to the methods on your target struct.
-/// See [./examples/macro.rs](examples/macro.rs) for a full example.
 ///
-/// The generation of these macros is optional. If you don't need them, pass `_` instead:
-/// ```no_run
+/// ```ignore
+/// # use futures::stream::{Stream, StreamExt};
+/// # use async_stream::stream;
+/// #[derive(Clone)]
+/// pub struct Calculator;
+/// impl Calculator {
+///     async fn add(self, req: Add) -> Sum {
+///         Sum(req.0 + req.1)
+///     }
+///     async fn multiply(
+///         self,
+///         req: Multiply,
+///         updates: impl Stream<Item = MultiplyUpdate>
+///     ) -> impl Stream<Item = MultiplyOutput> {
+///        stream! {
+///            tokio::pin!(updates);
+///            while let Some(MultiplyUpdate(n)) = updates.next().await {
+///                yield MultiplyResponse(req.0 * n);
+///            }
+///        }
+///     }
+/// }
+///
+/// create_my_dispatch!(Calculator, dispatch_calculator_request);
+///
+/// #[tokio::main]
+/// async fn main() -> anyhow::Result<()> {
+///    let server_addr: std::net::SocketAddr = "127.0.0.1:12345".parse()?;
+///    let (server, _server_certs) = make_server_endpoint(server_addr)?;
+///    let accept = server.accept().await.context("accept failed")?.await?;
+///    let connection = quic_rpc::quinn::Channel::new(accept);
+///    let calculator = Calculator;
+///    let server_handle = spawn_server(
+///        StoreService,
+///        quic_rpc::quinn::QuinnChannelTypes,
+///        connection,
+///        calculator,
+///        dispatch_calculator_request,
+///    );
+///    server_handle.await??;
+///    Ok(())
+/// }
+///
+/// ```
+///
+/// The generation of the macros in `CreateDispatch` and `CreateClient`
+/// is optional. If you don't need them, pass `_` instead:
+///
+/// ```ignore
+/// # use quic_rpc::*;
 /// derive_rpc_service! {
 ///     Request = MyRequest;
 ///     Response = MyResponse;
@@ -48,8 +126,8 @@
 ///     CreateDispatch = _;
 ///     CreateClient = _;
 ///
-///     Rpc add = Add, _ = Sum
-///     ClientStreaming stream = Input, Update = Output
+///     Rpc add = Add, _ -> Sum;
+///     ClientStreaming stream = Input, Update -> Output;
 /// }
 /// ```
 /// `
@@ -123,7 +201,7 @@ macro_rules! __derive_create_dispatch {
         ///
         /// The created function can be passed into [quic-rpc::server::spawn_server] directly.
         ///
-        /// See [./examples/macro.rs](examples/macro.rs) for a usage example.
+        /// See the docs for [derive_rpc_service] for details.
         #[macro_export]
         macro_rules! $create_dispatch {
             ($target:ident, $handler:ident) => {
@@ -239,7 +317,7 @@ macro_rules! __derive_create_client{
         ///
         /// The created function can be passed into [quic-rpc::server::spawn_server] directly.
         ///
-        /// See [./examples/macro.rs](examples/macro.rs) for a usage example.
+        /// See the docs for [derive_rpc_service] for details.
         #[macro_export]
         macro_rules! $create_client {
             ($struct:ident) => {
