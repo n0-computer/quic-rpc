@@ -54,7 +54,7 @@ mod store_rpc {
 use async_stream::stream;
 use futures::{SinkExt, Stream, StreamExt};
 use quic_rpc::mem::{self, MemChannelTypes};
-use quic_rpc::server::spawn_server_loop;
+use quic_rpc::server::spawn_server;
 use quic_rpc::client::RpcClient;
 use store_rpc::*;
 
@@ -107,25 +107,29 @@ async fn main() -> anyhow::Result<()> {
     let (client, server) = mem::connection::<StoreResponse, StoreRequest>(1);
     let mut client = RpcClient::<StoreService, MemChannelTypes>::new(client);
     let target = Store;
-    let server_handle = spawn_server_loop(
+    let server_handle = spawn_server(
         StoreService,
         MemChannelTypes,
         server,
         target,
         store_rpc::dispatch_request,
-    )
-    .await;
+    ).await;
 
     // a rpc call
-    println!("a rpc call");
-    let res = client.rpc(Get([0u8; 32])).await?;
-    println!("{:?}", res);
+    for i in 0..3 {
+        println!("a rpc call [{i}]");
+        let client = client.clone();
+        tokio::task::spawn(async move {
+            let res = client.rpc(Get([0u8; 32])).await;
+            println!("rpc res [{i}]: {:?}", res);
+        });
+    }
 
     // server streaming call
     println!("a server streaming call");
     let mut s = client.server_streaming(GetFile([0u8; 32])).await?;
     while let Some(res) = s.next().await {
-        println!("{:?}", res);
+        println!("streaming res: {:?}", res);
     }
 
     // client streaming call
@@ -137,7 +141,7 @@ async fn main() -> anyhow::Result<()> {
         }
     });
     let res = recv.await?;
-    println!("{:?}", res);
+    println!("client stremaing res: {:?}", res);
 
     // bidi streaming call
     println!("a bidi streaming call");
@@ -148,7 +152,7 @@ async fn main() -> anyhow::Result<()> {
         }
     });
     while let Some(res) = recv.next().await {
-        println!("{:?}", res);
+        println!("bidi res: {:?}", res);
     }
 
     // dropping the client will cause the server to terminate

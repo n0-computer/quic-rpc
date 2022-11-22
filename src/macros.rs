@@ -39,12 +39,12 @@ macro_rules! derive_rpc_service {
         }
 
         pub async fn $handler<C: $crate::ChannelTypes>(
-            mut server: $crate::server::RpcServer<$service, C>,
+            server: $crate::server::RpcServer<$service, C>,
+            msg: <$service as $crate::Service>::Req,
+            chan: (C::SendSink<<$service as $crate::Service>::Res>, C::RecvStream<<$service as $crate::Service>::Req>),
             target: $target,
         ) -> Result<$crate::server::RpcServer<$service, C>, $crate::server::RpcServerError<C>> {
-            let (req, chan) = server.accept_one().await?;
-            let target = target.clone();
-            match req {
+            match msg {
                 $(
                     $request::$m_input(msg) => { $crate::__rpc_invoke!($m_pattern, $m_name, $target, server, msg, chan, target) },
                 )*
