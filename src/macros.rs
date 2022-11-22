@@ -260,48 +260,59 @@ macro_rules! __derive_create_client{
 #[macro_export]
 macro_rules! __rpc_method {
     (Rpc, $service:ident, $m_name:ident, $m_input:ident, $m_output:ident, _) => {
-        pub async fn $m_name(&mut self, input: $m_input) -> ::std::result::Result<$m_output, $crate::client::RpcClientError<C>> {
+        pub async fn $m_name(
+            &mut self,
+            input: $m_input,
+        ) -> ::std::result::Result<$m_output, $crate::client::RpcClientError<C>> {
             self.0.rpc(input).await
         }
     };
     (ClientStreaming, $service:ident, $m_name:ident, $m_input:ident, $m_output:ident, $m_update:ident) => {
         pub async fn $m_name(
             &mut self,
-            input: $m_input
-    ) -> ::std::result::Result<
-        (
-            $crate::client::UpdateSink<$service, C, $m_input>,
-            ::futures::future::BoxFuture<'static, ::std::result::Result<$m_output, $crate::client::ClientStreamingItemError<C>>>,
-        ),
-        $crate::client::ClientStreamingError<C>
-    > {
+            input: $m_input,
+        ) -> ::std::result::Result<
+            (
+                $crate::client::UpdateSink<$service, C, $m_input>,
+                ::futures::future::BoxFuture<
+                    'static,
+                    ::std::result::Result<$m_output, $crate::client::ClientStreamingItemError<C>>,
+                >,
+            ),
+            $crate::client::ClientStreamingError<C>,
+        > {
             self.0.client_streaming(input).await
         }
     };
     (ServerStreaming, $service:ident, $m_name:ident, $m_input:ident, $m_output:ident, _) => {
         pub async fn $m_name(
             &mut self,
-            input: $m_input
-    ) -> ::std::result::Result<
-        ::futures::stream::BoxStream<'static, ::std::result::Result<$m_output, $crate::client::StreamingResponseItemError<C>>>,
-        $crate::client::StreamingResponseError<C>
-    > {
+            input: $m_input,
+        ) -> ::std::result::Result<
+            ::futures::stream::BoxStream<
+                'static,
+                ::std::result::Result<$m_output, $crate::client::StreamingResponseItemError<C>>,
+            >,
+            $crate::client::StreamingResponseError<C>,
+        > {
             self.0.server_streaming(input).await
         }
     };
     (BidiStreaming, $service:ident, $m_name:ident, $m_input:ident, $m_output:ident, $m_update:ident) => {
         pub async fn $m_name(
             &mut self,
-            input: $m_input
-    ) -> ::std::result::Result<
-        (
-            $crate::client::UpdateSink<$service, C, $m_input>,
-            ::futures::stream::BoxStream<'static, ::std::result::Result<$m_output, $crate::client::BidiItemError<C>>>,
-        ),
-        $crate::client::BidiError<C>
-    > {
+            input: $m_input,
+        ) -> ::std::result::Result<
+            (
+                $crate::client::UpdateSink<$service, C, $m_input>,
+                ::futures::stream::BoxStream<
+                    'static,
+                    ::std::result::Result<$m_output, $crate::client::BidiItemError<C>>,
+                >,
+            ),
+            $crate::client::BidiError<C>,
+        > {
             self.0.bidi(input).await
         }
-     };
- }
-
+    };
+}
