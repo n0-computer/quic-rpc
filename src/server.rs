@@ -8,6 +8,7 @@ use crate::{
 use futures::{channel::oneshot, task, task::Poll, Future, FutureExt, SinkExt, Stream, StreamExt};
 use pin_project::pin_project;
 use std::{error, fmt, fmt::Debug, marker::PhantomData, pin::Pin, result};
+use tokio::task::JoinHandle;
 
 /// A server channel for a specific service
 ///
@@ -309,4 +310,35 @@ async fn race2<T, A: Future<Output = T>, B: Future<Output = T>>(f1: A, f2: B) ->
         x = f1 => x,
         x = f2 => x,
     }
+}
+
+/// Spawn a server loop, invoking a handler callback for each request.
+///
+/// Requests will be handled sequentially.
+pub async fn spawn_server<S, C, T, F, Fut>(
+    _service_type: S,
+    _channel_type: C,
+    conn: C::Channel<S::Req, S::Res>,
+    target: T,
+    mut handler: F,
+) -> JoinHandle<Result<(), RpcServerError<C>>>
+where
+    S: Service,
+    C: ChannelTypes,
+    T: Clone + Send + 'static,
+    F: FnMut(RpcServer<S, C>, S::Req, (C::SendSink<S::Res>, C::RecvStream<S::Req>), T) -> Fut
+        + Send
+        + 'static,
+    Fut: Future<Output = Result<RpcServer<S, C>, RpcServerError<C>>> + Send + 'static,
+{
+    let mut server = RpcServer::<S, C>::new(conn);
+    tokio::task::spawn({
+        async move {
+            loop {
+                let (req, chan) = server.accept_one().await?;
+                let target = target.clone();
+                server = handler(server, req, chan, target).await?;
+            }
+        }
+    })
 }
