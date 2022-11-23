@@ -320,7 +320,7 @@ macro_rules! __derive_create_client{
         #[macro_export]
         macro_rules! $create_client {
             ($struct:ident) => {
-                #[derive(::std::clone::Clone)]
+                #[derive(::std::clone::Clone, ::std::fmt::Debug)]
                 pub struct $struct<C: $crate::ChannelTypes>(pub $crate::client::RpcClient<$service, C>);
 
                 impl<C: $crate::ChannelTypes> $struct<C> {
