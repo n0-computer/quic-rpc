@@ -29,7 +29,7 @@
 ///
 /// // Derive the RPC types.
 ///
-/// derive_rpc_service! {
+/// rpc_service! {
 ///     // Name of the created request enum.
 ///     Request = MyRequest;
 ///     // Name of the created response enum.
@@ -121,7 +121,7 @@
 ///
 /// ```ignore
 /// # use quic_rpc::*;
-/// derive_rpc_service! {
+/// rpc_service! {
 ///     Request = MyRequest;
 ///     Response = MyResponse;
 ///     Service = MyService;
@@ -134,7 +134,7 @@
 /// ```
 /// `
 #[macro_export]
-macro_rules! derive_rpc_service {
+macro_rules! rpc_service {
     (
         Request = $request:ident;
         Response = $response:ident;
@@ -203,7 +203,7 @@ macro_rules! __derive_create_dispatch {
         $create_dispatch:ident,
         [ $($m_pattern:ident $m_name:ident = $m_input:ident, $m_update:tt -> $m_output:ident);+ ]
     ) => {
-        #[doc = concat!("Create an RPC request dispatch function for ", stringify!($service), "\n\nSee the docs for [quic_rpc::derive_rpc_service] for usage docs.")]
+        #[doc = concat!("Create an RPC request dispatch function for ", stringify!($service), "\n\nSee the docs for [quic_rpc::rpc_service] for usage docs.")]
         #[macro_export]
         macro_rules! $create_dispatch {
             ($target:ident, $handler:ident) => {
@@ -316,7 +316,7 @@ macro_rules! __derive_create_client{
         $create_client:tt,
         [ $($m_pattern:ident $m_name:ident = $m_input:ident, $m_update:tt -> $m_output:ident);+ ]
     ) => {
-        #[doc = concat!("Create an RPC client for ", stringify!($service), "\n\nSee the docs for [quic_rpc::derive_rpc_service] for usage docs.")]
+        #[doc = concat!("Create an RPC client for ", stringify!($service), "\n\nSee the docs for [quic_rpc::rpc_service] for usage docs.")]
         #[macro_export]
         macro_rules! $create_client {
             ($struct:ident) => {

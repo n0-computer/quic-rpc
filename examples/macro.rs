@@ -1,5 +1,5 @@
 mod store_rpc {
-    use quic_rpc::derive_rpc_service;
+    use quic_rpc::rpc_service;
     use serde::{Deserialize, Serialize};
     use std::fmt::Debug;
 
@@ -34,7 +34,7 @@ mod store_rpc {
     #[derive(Debug, Serialize, Deserialize)]
     pub struct ConvertFileResponse(pub Vec<u8>);
 
-    derive_rpc_service! {
+    rpc_service! {
         Request = StoreRequest;
         Response = StoreResponse;
         Service = StoreService;
