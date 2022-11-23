@@ -1,54 +1,57 @@
 use anyhow::Context;
 use async_stream::stream;
 use futures::stream::{Stream, StreamExt};
-use quic_rpc::{quinn::QuinnChannelTypes, server::spawn_server};
+use quic_rpc::{quinn::QuinnChannelTypes, server::run_server_loop};
 use quinn::{Endpoint, ServerConfig};
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use types::store::*;
+use types::compute::*;
 
 #[derive(Clone)]
-pub struct Store;
+pub struct Compute;
 
-types::create_store_dispatch!(Store, dispatch_store_request);
+types::create_compute_dispatch!(Compute, dispatch_compute_request);
 
-impl Store {
-    async fn put(self, _put: Put) -> PutResponse {
-        PutResponse([0; 32])
+impl Compute {
+    async fn square(self, req: Sqr) -> SqrResponse {
+        SqrResponse(req.0 as u128 * req.0 as u128)
     }
 
-    async fn get(self, _get: Get) -> GetResponse {
-        GetResponse(vec![])
-    }
-
-    async fn put_file(
-        self,
-        _put: PutFile,
-        updates: impl Stream<Item = PutFileUpdate>,
-    ) -> PutFileResponse {
+    async fn sum(self, _req: Sum, updates: impl Stream<Item = SumUpdate>) -> SumResponse {
+        let mut sum = 0u128;
         tokio::pin!(updates);
-        while let Some(_update) = updates.next().await {}
-        PutFileResponse([0; 32])
+        while let Some(SumUpdate(n)) = updates.next().await {
+            sum += n as u128;
+        }
+        SumResponse(sum)
     }
 
-    fn get_file(self, _get: GetFile) -> impl Stream<Item = GetFileResponse> + Send + 'static {
+    fn fibonacci(self, req: Fibonacci) -> impl Stream<Item = FibonacciResponse> {
+        let mut a = 0u128;
+        let mut b = 1u128;
+        let mut n = req.0;
         stream! {
-            for i in 0..3 {
-                yield GetFileResponse(vec![i]);
+            while n > 0 {
+                yield FibonacciResponse(a);
+                let c = a + b;
+                a = b;
+                b = c;
+                n -= 1;
             }
         }
     }
 
-    fn convert_file(
+    fn multiply(
         self,
-        _convert: ConvertFile,
-        updates: impl Stream<Item = ConvertFileUpdate> + Send + 'static,
-    ) -> impl Stream<Item = ConvertFileResponse> + Send + 'static {
+        req: Multiply,
+        updates: impl Stream<Item = MultiplyUpdate>,
+    ) -> impl Stream<Item = MultiplyResponse> {
+        let product = req.0 as u128;
         stream! {
             tokio::pin!(updates);
-            while let Some(msg) = updates.next().await {
-                yield ConvertFileResponse(msg.0);
+            while let Some(MultiplyUpdate(n)) = updates.next().await {
+                yield MultiplyResponse(product * n as u128);
             }
         }
     }
@@ -58,18 +61,27 @@ impl Store {
 async fn main() -> anyhow::Result<()> {
     let server_addr: SocketAddr = "127.0.0.1:12345".parse()?;
     let (server, _server_certs) = make_server_endpoint(server_addr)?;
-    let target = Store;
-    let accept = server.accept().await.context("accept failed")?.await?;
-    let connection = quic_rpc::quinn::Channel::new(accept);
-    let server_handle = spawn_server(
-        StoreService,
-        QuinnChannelTypes,
-        connection,
-        target,
-        dispatch_store_request,
-    );
-    server_handle.await??;
-    Ok(())
+    loop {
+        let accept = server.accept().await.context("accept failed")?.await?;
+        tokio::task::spawn(async move {
+            let remote = accept.remote_address();
+            eprintln!("new connection from {remote}");
+            let connection = quic_rpc::quinn::Channel::new(accept);
+            let target = Compute;
+            match run_server_loop(
+                ComputeService,
+                QuinnChannelTypes,
+                connection,
+                target,
+                dispatch_compute_request,
+            )
+            .await
+            {
+                Ok(_) => eprintln!("connection to {remote} closed"),
+                Err(err) => eprintln!("connection to {remote} closed: {err:?}"),
+            }
+        });
+    }
 }
 
 fn make_server_endpoint(bind_addr: SocketAddr) -> anyhow::Result<(Endpoint, Vec<u8>)> {

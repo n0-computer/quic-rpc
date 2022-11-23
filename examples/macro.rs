@@ -53,7 +53,7 @@ use async_stream::stream;
 use futures::{SinkExt, Stream, StreamExt};
 use quic_rpc::client::RpcClient;
 use quic_rpc::mem::{self, MemChannelTypes};
-use quic_rpc::server::spawn_server;
+use quic_rpc::server::run_server_loop;
 use store_rpc::*;
 
 #[derive(Clone)]
@@ -106,14 +106,17 @@ create_store_client!(StoreClient);
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let (client, server) = mem::connection::<StoreResponse, StoreRequest>(1);
-    let target = Store;
-    let server_handle = spawn_server(
-        StoreService,
-        MemChannelTypes,
-        server,
-        target,
-        dispatch_store_request,
-    );
+    let server_handle = tokio::task::spawn(async move {
+        let target = Store;
+        run_server_loop(
+            StoreService,
+            MemChannelTypes,
+            server,
+            target,
+            dispatch_store_request,
+        )
+        .await
+    });
     let client = RpcClient::<StoreService, MemChannelTypes>::new(client);
     let mut client = StoreClient(client);
 

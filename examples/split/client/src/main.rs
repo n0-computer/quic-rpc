@@ -4,9 +4,9 @@ use quic_rpc::{quinn::QuinnChannelTypes, RpcClient};
 use quinn::{ClientConfig, Endpoint};
 use std::net::SocketAddr;
 use std::sync::Arc;
-use types::store::*;
+use types::compute::*;
 
-types::create_store_client!(StoreClient);
+types::create_compute_client!(ComputeClient);
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -14,47 +14,49 @@ async fn main() -> anyhow::Result<()> {
     let endpoint = make_insecure_client_endpoint("0.0.0.0:0".parse()?)?;
     let client = endpoint.connect(server_addr, "localhost")?.await?;
     let client = quic_rpc::quinn::Channel::new(client);
-    let client = RpcClient::<StoreService, QuinnChannelTypes>::new(client);
-    let mut client = StoreClient(client);
+    let client = RpcClient::<ComputeService, QuinnChannelTypes>::new(client);
+    let mut client = ComputeClient(client);
 
     // a rpc call
     for i in 0..3 {
-        println!("a rpc call [{i}]");
         let mut client = client.clone();
         tokio::task::spawn(async move {
-            let res = client.get(Get([0u8; 32])).await;
-            println!("rpc res [{i}]: {:?}", res);
+            println!("rpc call: square([{i}])");
+            let res = client.square(Sqr(i)).await;
+            println!("rpc res: square({i}) = {:?}", res.unwrap());
         });
     }
 
-    // server streaming call
-    println!("a server streaming call");
-    let mut s = client.get_file(GetFile([0u8; 32])).await?;
-    while let Some(res) = s.next().await {
-        println!("streaming res: {:?}", res);
-    }
-
     // client streaming call
-    println!("a client streaming call");
-    let (mut send, recv) = client.put_file(PutFile).await?;
+    println!("client streaming call: sum()");
+    let (mut send, recv) = client.sum(Sum).await?;
     tokio::task::spawn(async move {
-        for i in 0..3 {
-            send.send(PutFileUpdate(vec![i])).await.unwrap();
+        for i in 2..4 {
+            println!("client streaming update: {i}");
+            send.send(SumUpdate(i)).await.unwrap();
         }
     });
     let res = recv.await?;
-    println!("client stremaing res: {:?}", res);
+    println!("client streaming res: {:?}", res);
+
+    // server streaming call
+    println!("server streaming call: fibonacci(10)");
+    let mut s = client.fibonacci(Fibonacci(10)).await?;
+    while let Some(res) = s.next().await {
+        println!("server streaming res: {:?}", res?);
+    }
 
     // bidi streaming call
-    println!("a bidi streaming call");
-    let (mut send, mut recv) = client.convert_file(ConvertFile).await?;
+    println!("bidi streaming call: multiply(2)");
+    let (mut send, mut recv) = client.multiply(Multiply(2)).await?;
     tokio::task::spawn(async move {
-        for i in 0..3 {
-            send.send(ConvertFileUpdate(vec![i])).await.unwrap();
+        for i in 1..3 {
+            println!("bidi streaming update: {i}");
+            send.send(MultiplyUpdate(i)).await.unwrap();
         }
     });
     while let Some(res) = recv.next().await {
-        println!("bidi res: {:?}", res);
+        println!("bidi streaming res: {:?}", res?);
     }
 
     Ok(())

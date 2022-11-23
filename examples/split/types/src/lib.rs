@@ -1,50 +1,46 @@
-pub mod store {
+pub mod compute {
     use quic_rpc::rpc_service;
     use serde::{Deserialize, Serialize};
     use std::fmt::Debug;
 
-    pub type Cid = [u8; 32];
+    /// compute the square of a number
+    #[derive(Debug, Serialize, Deserialize)]
+    pub struct Sqr(pub u64);
+    #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+    pub struct SqrResponse(pub u128);
 
+    /// sum a stream of numbers
     #[derive(Debug, Serialize, Deserialize)]
-    pub struct Put(pub Vec<u8>);
+    pub struct Sum;
     #[derive(Debug, Serialize, Deserialize)]
-    pub struct PutResponse(pub Cid);
+    pub struct SumUpdate(pub u64);
+    #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+    pub struct SumResponse(pub u128);
 
+    /// compute the fibonacci sequence as a stream
     #[derive(Debug, Serialize, Deserialize)]
-    pub struct Get(pub Cid);
+    pub struct Fibonacci(pub u64);
     #[derive(Debug, Serialize, Deserialize)]
-    pub struct GetResponse(pub Vec<u8>);
+    pub struct FibonacciResponse(pub u128);
 
+    /// multiply a stream of numbers, returning a stream
     #[derive(Debug, Serialize, Deserialize)]
-    pub struct PutFile;
+    pub struct Multiply(pub u64);
     #[derive(Debug, Serialize, Deserialize)]
-    pub struct PutFileUpdate(pub Vec<u8>);
+    pub struct MultiplyUpdate(pub u64);
     #[derive(Debug, Serialize, Deserialize)]
-    pub struct PutFileResponse(pub Cid);
-
-    #[derive(Debug, Serialize, Deserialize)]
-    pub struct GetFile(pub Cid);
-    #[derive(Debug, Serialize, Deserialize)]
-    pub struct GetFileResponse(pub Vec<u8>);
-
-    #[derive(Debug, Serialize, Deserialize)]
-    pub struct ConvertFile;
-    #[derive(Debug, Serialize, Deserialize)]
-    pub struct ConvertFileUpdate(pub Vec<u8>);
-    #[derive(Debug, Serialize, Deserialize)]
-    pub struct ConvertFileResponse(pub Vec<u8>);
+    pub struct MultiplyResponse(pub u128);
 
     rpc_service! {
-        Request = StoreRequest;
-        Response = StoreResponse;
-        Service = StoreService;
-        CreateDispatch = create_store_dispatch;
-        CreateClient = create_store_client;
+        Request = ComputeRequest;
+        Response = ComputeResponse;
+        Service = ComputeService;
+        CreateDispatch = create_compute_dispatch;
+        CreateClient = create_compute_client;
 
-        Rpc put = Put, _ -> PutResponse;
-        Rpc get = Get, _ -> GetResponse;
-        ClientStreaming put_file = PutFile, PutFileUpdate -> PutFileResponse;
-        ServerStreaming get_file = GetFile, _ -> GetFileResponse;
-        BidiStreaming convert_file = ConvertFile, ConvertFileUpdate -> ConvertFileResponse;
+        Rpc square = Sqr, _ -> SqrResponse;
+        ClientStreaming sum = Sum, SumUpdate -> SumResponse;
+        ServerStreaming fibonacci = Fibonacci, _ -> FibonacciResponse;
+        BidiStreaming multiply = Multiply, MultiplyUpdate -> MultiplyResponse;
     }
 }
