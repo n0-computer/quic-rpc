@@ -95,7 +95,7 @@ impl<S: Service, C: ChannelTypes> RpcClient<S, C> {
 
     /// Bidi call to the server, request opens a stream, response is a stream
     pub async fn server_streaming<M>(
-        &mut self,
+        &self,
         msg: M,
     ) -> result::Result<
         BoxStream<'static, result::Result<M::Response, StreamingResponseItemError<C>>>,
@@ -124,7 +124,7 @@ impl<S: Service, C: ChannelTypes> RpcClient<S, C> {
 
     /// Call to the server that allows the client to stream, single response
     pub async fn client_streaming<M>(
-        &mut self,
+        &self,
         msg: M,
     ) -> result::Result<
         (
@@ -163,7 +163,7 @@ impl<S: Service, C: ChannelTypes> RpcClient<S, C> {
 
     /// Bidi call to the server, request opens a stream, response is a stream
     pub async fn bidi<M>(
-        &mut self,
+        &self,
         msg: M,
     ) -> result::Result<
         (

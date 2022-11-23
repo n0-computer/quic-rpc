@@ -145,7 +145,7 @@ impl ComputeService {
     pub async fn server<C: ChannelTypes>(
         server: RpcServer<ComputeService, C>,
     ) -> result::Result<(), RpcServerError<C>> {
-        let mut s = server;
+        let s = server;
         let service = ComputeService;
         loop {
             let (req, chan) = s.accept_one().await?;
@@ -168,7 +168,7 @@ impl ComputeService {
         parallelism: usize,
     ) -> result::Result<(), RpcServerError<C>> {
         let s = server.clone();
-        let mut s2 = s.clone();
+        let s2 = s.clone();
         let service = ComputeService;
         let request_stream = stream! {
             loop {
@@ -208,7 +208,7 @@ impl ComputeService {
 pub async fn smoke_test<C: ChannelTypes>(
     client: C::Channel<ComputeResponse, ComputeRequest>,
 ) -> anyhow::Result<()> {
-    let mut client = RpcClient::<ComputeService, C>::new(client);
+    let client = RpcClient::<ComputeService, C>::new(client);
     // a rpc call
     let res = client.rpc(Sqr(1234)).await?;
     assert_eq!(res, SqrResponse(1522756));
@@ -243,7 +243,7 @@ pub async fn smoke_test<C: ChannelTypes>(
 }
 
 pub async fn bench<C: ChannelTypes>(
-    mut client: RpcClient<ComputeService, C>,
+    client: RpcClient<ComputeService, C>,
     n: u64,
 ) -> anyhow::Result<()>
 where

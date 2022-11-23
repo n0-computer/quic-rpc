@@ -42,7 +42,7 @@ impl<S: Service, C: ChannelTypes> RpcServer<S, C> {
     /// Accept one channel from the client, pull out the first request, and return both the first
     /// message and the channel for further processing.
     pub async fn accept_one(
-        &mut self,
+        &self,
     ) -> result::Result<(S::Req, (C::SendSink<S::Res>, C::RecvStream<S::Req>)), RpcServerError<C>>
     where
         C::RecvStream<S::Req>: Unpin,
