@@ -64,13 +64,41 @@ impl<S: Service, C: ChannelTypes> RpcServer<S, C> {
         Ok((request, channel))
     }
 
+    /// A rpc call that also maps the error from the user type to the wire type
+    ///
+    /// This is useful if you want to write your function with a convenient error type like anyhow::Error,
+    /// yet still use a serializable error type on the wire.
+    pub async fn rpc_map_err<M, F, Fut, T, R, E1, E2>(
+        &self,
+        req: M,
+        chan: (C::SendSink<S::Res>, C::RecvStream<S::Req>),
+        target: T,
+        f: F,
+    ) -> result::Result<(), RpcServerError<C>>
+    where
+        M: Msg<S, Pattern = Rpc, Response = result::Result<R, E2>>,
+        F: FnOnce(T, M) -> Fut,
+        Fut: Future<Output = result::Result<R, E1>>,
+        E2: From<E1>,
+        T: Send + 'static,
+    {
+        let fut = |target: T, msg: M| async move {
+            // call the inner fn
+            let res: Result<R, E1> = f(target, msg).await;
+            // convert the error type
+            let res: Result<R, E2> = res.map_err(E2::from);
+            res
+        };
+        self.rpc(req, chan, target, fut).await
+    }
+
     /// handle the message M using the given function on the target object
     ///
     /// If you want to support concurrent requests, you need to spawn this on a tokio task yourself.
     pub async fn rpc<M, F, Fut, T>(
         &self,
         req: M,
-        c: (C::SendSink<S::Res>, C::RecvStream<S::Req>),
+        chan: (C::SendSink<S::Res>, C::RecvStream<S::Req>),
         target: T,
         f: F,
     ) -> result::Result<(), RpcServerError<C>>
@@ -80,7 +108,7 @@ impl<S: Service, C: ChannelTypes> RpcServer<S, C> {
         Fut: Future<Output = M::Response>,
         T: Send + 'static,
     {
-        let (mut send, mut recv) = c;
+        let (mut send, mut recv) = chan;
         // cancel if we get an update, no matter what it is
         let cancel = recv
             .next()
