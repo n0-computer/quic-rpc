@@ -77,11 +77,9 @@ impl<S: Service, C: ChannelTypes, M: Msg<S>> Sink<M::Update> for UpdateSink<S, C
 
 /// Either an error opening a channel, or an error opening a subchannel
 #[derive(Debug)]
-pub enum ClientOpenBiError<C: ChannelTypes> {
+enum ClientOpenBiError<C: ChannelTypes> {
     /// There is no channel yet
     NoChannel,
-    /// Error opening the channel
-    OpenChannelError(C::CreateChannelError),
     /// Error opening the substream pair
     OpenBiError(C::OpenBiError),
 }
@@ -129,7 +127,7 @@ impl<S: Service, C: ChannelTypes> RpcClient<S, C> {
         M: Msg<S, Pattern = Rpc> + Into<S::Req>,
     {
         let msg = msg.into();
-        let (mut send, mut recv) = self.open_bi().await.map_err(RpcClientError::Open)?;
+        let (mut send, mut recv) = self.open_bi().await?;
         send.send(msg).await.map_err(RpcClientError::Send)?;
         let res = recv
             .next()
@@ -153,7 +151,7 @@ impl<S: Service, C: ChannelTypes> RpcClient<S, C> {
         M: Msg<S, Pattern = ServerStreaming> + Into<S::Req>,
     {
         let msg = msg.into();
-        let (mut send, recv) = self.open_bi().map_err(StreamingResponseError::Open).await?;
+        let (mut send, recv) = self.open_bi().await?;
         send.send(msg).map_err(StreamingResponseError::Send).await?;
         let recv = recv.map(move |x| match x {
             Ok(x) => {
@@ -181,7 +179,7 @@ impl<S: Service, C: ChannelTypes> RpcClient<S, C> {
         M: Msg<S, Pattern = ClientStreaming> + Into<S::Req>,
     {
         let msg = msg.into();
-        let (mut send, mut recv) = self.open_bi().map_err(ClientStreamingError::Open).await?;
+        let (mut send, mut recv) = self.open_bi().await?;
         send.send(msg).map_err(ClientStreamingError::Send).await?;
         let send = UpdateSink::<S, C, M>(send, PhantomData);
         let recv = async move {
@@ -216,7 +214,7 @@ impl<S: Service, C: ChannelTypes> RpcClient<S, C> {
         M: Msg<S, Pattern = BidiStreaming> + Into<S::Req>,
     {
         let msg = msg.into();
-        let (mut send, recv) = self.open_bi().await.map_err(BidiError::Open)?;
+        let (mut send, recv) = self.open_bi().await?;
         send.send(msg).await.map_err(BidiError::Send)?;
         let send = UpdateSink(send, PhantomData);
         let recv = recv
@@ -232,8 +230,10 @@ impl<S: Service, C: ChannelTypes> RpcClient<S, C> {
 /// Client error. All client DSL methods return a `Result` with this error type.
 #[derive(Debug)]
 pub enum RpcClientError<C: ChannelTypes> {
+    /// There is no channel available
+    NoChannel,
     /// Unable to open a stream to the server
-    Open(ClientOpenBiError<C>),
+    Open(C::OpenBiError),
     /// Unable to send the request to the server
     Send(C::SendError),
     /// Server closed the stream before sending a response
@@ -252,11 +252,22 @@ impl<C: ChannelTypes> fmt::Display for RpcClientError<C> {
 
 impl<C: ChannelTypes> error::Error for RpcClientError<C> {}
 
+impl<C: ChannelTypes> From<ClientOpenBiError<C>> for RpcClientError<C> {
+    fn from(e: ClientOpenBiError<C>) -> Self {
+        match e {
+            ClientOpenBiError::NoChannel => Self::NoChannel,
+            ClientOpenBiError::OpenBiError(e) => Self::Open(e),
+        }
+    }
+}
+
 /// Server error when accepting a bidi request
 #[derive(Debug)]
 pub enum BidiError<C: ChannelTypes> {
+    /// There is no channel available
+    NoChannel,
     /// Unable to open a stream to the server
-    Open(ClientOpenBiError<C>),
+    Open(C::OpenBiError),
     /// Unable to send the request to the server
     Send(C::SendError),
 }
@@ -268,6 +279,15 @@ impl<C: ChannelTypes> fmt::Display for BidiError<C> {
 }
 
 impl<C: ChannelTypes> error::Error for BidiError<C> {}
+
+impl<C: ChannelTypes> From<ClientOpenBiError<C>> for BidiError<C> {
+    fn from(e: ClientOpenBiError<C>) -> Self {
+        match e {
+            ClientOpenBiError::NoChannel => Self::NoChannel,
+            ClientOpenBiError::OpenBiError(e) => Self::Open(e),
+        }
+    }
+}
 
 /// Server error when receiving an item for a bidi request
 #[derive(Debug)]
@@ -289,8 +309,10 @@ impl<C: ChannelTypes> error::Error for BidiItemError<C> {}
 /// Server error when accepting a client streaming request
 #[derive(Debug)]
 pub enum ClientStreamingError<C: ChannelTypes> {
+    /// There is no channel available
+    NoChannel,
     /// Unable to open a stream to the server
-    Open(ClientOpenBiError<C>),
+    Open(C::OpenBiError),
     /// Unable to send the request to the server
     Send(C::SendError),
 }
@@ -302,6 +324,15 @@ impl<C: ChannelTypes> fmt::Display for ClientStreamingError<C> {
 }
 
 impl<C: ChannelTypes> error::Error for ClientStreamingError<C> {}
+
+impl<C: ChannelTypes> From<ClientOpenBiError<C>> for ClientStreamingError<C> {
+    fn from(e: ClientOpenBiError<C>) -> Self {
+        match e {
+            ClientOpenBiError::NoChannel => Self::NoChannel,
+            ClientOpenBiError::OpenBiError(e) => Self::Open(e),
+        }
+    }
+}
 
 /// Server error when receiving an item for a client streaming request
 #[derive(Debug)]
@@ -325,8 +356,10 @@ impl<C: ChannelTypes> error::Error for ClientStreamingItemError<C> {}
 /// Server error when accepting a server streaming request
 #[derive(Debug)]
 pub enum StreamingResponseError<C: ChannelTypes> {
+    /// There is no channel available
+    NoChannel,
     /// Unable to open a stream to the server
-    Open(ClientOpenBiError<C>),
+    Open(C::OpenBiError),
     /// Unable to send the request to the server
     Send(C::SendError),
 }
@@ -339,6 +372,14 @@ impl<C: ChannelTypes> fmt::Display for StreamingResponseError<C> {
 
 impl<C: ChannelTypes> error::Error for StreamingResponseError<C> {}
 
+impl<C: ChannelTypes> From<ClientOpenBiError<C>> for StreamingResponseError<C> {
+    fn from(e: ClientOpenBiError<C>) -> Self {
+        match e {
+            ClientOpenBiError::NoChannel => Self::NoChannel,
+            ClientOpenBiError::OpenBiError(e) => Self::Open(e),
+        }
+    }
+}
 /// Client error when handling responses from a server streaming request
 #[derive(Debug)]
 pub enum StreamingResponseItemError<C: ChannelTypes> {

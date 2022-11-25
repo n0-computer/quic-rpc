@@ -139,7 +139,7 @@ pub trait ChannelTypes: Debug + Sized + Send + Sync + Unpin + Clone + 'static {
         Self: 'a;
 
     /// Errors that can happen when creating a channel
-    type CreateChannelError: RpcError + Clone;
+    type CreateChannelError: RpcError;
 
     /// Channel type
     type Channel<In: RpcMessage, Out: RpcMessage>: crate::Channel<In, Out, Self>;
