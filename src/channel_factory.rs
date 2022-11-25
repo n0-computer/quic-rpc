@@ -12,20 +12,20 @@ use crate::{ChannelTypes, RpcMessage};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ChannelId(pub u64);
 
-/// A channel handle
+/// A channel with an id to uniquely identify it
 #[allow(type_alias_bounds)]
 pub(crate) type NumberedChannel<In: RpcMessage, Out: RpcMessage, C: ChannelTypes> =
     (C::Channel<In, Out>, ChannelId);
 
 /// Result when attempting to open a channel
 #[allow(type_alias_bounds)]
-pub(crate) type ChannelOrError<In: RpcMessage, Out: RpcMessage, C: ChannelTypes> =
-    Result<NumberedChannel<In, Out, C>, C::CreateChannelError>;
-
-/// Result when attempting to open a channel
-#[allow(type_alias_bounds)]
 pub(crate) type CreateChannelResult<In: RpcMessage, Out: RpcMessage, C: ChannelTypes> =
     Result<C::Channel<In, Out>, C::CreateChannelError>;
+
+/// Result containing a numbered channel or an error
+#[allow(type_alias_bounds)]
+pub(crate) type ChannelOrError<In: RpcMessage, Out: RpcMessage, C: ChannelTypes> =
+    Result<NumberedChannel<In, Out, C>, C::CreateChannelError>;
 
 #[allow(unused_variables)]
 /// A channel factory provides channels and keeps track of channel errors.

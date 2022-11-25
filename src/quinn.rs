@@ -204,10 +204,10 @@ impl<In: RpcMessage + Sync, Out: RpcMessage + Sync> crate::Channel<In, Out, Quin
 pub enum CreateChannelError {
     /// Something went wrong immediately when creating the quinn endpoint
     Io(io::ErrorKind, String),
-    /// We got an endpoint, but were unable to actually open a connection and produce a channel
-    Connection(quinn::ConnectionError),
-    /// We got an endpoint, but were unable to actually open a connection and produce a channel
+    /// Error directly when calling connect on the quinn endpoint
     Connect(quinn::ConnectError),
+    /// Error produced by the future returned by connect
+    Connection(quinn::ConnectionError),
 }
 
 impl From<io::Error> for CreateChannelError {
