@@ -34,4 +34,4 @@ rustls = "0.20.7"
 thousands = "0.2.0"
 
 [workspace]
-members = ["examples/split/types", "examples/split/server", "examples/split/client"]
+members = ["examples/split/types", "examples/split/server", "examples/split/client", "examples/split/lazy"]

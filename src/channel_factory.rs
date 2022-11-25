@@ -191,19 +191,23 @@ where
     }
 }
 
-fn should_update<C>(target: &Option<(C, ChannelId)>, source: &ChannelId) -> bool {
+fn should_update_target<C>(target: &Option<(C, ChannelId)>, source: &ChannelId) -> bool {
     match target {
-        Some((_chan, id)) => id == source,
+        // if the target is a channel, update if it is a different channel
+        Some((_chan, id)) => id != source,
+        // otherwise, update in any case. Anything is better than None
         None => true,
     }
 }
 
-fn is_current_channel<C, E>(
+fn should_spawn_task<C, E>(
     target: &Option<Result<(C, ChannelId), E>>,
     source_id: ChannelId,
 ) -> bool {
     match target {
+        // we got an error for our current channel, so we should try to get a new channel
         Some(Ok((_chan, id))) => *id == source_id,
+        // we got either no channel or an error from the last task, so we should try again
         _ => true,
     }
 }
@@ -220,7 +224,7 @@ where
         let mut this = self.0.lock().unwrap();
         this.update_current();
         if let Some(Ok(channel)) = &this.current {
-            if should_update(target, &channel.1) {
+            if should_update_target(target, &channel.1) {
                 *target = Some(channel.clone());
             }
         }
@@ -229,7 +233,7 @@ where
     fn accept_bi_error(&self, channel: ChannelId, _error: &C::AcceptBiError) {
         let mut this = self.0.lock().unwrap();
         // does this error refer to the current channel?
-        if is_current_channel(&this.current, channel) {
+        if should_spawn_task(&this.current, channel) {
             this.maybe_spawn_open();
         }
     }
@@ -237,7 +241,7 @@ where
     fn open_bi_error(&self, channel: ChannelId, _error: &C::OpenBiError) {
         let mut this = self.0.lock().unwrap();
         // does this error refer to the current channel?
-        if is_current_channel(&this.current, channel) {
+        if should_spawn_task(&this.current, channel) {
             this.maybe_spawn_open();
         }
     }
