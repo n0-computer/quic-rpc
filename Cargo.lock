@@ -486,7 +486,6 @@ dependencies = [
  "derive_more",
  "flume",
  "futures",
- "parking_lot",
  "pin-project",
  "quinn",
  "rcgen",

@@ -221,11 +221,28 @@ impl Display for OpenBiError {
 
 impl std::error::Error for OpenBiError {}
 
+/// CreateChannelError for mem channels.
+///
+/// You can always create a mem channel, so there is no possible error.
+/// Nevertheless we need a type for it.
+#[derive(Debug, Clone, Copy)]
+pub enum CreateChannelError {}
+
+impl Display for CreateChannelError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Debug::fmt(self, f)
+    }
+}
+
+impl std::error::Error for CreateChannelError {}
+
 /// Types for mem channels.
 #[derive(Debug, Clone, Copy)]
 pub struct MemChannelTypes;
 
 impl crate::ChannelTypes for MemChannelTypes {
+    type CreateChannelError = self::CreateChannelError;
+
     type SendSink<M: RpcMessage> = self::SendSink<M>;
 
     type RecvStream<M: RpcMessage> = self::RecvStream<M>;

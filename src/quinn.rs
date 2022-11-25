@@ -166,6 +166,8 @@ impl<'a, In, Out> Future for AcceptBiFuture<'a, In, Out> {
 //     BoxFuture<'a, result::Result<self::Socket<In, Out>, self::AcceptBiError>>;
 
 impl crate::ChannelTypes for QuinnChannelTypes {
+    type CreateChannelError = self::CreateChannelError;
+
     type SendSink<M: RpcMessage> = self::SendSink<M>;
 
     type RecvStream<M: RpcMessage> = self::RecvStream<M>;
@@ -196,3 +198,20 @@ impl<In: RpcMessage + Sync, Out: RpcMessage + Sync> crate::Channel<In, Out, Quin
         AcceptBiFuture(self.0.accept_bi(), PhantomData)
     }
 }
+
+/// CreateChannelError for quinn channels.
+#[derive(Debug, Clone)]
+pub enum CreateChannelError {
+    /// Something went wrong immediately when creating the quinn endpoint
+    IoError(io::ErrorKind, String),
+    /// We got an endpoint, but were unable to actually open a connection and produce a channel
+    ConnectError(quinn::ConnectError),
+}
+
+impl fmt::Display for CreateChannelError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Debug::fmt(self, f)
+    }
+}
+
+impl std::error::Error for CreateChannelError {}

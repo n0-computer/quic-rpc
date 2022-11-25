@@ -56,7 +56,7 @@ impl Fs {
 async fn main() -> anyhow::Result<()> {
     let fs = Fs;
     let (server, client) = quic_rpc::mem::connection::<IoRequest, IoResponse>(1);
-    let client = RpcClient::<IoService, MemChannelTypes>::new(client);
+    let mut client = RpcClient::<IoService, MemChannelTypes>::new(client);
     let server = RpcServer::<IoService, MemChannelTypes>::new(server);
     let handle = tokio::task::spawn(async move {
         for _ in 0..1 {

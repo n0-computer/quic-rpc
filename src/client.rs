@@ -2,8 +2,9 @@
 //!
 //! This defines the RPC client DSL
 use crate::{
+    channel_factory::{ChannelFactory, ChannelHandle},
     message::{BidiStreaming, ClientStreaming, Msg, Rpc, ServerStreaming},
-    Channel, ChannelTypes, OpenChannelError, Service,
+    Channel, ChannelTypes, Service,
 };
 use futures::{
     future::BoxFuture, stream::BoxStream, FutureExt, Sink, SinkExt, Stream, StreamExt, TryFutureExt,
@@ -19,58 +20,22 @@ use std::{
     task::{Context, Poll},
 };
 
-/// A channel factory holds a channel or a cause for there being no channel.
-///
-/// It is informed when there are issues with the current channel and can then decide to
-/// create a new channel and replace the old one.
-pub trait ChannelFactory<S: Service, C: ChannelTypes>: fmt::Debug + Send + Sync + 'static {
-    /// The current channel or reason why there is no channel.
-    ///
-    /// This method always returns immediately, even if there is no channel. It might trigger
-    /// acquisition of a new channel in the background.
-    fn current(&self) -> Result<C::Channel<S::Res, S::Req>, OpenChannelError>;
-
-    /// Notification that there has been an error for the given channel. Depending on the error,
-    /// this might indicate that the channel is no longer usable and a new one should be created.
-    fn open_bi_error(&self, _channel: &C::Channel<S::Res, S::Req>, _error: &C::OpenBiError) {}
-
-    /// Notification that there has been an error for the given channel. Depending on the error,
-    /// this might indicate that the channel is no longer usable and a new one should be created.
-    fn accept_bi_error(&self, _channel: &C::Channel<S::Res, S::Req>, _error: &C::AcceptBiError) {}
-}
-
-struct StaticChannelFactory<S: Service, C: ChannelTypes> {
-    channel: C::Channel<S::Res, S::Req>,
-}
-
-impl<S: Service, C: ChannelTypes> Debug for StaticChannelFactory<S, C> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("StaticChannelFactory")
-            .field("channel", &self.channel)
-            .finish()
-    }
-}
-
-impl<S: Service, C: ChannelTypes> ChannelFactory<S, C> for StaticChannelFactory<S, C> {
-    fn current(&self) -> Result<C::Channel<S::Res, S::Req>, OpenChannelError> {
-        Ok(self.channel.clone())
-    }
-}
-
 /// A client for a specific service
 ///
 /// This is a wrapper around a [crate::Channel] that serves as the entry point for the client DSL.
 /// `S` is the service type, `C` is the channel type.
 #[derive(Debug)]
 pub struct RpcClient<S: Service, C: ChannelTypes> {
-    channel: Arc<dyn ChannelFactory<S, C>>,
+    factory: Option<Arc<dyn ChannelFactory<S, C>>>,
+    current: Option<ChannelHandle<S, C>>,
     _s: PhantomData<S>,
 }
 
 impl<S: Service, C: ChannelTypes> Clone for RpcClient<S, C> {
     fn clone(&self) -> Self {
         Self {
-            channel: self.channel.clone(),
+            factory: self.factory.clone(),
+            current: self.current.clone(),
             _s: self._s,
         }
     }
@@ -109,8 +74,10 @@ impl<S: Service, C: ChannelTypes, M: Msg<S>> Sink<M::Update> for UpdateSink<S, C
 /// Either an error opening a channel, or an error opening a subchannel
 #[derive(Debug)]
 pub enum ClientOpenBiError<C: ChannelTypes> {
+    /// There is no channel yet
+    NoChannel,
     /// Error opening the channel
-    OpenChannelError(crate::OpenChannelError),
+    OpenChannelError(C::CreateChannelError),
     /// Error opening the subchannel
     OpenBiError(C::OpenBiError),
 }
@@ -118,13 +85,18 @@ pub enum ClientOpenBiError<C: ChannelTypes> {
 impl<S: Service, C: ChannelTypes> RpcClient<S, C> {
     /// Create a new rpc client from a channel
     pub fn new(channel: C::Channel<S::Res, S::Req>) -> Self {
-        Self::lazy(Arc::new(StaticChannelFactory { channel }))
+        Self {
+            factory: None,
+            current: Some(Arc::new(channel)),
+            _s: PhantomData,
+        }
     }
 
     /// Create a new rpc client from a channel holder
-    pub fn lazy(channel: Arc<dyn ChannelFactory<S, C>>) -> Self {
+    pub fn from_factory(factory: Arc<dyn ChannelFactory<S, C>>) -> Self {
         Self {
-            channel,
+            factory: Some(factory),
+            current: None,
             _s: PhantomData,
         }
     }
@@ -133,23 +105,25 @@ impl<S: Service, C: ChannelTypes> RpcClient<S, C> {
     async fn open_bi(
         &self,
     ) -> result::Result<(C::SendSink<S::Req>, C::RecvStream<S::Res>), ClientOpenBiError<C>> {
-        match self.channel.current() {
-            Ok(channel) => match channel.open_bi().await {
+        match &self.current {
+            Some(channel) => match channel.open_bi().await {
                 Ok(chan) => Ok(chan),
                 Err(e) => {
-                    self.channel.open_bi_error(&channel, &e);
+                    // let the factory know that we got an error
+                    self.factory.open_bi_error(channel, &e);
                     Err(ClientOpenBiError::OpenBiError(e))
                 }
             },
-            Err(e) => Err(ClientOpenBiError::OpenChannelError(e)),
+            None => Err(ClientOpenBiError::NoChannel),
         }
     }
 
     /// RPC call to the server, single request, single response
-    pub async fn rpc<M>(&self, msg: M) -> result::Result<M::Response, RpcClientError<C>>
+    pub async fn rpc<M>(&mut self, msg: M) -> result::Result<M::Response, RpcClientError<C>>
     where
         M: Msg<S, Pattern = Rpc> + Into<S::Req>,
     {
+        self.factory.update_channel(&mut self.current);
         let msg = msg.into();
         let (mut send, mut recv) = self.open_bi().await.map_err(RpcClientError::Open)?;
         send.send(msg).await.map_err(RpcClientError::Send)?;

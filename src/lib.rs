@@ -71,6 +71,7 @@ pub mod quinn;
 pub use client::RpcClient;
 pub mod server;
 pub use server::RpcServer;
+pub mod channel_factory;
 
 /// requirements for a RPC message
 ///
@@ -96,13 +97,6 @@ pub trait Service: Send + Sync + Debug + Clone + 'static {
     type Req: RpcMessage;
     /// Type of response messages
     type Res: RpcMessage;
-}
-
-/// Generic error opening a channel
-#[derive(Debug, Clone)]
-pub enum OpenChannelError {
-    /// There is no channel
-    NoChannel,
 }
 
 /// Defines a set of types for a kind of channel
@@ -143,6 +137,9 @@ pub trait ChannelTypes: Debug + Sized + Send + Sync + Unpin + Clone + 'static {
         + 'a
     where
         Self: 'a;
+
+    /// Errors that can happen when creating a channel
+    type CreateChannelError: RpcError + Clone;
 
     /// Channel type
     type Channel<In: RpcMessage, Out: RpcMessage>: crate::Channel<In, Out, Self>;

@@ -208,7 +208,7 @@ impl ComputeService {
 pub async fn smoke_test<C: ChannelTypes>(
     client: C::Channel<ComputeResponse, ComputeRequest>,
 ) -> anyhow::Result<()> {
-    let client = RpcClient::<ComputeService, C>::new(client);
+    let mut client = RpcClient::<ComputeService, C>::new(client);
     // a rpc call
     let res = client.rpc(Sqr(1234)).await?;
     assert_eq!(res, SqrResponse(1522756));
@@ -243,7 +243,7 @@ pub async fn smoke_test<C: ChannelTypes>(
 }
 
 pub async fn bench<C: ChannelTypes>(
-    client: RpcClient<ComputeService, C>,
+    mut client: RpcClient<ComputeService, C>,
     n: u64,
 ) -> anyhow::Result<()>
 where
@@ -270,7 +270,7 @@ where
         let reqs = futures::stream::iter((0..n).map(Sqr));
         let resp = reqs
             .map(|x| {
-                let client = client.clone();
+                let mut client = client.clone();
                 async move {
                     let res = client.rpc(x).await?.0;
                     anyhow::Ok(res)
