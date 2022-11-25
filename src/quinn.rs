@@ -203,9 +203,29 @@ impl<In: RpcMessage + Sync, Out: RpcMessage + Sync> crate::Channel<In, Out, Quin
 #[derive(Debug, Clone)]
 pub enum CreateChannelError {
     /// Something went wrong immediately when creating the quinn endpoint
-    IoError(io::ErrorKind, String),
+    Io(io::ErrorKind, String),
     /// We got an endpoint, but were unable to actually open a connection and produce a channel
-    ConnectError(quinn::ConnectError),
+    Connection(quinn::ConnectionError),
+    /// We got an endpoint, but were unable to actually open a connection and produce a channel
+    Connect(quinn::ConnectError),
+}
+
+impl From<io::Error> for CreateChannelError {
+    fn from(e: io::Error) -> Self {
+        CreateChannelError::Io(e.kind(), e.to_string())
+    }
+}
+
+impl From<quinn::ConnectionError> for CreateChannelError {
+    fn from(e: quinn::ConnectionError) -> Self {
+        CreateChannelError::Connection(e)
+    }
+}
+
+impl From<quinn::ConnectError> for CreateChannelError {
+    fn from(e: quinn::ConnectError) -> Self {
+        CreateChannelError::Connect(e)
+    }
 }
 
 impl fmt::Display for CreateChannelError {

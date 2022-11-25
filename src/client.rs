@@ -107,8 +107,9 @@ impl<S: Service, C: ChannelTypes> RpcClient<S, C> {
 
     /// Open a bidi connection on an existing channel, or possibly also open a new channel
     async fn open_bi(
-        &self,
+        &mut self,
     ) -> result::Result<(C::SendSink<S::Req>, C::RecvStream<S::Res>), ClientOpenBiError<C>> {
+        self.factory.update_channel(&mut self.current);
         match &self.current {
             Some((channel, id)) => match channel.open_bi().await {
                 Ok(chan) => Ok(chan),
@@ -127,7 +128,6 @@ impl<S: Service, C: ChannelTypes> RpcClient<S, C> {
     where
         M: Msg<S, Pattern = Rpc> + Into<S::Req>,
     {
-        self.factory.update_channel(&mut self.current);
         let msg = msg.into();
         let (mut send, mut recv) = self.open_bi().await.map_err(RpcClientError::Open)?;
         send.send(msg).await.map_err(RpcClientError::Send)?;

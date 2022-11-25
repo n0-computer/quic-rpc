@@ -1,9 +1,12 @@
 use futures::sink::SinkExt;
 use futures::stream::StreamExt;
+use quic_rpc::channel_factory::LazyChannelFactory;
 use quic_rpc::{quinn::QuinnChannelTypes, RpcClient};
 use quinn::{ClientConfig, Endpoint};
+use std::io;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::Duration;
 use types::compute::*;
 
 types::create_compute_client!(ComputeClient);
@@ -11,11 +14,30 @@ types::create_compute_client!(ComputeClient);
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let server_addr: SocketAddr = "127.0.0.1:12345".parse()?;
-    let endpoint = make_insecure_client_endpoint("0.0.0.0:0".parse()?)?;
-    let client = endpoint.connect(server_addr, "localhost")?.await?;
-    let client = quic_rpc::quinn::Channel::new(client);
-    let client = RpcClient::<ComputeService, QuinnChannelTypes>::new(client);
+    let bind_addr: SocketAddr = "0.0.0.0:0".parse()?;
+    let factory = LazyChannelFactory::<ComputeResponse, ComputeRequest, QuinnChannelTypes, _>::lazy(
+        move || async move {
+            println!("opening endpoint on {}", bind_addr);
+            let endpoint = make_insecure_client_endpoint(bind_addr)?;
+            let server_name = "localhost";
+            println!(
+                "connecting to {} with server name {}",
+                server_addr, server_name
+            );
+            let client = endpoint.connect(server_addr, server_name)?.await?;
+            println!("connected. creating channel");
+            let client = quic_rpc::quinn::Channel::new(client);
+            Ok(client)
+        },
+    );
+    let client = RpcClient::<ComputeService, QuinnChannelTypes>::from_factory(Arc::new(factory));
     let mut client = ComputeClient(client);
+
+    // just do some simple call in a loop until the server side is available
+    while let Err(e) = client.square(Sqr(5)).await {
+        println!("Got error: {}. probably the server is not there yet.", e);
+        tokio::time::sleep(Duration::from_secs(1)).await;
+    }
 
     // a rpc call
     for i in 0..3 {
@@ -62,7 +84,7 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-pub fn make_insecure_client_endpoint(bind_addr: SocketAddr) -> anyhow::Result<Endpoint> {
+pub fn make_insecure_client_endpoint(bind_addr: SocketAddr) -> io::Result<Endpoint> {
     let crypto = rustls::ClientConfig::builder()
         .with_safe_defaults()
         .with_custom_certificate_verifier(Arc::new(SkipServerVerification))
