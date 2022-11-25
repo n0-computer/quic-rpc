@@ -2,8 +2,10 @@
 
 A streaming rpc system based on quic
 
-[![Latest Version]][crates.io] [![Docs Badge]][docs.rs] ![license badge] [![status badge]][status link]
+[![Github badge]][repo link] [![Latest Version]][crates.io] [![Docs Badge]][docs.rs] ![license badge] [![status badge]][status link]
 
+[Github badge] https://img.shields.io/badge/github-quic_rpc-8da0cb?style=for-the-badge&labelColor=555555&logo=github
+[repo link] https://github.com/n0-computer/quic-rpc
 [Latest Version]: https://img.shields.io/crates/v/quic-rpc.svg
 [crates.io]: https://crates.io/crates/quic-rpc
 [Docs Badge]: https://img.shields.io/badge/docs-docs.rs-green
