@@ -181,7 +181,7 @@ async fn main() -> anyhow::Result<()> {
     async fn server_future(
         server: RpcServer<StoreService, MemChannelTypes>,
     ) -> result::Result<(), RpcServerError<MemChannelTypes>> {
-        let s = server;
+        let mut s = server;
         let store = Store;
         loop {
             let (req, chan) = s.accept_one().await?;
@@ -201,7 +201,7 @@ async fn main() -> anyhow::Result<()> {
     }
 
     let (client, server) = mem::connection::<StoreResponse, StoreRequest>(1);
-    let client = RpcClient::<StoreService, MemChannelTypes>::new(client);
+    let mut client = RpcClient::<StoreService, MemChannelTypes>::new(client);
     let server = RpcServer::<StoreService, MemChannelTypes>::new(server);
     let server_handle = tokio::task::spawn(server_future(server));
 

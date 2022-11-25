@@ -47,7 +47,7 @@
 //! let (server, client) = quic_rpc::mem::connection::<PingRequest, PingResponse>(1);
 //!
 //! // create the rpc client given the channel and the service type
-//! let client = RpcClient::<PingService, MemChannelTypes>::new(client);
+//! let mut client = RpcClient::<PingService, MemChannelTypes>::new(client);
 //!
 //! // call the service
 //! let res = client.rpc(Ping).await?;
@@ -71,6 +71,7 @@ pub mod quinn;
 pub use client::RpcClient;
 pub mod server;
 pub use server::RpcServer;
+pub mod channel_factory;
 
 /// requirements for a RPC message
 ///
@@ -136,6 +137,9 @@ pub trait ChannelTypes: Debug + Sized + Send + Sync + Unpin + Clone + 'static {
         + 'a
     where
         Self: 'a;
+
+    /// Errors that can happen when creating a channel
+    type CreateChannelError: RpcError;
 
     /// Channel type
     type Channel<In: RpcMessage, Out: RpcMessage>: crate::Channel<In, Out, Self>;

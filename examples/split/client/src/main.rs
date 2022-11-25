@@ -2,6 +2,7 @@ use futures::sink::SinkExt;
 use futures::stream::StreamExt;
 use quic_rpc::{quinn::QuinnChannelTypes, RpcClient};
 use quinn::{ClientConfig, Endpoint};
+use std::io;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use types::compute::*;
@@ -62,7 +63,7 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-pub fn make_insecure_client_endpoint(bind_addr: SocketAddr) -> anyhow::Result<Endpoint> {
+pub fn make_insecure_client_endpoint(bind_addr: SocketAddr) -> io::Result<Endpoint> {
     let crypto = rustls::ClientConfig::builder()
         .with_safe_defaults()
         .with_custom_certificate_verifier(Arc::new(SkipServerVerification))

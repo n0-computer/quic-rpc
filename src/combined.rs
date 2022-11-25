@@ -180,6 +180,21 @@ impl<A: ChannelTypes, B: ChannelTypes> fmt::Display for AcceptBiError<A, B> {
     }
 }
 
+/// AcceptBiError for combined channels
+#[derive(Debug, Clone)]
+pub enum CreateChannelError<A: ChannelTypes, B: ChannelTypes> {
+    /// A variant
+    A(A::CreateChannelError),
+    /// B variant
+    B(B::CreateChannelError),
+}
+
+impl<A: ChannelTypes, B: ChannelTypes> fmt::Display for CreateChannelError<A, B> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Debug::fmt(self, f)
+    }
+}
+
 /// Future returned by open_bi
 pub type OpenBiFuture<'a, A, B, In, Out> =
     BoxFuture<'a, result::Result<Socket<A, B, In, Out>, self::OpenBiError<A, B>>>;
@@ -198,6 +213,8 @@ type Socket<A, B, In, Out> = (self::SendSink<A, B, Out>, self::RecvStream<A, B, 
 pub struct CombinedChannelTypes<A: ChannelTypes, B: ChannelTypes>(PhantomData<(A, B)>);
 
 impl<A: ChannelTypes, B: ChannelTypes> crate::ChannelTypes for CombinedChannelTypes<A, B> {
+    type CreateChannelError = self::CreateChannelError<A, B>;
+
     type SendSink<M: RpcMessage> = self::SendSink<A, B, M>;
 
     type RecvStream<M: RpcMessage> = self::RecvStream<A, B, M>;

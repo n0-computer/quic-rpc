@@ -94,7 +94,7 @@ impl ComputeService {
     pub async fn server<C: ChannelTypes>(
         server: RpcServer<ComputeService, C>,
     ) -> result::Result<(), RpcServerError<C>> {
-        let s = server;
+        let mut s = server;
         let service = ComputeService;
         loop {
             let (req, chan) = s.accept_one().await?;
