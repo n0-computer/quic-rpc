@@ -61,7 +61,7 @@ async fn main() -> anyhow::Result<()> {
     let handle = tokio::task::spawn(async move {
         for _ in 0..1 {
             let (req, chan) = server.accept_one().await?;
-            let s = server.clone();
+            let mut s = server.clone();
             match req {
                 IoRequest::Write(req) => s.rpc_map_err(req, chan, fs, Fs::write).await,
             }?

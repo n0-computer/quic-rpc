@@ -2,7 +2,7 @@
 //!
 //! This defines the RPC client DSL
 use crate::{
-    channel_factory::{ChannelFactory, ChannelHandle},
+    channel_factory::{ChannelFactory, ChannelId, NumberedChannel},
     message::{BidiStreaming, ClientStreaming, Msg, Rpc, ServerStreaming},
     Channel, ChannelTypes, Service,
 };
@@ -26,8 +26,12 @@ use std::{
 /// `S` is the service type, `C` is the channel type.
 #[derive(Debug)]
 pub struct RpcClient<S: Service, C: ChannelTypes> {
-    factory: Option<Arc<dyn ChannelFactory<S, C>>>,
-    current: Option<ChannelHandle<S, C>>,
+    /// the optional channel factory that can be informed when channels produce errors,
+    /// and that can then create new channels.
+    #[allow(clippy::type_complexity)]
+    factory: Option<Arc<dyn ChannelFactory<S::Res, S::Req, C>>>,
+    /// the optional channel used for RPCs. If this is none, all RPCs will fail.
+    current: Option<NumberedChannel<S::Res, S::Req, C>>,
     _s: PhantomData<S>,
 }
 
@@ -78,7 +82,7 @@ pub enum ClientOpenBiError<C: ChannelTypes> {
     NoChannel,
     /// Error opening the channel
     OpenChannelError(C::CreateChannelError),
-    /// Error opening the subchannel
+    /// Error opening the substream pair
     OpenBiError(C::OpenBiError),
 }
 
@@ -87,13 +91,13 @@ impl<S: Service, C: ChannelTypes> RpcClient<S, C> {
     pub fn new(channel: C::Channel<S::Res, S::Req>) -> Self {
         Self {
             factory: None,
-            current: Some(Arc::new(channel)),
+            current: Some((channel, ChannelId(0))),
             _s: PhantomData,
         }
     }
 
     /// Create a new rpc client from a channel holder
-    pub fn from_factory(factory: Arc<dyn ChannelFactory<S, C>>) -> Self {
+    pub fn from_factory(factory: Arc<dyn ChannelFactory<S::Res, S::Req, C>>) -> Self {
         Self {
             factory: Some(factory),
             current: None,
@@ -106,11 +110,11 @@ impl<S: Service, C: ChannelTypes> RpcClient<S, C> {
         &self,
     ) -> result::Result<(C::SendSink<S::Req>, C::RecvStream<S::Res>), ClientOpenBiError<C>> {
         match &self.current {
-            Some(channel) => match channel.open_bi().await {
+            Some((channel, id)) => match channel.open_bi().await {
                 Ok(chan) => Ok(chan),
                 Err(e) => {
                     // let the factory know that we got an error
-                    self.factory.open_bi_error(channel, &e);
+                    self.factory.open_bi_error(*id, &e);
                     Err(ClientOpenBiError::OpenBiError(e))
                 }
             },
@@ -139,7 +143,7 @@ impl<S: Service, C: ChannelTypes> RpcClient<S, C> {
 
     /// Bidi call to the server, request opens a stream, response is a stream
     pub async fn server_streaming<M>(
-        &self,
+        &mut self,
         msg: M,
     ) -> result::Result<
         BoxStream<'static, result::Result<M::Response, StreamingResponseItemError<C>>>,
@@ -164,7 +168,7 @@ impl<S: Service, C: ChannelTypes> RpcClient<S, C> {
 
     /// Call to the server that allows the client to stream, single response
     pub async fn client_streaming<M>(
-        &self,
+        &mut self,
         msg: M,
     ) -> result::Result<
         (
@@ -199,7 +203,7 @@ impl<S: Service, C: ChannelTypes> RpcClient<S, C> {
 
     /// Bidi call to the server, request opens a stream, response is a stream
     pub async fn bidi<M>(
-        &self,
+        &mut self,
         msg: M,
     ) -> result::Result<
         (

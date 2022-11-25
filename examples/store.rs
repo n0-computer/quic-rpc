@@ -181,7 +181,7 @@ async fn main() -> anyhow::Result<()> {
     async fn server_future(
         server: RpcServer<StoreService, MemChannelTypes>,
     ) -> result::Result<(), RpcServerError<MemChannelTypes>> {
-        let s = server;
+        let mut s = server;
         let store = Store;
         loop {
             let (req, chan) = s.accept_one().await?;
