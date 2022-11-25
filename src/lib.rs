@@ -98,6 +98,13 @@ pub trait Service: Send + Sync + Debug + Clone + 'static {
     type Res: RpcMessage;
 }
 
+/// Generic error opening a channel
+#[derive(Debug, Clone)]
+pub enum OpenChannelError {
+    /// There is no channel
+    NoChannel,
+}
+
 /// Defines a set of types for a kind of channel
 ///
 /// Every distinct kind of channel has its own ChannelType. See e.g.
