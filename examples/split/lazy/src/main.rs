@@ -1,3 +1,9 @@
+//! Lazy client example
+//!
+//! This opens a RpcClient in lazy mode and tries to perform some PRC calls in a loop.
+//!
+//! To try this out, start and stop the server in a separate terminal. You should see
+//! the client reconnecting to the server after some time.
 use quic_rpc::channel_factory::LazyChannelFactory;
 use quic_rpc::{quinn::QuinnChannelTypes, RpcClient};
 use quinn::{ClientConfig, Endpoint};
