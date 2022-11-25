@@ -13,35 +13,17 @@ types::create_compute_client!(ComputeClient);
 async fn main() -> anyhow::Result<()> {
     let bind_addr: SocketAddr = "0.0.0.0:0".parse()?;
     let server_addr: SocketAddr = "127.0.0.1:12345".parse()?;
+    let server_name = "localhost";
     let factory = LazyChannelFactory::<ComputeResponse, ComputeRequest, QuinnChannelTypes, _>::lazy(
         move || async move {
             println!("opening endpoint on {}", bind_addr);
-            let endpoint = match make_insecure_client_endpoint(bind_addr) {
-                Ok(endpoint) => endpoint,
-                Err(e) => {
-                    println!("Error opening endpoint: {}", e);
-                    return Err(e.into());
-                }
-            };
-            let server_name = "localhost";
-            println!(
-                "connecting to {} with server name {}",
-                server_addr, server_name
-            );
-            let connecting = match endpoint.connect(server_addr, server_name) {
-                Ok(connecting) => connecting,
-                Err(e) => {
-                    println!("Error calling collect: {}", e);
-                    return Err(e.into());
-                }
-            };
-            let connection = match connecting.await {
-                Ok(connection) => connection,
-                Err(e) => {
-                    println!("Error from connect future: {}", e);
-                    return Err(e.into());
-                }
-            };
+            let endpoint = make_insecure_client_endpoint(bind_addr).map_err(|e| dbg!(e))?;
+            println!("connecting to {} with {}", server_addr, server_name);
+            let connection = endpoint
+                .connect(server_addr, server_name)
+                .map_err(|e| dbg!(e))?
+                .await
+                .map_err(|e| dbg!(e))?;
             println!("connected. creating channel");
             let client = quic_rpc::quinn::Channel::new(connection);
             Ok(client)
