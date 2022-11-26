@@ -35,8 +35,7 @@ async fn main() -> anyhow::Result<()> {
             Ok(client)
         },
     );
-    let mut client =
-        RpcClient::<ComputeService, QuinnChannelTypes>::from_factory(Arc::new(factory));
+    let client = RpcClient::<ComputeService, QuinnChannelTypes>::from_factory(Arc::new(factory));
 
     for i in 0..100000 {
         match client.rpc(Sqr(i)).await {

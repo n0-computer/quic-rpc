@@ -35,11 +35,8 @@ pub(crate) type ChannelOrError<In: RpcMessage, Out: RpcMessage, C: ChannelTypes>
 pub trait ChannelFactory<In: RpcMessage, Out: RpcMessage, C: ChannelTypes>:
     fmt::Debug + Send + Sync + 'static
 {
-    /// Updates a channel if there is a new channel.
-    ///
-    /// This uses the channel id to determine if the channel is identical to the one we already
-    /// have.
-    fn update_channel(&self, target: &mut Option<NumberedChannel<In, Out, C>>);
+    /// Get a clone of the current channel.
+    fn channel(&self) -> Option<NumberedChannel<In, Out, C>>;
 
     /// Notification that there has been an error for the given channel. Depending on the error,
     /// this might indicate that the channel is no longer usable and a new one should be created.
@@ -50,11 +47,31 @@ pub trait ChannelFactory<In: RpcMessage, Out: RpcMessage, C: ChannelTypes>:
     fn accept_bi_error(&self, id: ChannelId, error: &C::AcceptBiError) {}
 }
 
+pub(crate) struct ConstantChannelFactory<In: RpcMessage, Out: RpcMessage, C: ChannelTypes>(
+    pub C::Channel<In, Out>,
+);
+
+impl<In: RpcMessage, Out: RpcMessage, C: ChannelTypes> ChannelFactory<In, Out, C>
+    for ConstantChannelFactory<In, Out, C>
+{
+    fn channel(&self) -> Option<NumberedChannel<In, Out, C>> {
+        Some((self.0.clone(), ChannelId(0)))
+    }
+}
+
+impl<In: RpcMessage, Out: RpcMessage, C: ChannelTypes> fmt::Debug
+    for ConstantChannelFactory<In, Out, C>
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "ConstantChannelFactory")
+    }
+}
+
 impl<In: RpcMessage, Out: RpcMessage, C: ChannelTypes> ChannelFactory<In, Out, C>
     for Arc<dyn ChannelFactory<In, Out, C>>
 {
-    fn update_channel(&self, target: &mut Option<NumberedChannel<In, Out, C>>) {
-        (**self).update_channel(target)
+    fn channel(&self) -> Option<NumberedChannel<In, Out, C>> {
+        (**self).channel()
     }
 
     fn open_bi_error(&self, id: ChannelId, error: &C::OpenBiError) {
@@ -63,30 +80,6 @@ impl<In: RpcMessage, Out: RpcMessage, C: ChannelTypes> ChannelFactory<In, Out, C
 
     fn accept_bi_error(&self, id: ChannelId, error: &C::AcceptBiError) {
         (**self).accept_bi_error(id, error)
-    }
-}
-
-/// Implement ChannelFactory for Option so you can just call the error handling
-/// methods on an option of a factory.
-impl<In: RpcMessage, Out: RpcMessage, C: ChannelTypes, T: ChannelFactory<In, Out, C>>
-    ChannelFactory<In, Out, C> for Option<T>
-{
-    fn update_channel(&self, target: &mut Option<NumberedChannel<In, Out, C>>) {
-        if let Some(this) = self {
-            this.update_channel(target)
-        }
-    }
-
-    fn open_bi_error(&self, id: ChannelId, error: &C::OpenBiError) {
-        if let Some(f) = self.as_ref() {
-            f.open_bi_error(id, error)
-        }
-    }
-
-    fn accept_bi_error(&self, id: ChannelId, error: &C::AcceptBiError) {
-        if let Some(f) = self.as_ref() {
-            f.accept_bi_error(id, error)
-        }
     }
 }
 
@@ -191,15 +184,6 @@ where
     }
 }
 
-fn should_update_target<C>(target: &Option<(C, ChannelId)>, source: &ChannelId) -> bool {
-    match target {
-        // if the target is a channel, update if it is a different channel
-        Some((_chan, id)) => id != source,
-        // otherwise, update in any case. Anything is better than None
-        None => true,
-    }
-}
-
 fn should_spawn_task<C, E>(
     target: &Option<Result<(C, ChannelId), E>>,
     source_id: ChannelId,
@@ -220,13 +204,13 @@ where
     F: Fn() -> Fut + Send + 'static,
     Fut: Future<Output = CreateChannelResult<In, Out, C>> + Send + 'static,
 {
-    fn update_channel(&self, target: &mut Option<NumberedChannel<In, Out, C>>) {
-        let mut this = self.0.lock().unwrap();
-        this.update_current();
-        if let Some(Ok(channel)) = &this.current {
-            if should_update_target(target, &channel.1) {
-                *target = Some(channel.clone());
-            }
+    fn channel(&self) -> Option<NumberedChannel<In, Out, C>> {
+        let mut inner = self.0.lock().unwrap();
+        inner.update_current();
+        if let Some(Ok((channel, id))) = &inner.current {
+            Some((channel.clone(), *id))
+        } else {
+            None
         }
     }
 

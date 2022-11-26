@@ -69,7 +69,7 @@ impl<S: Service, C: ChannelTypes> RpcServer<S, C> {
     /// This is useful if you want to write your function with a convenient error type like anyhow::Error,
     /// yet still use a serializable error type on the wire.
     pub async fn rpc_map_err<M, F, Fut, T, R, E1, E2>(
-        &mut self,
+        &self,
         req: M,
         chan: (C::SendSink<S::Res>, C::RecvStream<S::Req>),
         target: T,
@@ -96,7 +96,7 @@ impl<S: Service, C: ChannelTypes> RpcServer<S, C> {
     ///
     /// If you want to support concurrent requests, you need to spawn this on a tokio task yourself.
     pub async fn rpc<M, F, Fut, T>(
-        &mut self,
+        &self,
         req: M,
         chan: (C::SendSink<S::Res>, C::RecvStream<S::Req>),
         target: T,
@@ -129,7 +129,7 @@ impl<S: Service, C: ChannelTypes> RpcServer<S, C> {
     ///
     /// If you want to support concurrent requests, you need to spawn this on a tokio task yourself.
     pub async fn client_streaming<M, F, Fut, T>(
-        &mut self,
+        &self,
         req: M,
         c: (C::SendSink<S::Res>, C::RecvStream<S::Req>),
         target: T,
@@ -158,7 +158,7 @@ impl<S: Service, C: ChannelTypes> RpcServer<S, C> {
     ///
     /// If you want to support concurrent requests, you need to spawn this on a tokio task yourself.
     pub async fn bidi_streaming<M, F, Str, T>(
-        &mut self,
+        &self,
         req: M,
         c: (C::SendSink<S::Res>, C::RecvStream<S::Req>),
         target: T,
