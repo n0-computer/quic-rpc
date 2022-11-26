@@ -6,7 +6,7 @@ use futures::{
 };
 use pin_project::pin_project;
 use std::{
-    fmt,
+    error, fmt,
     fmt::Debug,
     marker::PhantomData,
     pin::Pin,
@@ -133,6 +133,8 @@ impl<A: ChannelTypes, B: ChannelTypes> fmt::Display for SendError<A, B> {
     }
 }
 
+impl<A: ChannelTypes, B: ChannelTypes> error::Error for SendError<A, B> {}
+
 /// RecvError for combined channels
 #[derive(Debug)]
 pub enum RecvError<A: ChannelTypes, B: ChannelTypes> {
@@ -147,6 +149,8 @@ impl<A: ChannelTypes, B: ChannelTypes> fmt::Display for RecvError<A, B> {
         fmt::Debug::fmt(self, f)
     }
 }
+
+impl<A: ChannelTypes, B: ChannelTypes> error::Error for RecvError<A, B> {}
 
 /// OpenBiError for combined channels
 #[derive(Debug)]
@@ -165,6 +169,8 @@ impl<A: ChannelTypes, B: ChannelTypes> fmt::Display for OpenBiError<A, B> {
     }
 }
 
+impl<A: ChannelTypes, B: ChannelTypes> error::Error for OpenBiError<A, B> {}
+
 /// AcceptBiError for combined channels
 #[derive(Debug)]
 pub enum AcceptBiError<A: ChannelTypes, B: ChannelTypes> {
@@ -180,6 +186,8 @@ impl<A: ChannelTypes, B: ChannelTypes> fmt::Display for AcceptBiError<A, B> {
     }
 }
 
+impl<A: ChannelTypes, B: ChannelTypes> error::Error for AcceptBiError<A, B> {}
+
 /// AcceptBiError for combined channels
 #[derive(Debug, Clone)]
 pub enum CreateChannelError<A: ChannelTypes, B: ChannelTypes> {
@@ -194,6 +202,8 @@ impl<A: ChannelTypes, B: ChannelTypes> fmt::Display for CreateChannelError<A, B>
         fmt::Debug::fmt(self, f)
     }
 }
+
+impl<A: ChannelTypes, B: ChannelTypes> error::Error for CreateChannelError<A, B> {}
 
 /// Future returned by open_bi
 pub type OpenBiFuture<'a, A, B, In, Out> =
