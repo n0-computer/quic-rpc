@@ -18,6 +18,7 @@ use std::{
     result,
     sync::Arc,
     task::{Context, Poll},
+    time::SystemTime,
 };
 
 /// A client for a specific service
@@ -119,7 +120,23 @@ impl<S: Service, C: ChannelTypes> RpcClient<S, C> {
     {
         let msg = msg.into();
         let (mut send, mut recv) = self.open_bi().await?;
+        println!(
+            "Send     {}",
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap()
+                .as_millis()
+                % 10000
+        );
         send.send(msg).await.map_err(RpcClientError::Send)?;
+        println!(
+            "End Send {}",
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap()
+                .as_millis()
+                % 10000
+        );
         let res = recv
             .next()
             .await
@@ -127,6 +144,7 @@ impl<S: Service, C: ChannelTypes> RpcClient<S, C> {
             .map_err(RpcClientError::RecvError)?;
         // keep send alive until we have the answer
         drop(send);
+        println!();
         M::Response::try_from(res).map_err(|_| RpcClientError::DowncastError)
     }
 

@@ -7,7 +7,7 @@ use crate::{
 };
 use futures::{channel::oneshot, task, task::Poll, Future, FutureExt, SinkExt, Stream, StreamExt};
 use pin_project::pin_project;
-use std::{error, fmt, fmt::Debug, marker::PhantomData, pin::Pin, result};
+use std::{error, fmt, fmt::Debug, marker::PhantomData, pin::Pin, result, time::SystemTime};
 
 /// A server channel for a specific service
 ///
@@ -52,6 +52,14 @@ impl<S: Service, C: ChannelTypes> RpcServer<S, C> {
             .accept_bi()
             .await
             .map_err(RpcServerError::AcceptBiError)?;
+        println!(
+            "Accept   {}",
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap()
+                .as_millis()
+                % 10000
+        );
         // get the first message from the client. This will tell us what it wants to do.
         let request: S::Req = channel
             .1
@@ -61,6 +69,14 @@ impl<S: Service, C: ChannelTypes> RpcServer<S, C> {
             .ok_or(RpcServerError::EarlyClose)?
             // recv error
             .map_err(RpcServerError::RecvError)?;
+        println!(
+            "Eaccept  {}",
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap()
+                .as_millis()
+                % 10000
+        );
         Ok((request, channel))
     }
 
