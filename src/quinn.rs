@@ -125,8 +125,8 @@ impl<'a, In, Out> Future for OpenBiFuture<'a, In, Out> {
             let send = FramedWrite::new(send, LengthDelimitedCodec::new());
             let recv = FramedRead::new(recv, LengthDelimitedCodec::new());
             // now switch to streams of WantRequestUpdate and WantResponse
-            let recv = SymmetricallyFramed::new(recv, SymmetricalBincode::<In>::default());
             let send = SymmetricallyFramed::new(send, SymmetricalBincode::<Out>::default());
+            let recv = SymmetricallyFramed::new(recv, SymmetricalBincode::<In>::default());
             // box so we don't have to write down the insanely long type
             let send = SendSink(send);
             let recv = RecvStream(recv);
@@ -187,7 +187,7 @@ impl crate::ChannelTypes for QuinnChannelTypes {
     type Channel<In: RpcMessage, Out: RpcMessage> = self::Channel<In, Out>;
 }
 
-impl<In: RpcMessage + Sync, Out: RpcMessage + Sync> crate::Channel<In, Out, QuinnChannelTypes>
+impl<In: RpcMessage + Sync, Out: RpcMessage> crate::Channel<In, Out, QuinnChannelTypes>
     for self::Channel<In, Out>
 {
     fn open_bi(&self) -> OpenBiFuture<'_, In, Out> {

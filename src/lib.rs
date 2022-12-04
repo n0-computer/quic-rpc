@@ -54,7 +54,7 @@
 //! # Ok(())
 //! # }
 //! ```
-#![deny(missing_docs)]
+// #![deny(missing_docs)]
 #![deny(rustdoc::broken_intra_doc_links)]
 use futures::{Future, Sink, Stream};
 use serde::{de::DeserializeOwned, Serialize};
@@ -68,6 +68,7 @@ pub mod macros;
 pub mod mem;
 pub mod message;
 pub mod quinn;
+pub mod yamux;
 pub use client::RpcClient;
 pub mod server;
 pub use server::RpcServer;
