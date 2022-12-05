@@ -25,7 +25,7 @@ use yamux::Mode;
 
 pub trait InnerConnection: AsyncRead + AsyncWrite + Unpin + Send + 'static {}
 
-impl <T: AsyncRead + AsyncWrite + Unpin + Send + 'static> InnerConnection for T {}
+impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> InnerConnection for T {}
 
 trait Ops: Send + Sync + 'static {
     fn poll_new_outbound(&self, cx: &mut Context<'_>) -> Poll<yamux::Result<yamux::Stream>>;

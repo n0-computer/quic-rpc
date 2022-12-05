@@ -1,16 +1,23 @@
 use std::{
     net::{Ipv4Addr, SocketAddr, SocketAddrV4},
     sync::Arc,
-    time::{Instant, Duration},
+    time::{Duration, Instant},
 };
 
 use anyhow::Context;
 use futures::StreamExt;
-use quic_rpc::{quinn::QuinnChannelTypes, rpc_service, ChannelTypes, RpcClient, RpcServer, yamux::YamuxChannelTypes};
+use quic_rpc::{
+    quinn::QuinnChannelTypes, rpc_service, yamux::YamuxChannelTypes, ChannelTypes, RpcClient,
+    RpcServer,
+};
 use quinn::{ClientConfig, Endpoint, ServerConfig};
 use serde::{Deserialize, Serialize};
-use tokio::{task::JoinHandle, net::{TcpSocket, TcpStream}, io::{AsyncReadExt, AsyncWriteExt}};
-use tokio_util::compat::{TokioAsyncReadCompatExt, FuturesAsyncReadCompatExt};
+use tokio::{
+    io::{AsyncReadExt, AsyncWriteExt},
+    net::{TcpSocket, TcpStream},
+    task::JoinHandle,
+};
+use tokio_util::compat::{FuturesAsyncReadCompatExt, TokioAsyncReadCompatExt};
 use yamux::Control;
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -180,6 +187,8 @@ async fn quinn_bench() -> anyhow::Result<()> {
 }
 
 /// Raw quinn benchmark, without anything related to quic-rpc
+///
+/// Just send big chunks over the wire and back
 async fn quinn_raw() -> anyhow::Result<()> {
     let Endpoints {
         client,
@@ -200,11 +209,14 @@ async fn quinn_raw() -> anyhow::Result<()> {
     let client_connection = client.connect(server_addr, "localhost")?.await?;
     let (mut send, mut recv) = client_connection.open_bi().await?;
     let mut buffer = vec![0u8; 1024 * 1024];
-    for i in 0..1000 {
-        println!("{}", i);
+    let t0 = Instant::now();
+    let n = 1000u64;
+    for _ in 0..n {
         send.write_all(&buffer).await?;
         recv.read_exact(&mut buffer).await?;
     }
+    let rate = ((buffer.len() as u64 * n) as f64 / t0.elapsed().as_secs_f64()) as u64;
+    println!("{} bytes/s", rate);
     server.abort();
     let _ = server.await;
     Ok(())
@@ -218,7 +230,7 @@ fn config() -> yamux::Config {
 async fn yamux_bench() -> anyhow::Result<()> {
     type C = YamuxChannelTypes;
     type S = BenchService;
-    let addr = "127.0.0.1:12120".parse()?;
+    let addr = "127.0.0.1:12121".parse()?;
     let server_handle = tokio::task::spawn(async move {
         let socket = TcpSocket::new_v4()?;
         println!("created socket");
@@ -228,8 +240,11 @@ async fn yamux_bench() -> anyhow::Result<()> {
         println!("got listener");
         while let Ok((stream, _addr)) = listener.accept().await {
             println!("accepted one!");
-            let connection =
-                quic_rpc::yamux::Channel::<BenchRequest, BenchResponse>::new(stream.compat(), yamux::Config::default(), yamux::Mode::Server);
+            let connection = quic_rpc::yamux::Channel::<BenchRequest, BenchResponse>::new(
+                stream.compat(),
+                yamux::Config::default(),
+                yamux::Mode::Server,
+            );
             let server = RpcServer::<S, C>::new(connection);
             BenchService::server(server).await?;
         }
@@ -239,45 +254,40 @@ async fn yamux_bench() -> anyhow::Result<()> {
     println!("calling connect {:?}", addr);
     let socket = TcpStream::connect(addr).await?;
     println!("connected to {:?}", addr);
-    let client_connection =
-    quic_rpc::yamux::Channel::<BenchResponse, BenchRequest>::new(socket.compat(), yamux::Config::default(), yamux::Mode::Client);
+    let client_connection = quic_rpc::yamux::Channel::<BenchResponse, BenchRequest>::new(
+        socket.compat(),
+        yamux::Config::default(),
+        yamux::Mode::Client,
+    );
     tokio::task::spawn(client_connection.clone().consume_incoming_streams());
     let client = RpcClient::<S, C>::new(client_connection);
     for i in 0..100 {
         println!("sending message {}", i);
-        client
-            .rpc(BulkRequest(vec![i as u8; 1024 * 1024]))
-            .await?;
+        client.rpc(BulkRequest(vec![i as u8; 1024 * 1024])).await?;
     }
     server_handle.abort();
     let _ = server_handle.await;
     Ok(())
 }
 
-/// Raw quinn benchmark, without anything related to quic-rpc
+/// Raw yamux benchmark, without anything related to quic-rpc
+///
+/// Just send big chunks over the wire and back
 async fn yamux_raw() -> anyhow::Result<()> {
     let addr = "127.0.0.1:12010".parse()?;
     let server_handle = tokio::task::spawn(async move {
         let socket = TcpSocket::new_v4()?;
-        println!("S created socket");
         socket.bind(addr)?;
-        println!("S bound to socket");
         let listener = socket.listen(1024)?;
-        println!("S got listener");
         while let Ok((stream, addr)) = listener.accept().await {
-            println!("S accepted one! {:?}", addr);
             let mut conn = yamux::Connection::new(stream.compat(), config(), yamux::Mode::Server);
             while let Some(x) = futures::future::poll_fn(|cx| conn.poll_next_inbound(cx)).await {
                 tokio::task::spawn(async move {
-                    println!("S got a substream or error {:?}", x);
                     let stream = x?;
-                    println!("S got a substream {}", stream.id());
                     let mut stream = stream.compat();
                     let mut buffer = vec![0u8; 1024 * 1024];
                     loop {
-                        println!("S reading {} bytes", buffer.len());
                         stream.read_exact(&mut buffer).await?;
-                        println!("S writing {} bytes", buffer.len());
                         stream.write_all(&buffer).await?;
                     }
                     anyhow::Ok(())
@@ -287,9 +297,7 @@ async fn yamux_raw() -> anyhow::Result<()> {
         anyhow::Ok(())
     });
     tokio::time::sleep(Duration::from_secs(1)).await;
-    println!("C calling connect {:?}", addr);
     let stream = TcpStream::connect(addr).await?;
-    println!("C wrapping into yamux p:{:?} l:{:?}", stream.peer_addr(), stream.local_addr());
     let conn = yamux::Connection::new(stream.compat(), config(), yamux::Mode::Client);
     let (mut ctrl, conn) = Control::new(conn);
     tokio::task::spawn(conn.for_each(|r| {
@@ -297,17 +305,17 @@ async fn yamux_raw() -> anyhow::Result<()> {
         r.unwrap();
         futures::future::ready(())
     }));
-    println!("C opening substream");
     let stream = ctrl.open_stream().await?;
-    println!("C opened substream {}", stream.id());
     let mut buffer = vec![0u8; 1024 * 1024];
     let mut stream = stream.compat();
-    for i in 0..1000 {
-        println!("C writing {} bytes", buffer.len());
+    let t0 = Instant::now();
+    let n = 1000u64;
+    for i in 0..n {
         stream.write_all(&buffer).await?;
-        println!("C reading {} bytes", buffer.len());
         stream.read_exact(&mut buffer).await?;
     }
+    let rate = ((buffer.len() as u64 * n) as f64 / t0.elapsed().as_secs_f64()) as u64;
+    println!("{} bytes/s", rate);
     server_handle.abort();
     let _ = server_handle.await;
     Ok(())
@@ -317,9 +325,10 @@ fn main() -> anyhow::Result<()> {
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()?;
-    let t0 = Instant::now();
-    // rt.block_on(yamux_bench())?;
-    rt.block_on(yamux_bench())?;
-    println!("Elapsed: {}", t0.elapsed().as_secs_f64());
+    println!("quinn raw");
+    rt.block_on(quinn_raw())?;
+
+    println!("yamux raw");
+    rt.block_on(yamux_raw())?;
     Ok(())
 }
