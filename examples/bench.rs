@@ -10,7 +10,7 @@ use quic_rpc::{
     quinn::QuinnChannelTypes, rpc_service, yamux::YamuxChannelTypes, ChannelTypes, RpcClient,
     RpcServer,
 };
-use quinn::{ClientConfig, Endpoint, ServerConfig};
+use quinn::{ClientConfig, Endpoint, EndpointConfig, ServerConfig, TokioRuntime};
 use serde::{Deserialize, Serialize};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -19,6 +19,8 @@ use tokio::{
 };
 use tokio_util::compat::{FuturesAsyncReadCompatExt, TokioAsyncReadCompatExt};
 use yamux::Control;
+
+const PACKET_SIZE: u16 = 9200;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct BulkRequest(Vec<u8>);
@@ -83,9 +85,17 @@ impl BenchService {
 pub fn make_client_endpoint(
     bind_addr: SocketAddr,
     server_certs: &[&[u8]],
+    packet_size: u16,
 ) -> anyhow::Result<Endpoint> {
     let client_cfg = configure_client(server_certs)?;
-    let mut endpoint = Endpoint::client(bind_addr)?;
+    let mut endpoint_config = EndpointConfig::default();
+    endpoint_config.max_udp_payload_size(packet_size as u64);
+    let mut endpoint = Endpoint::new(
+        endpoint_config,
+        None,
+        std::net::UdpSocket::bind(bind_addr)?,
+        TokioRuntime,
+    )?;
     endpoint.set_default_client_config(client_cfg);
     Ok(endpoint)
 }
@@ -98,9 +108,19 @@ pub fn make_client_endpoint(
 /// - a stream of incoming QUIC connections
 /// - server certificate serialized into DER format
 #[allow(unused)]
-pub fn make_server_endpoint(bind_addr: SocketAddr) -> anyhow::Result<(Endpoint, Vec<u8>)> {
-    let (server_config, server_cert) = configure_server()?;
-    let endpoint = Endpoint::server(server_config, bind_addr)?;
+pub fn make_server_endpoint(
+    bind_addr: SocketAddr,
+    packet_size: u16,
+) -> anyhow::Result<(Endpoint, Vec<u8>)> {
+    let (server_config, server_cert) = configure_server(packet_size)?;
+    let mut endpoint_config = EndpointConfig::default();
+    endpoint_config.max_udp_payload_size(packet_size as u64);
+    let endpoint = Endpoint::new(
+        endpoint_config,
+        Some(server_config),
+        std::net::UdpSocket::bind(bind_addr)?,
+        TokioRuntime,
+    )?;
     Ok((endpoint, server_cert))
 }
 
@@ -120,7 +140,7 @@ fn configure_client(server_certs: &[&[u8]]) -> anyhow::Result<ClientConfig> {
 
 /// Returns default server configuration along with its certificate.
 #[allow(clippy::field_reassign_with_default)] // https://github.com/rust-lang/rust-clippy/issues/6527
-fn configure_server() -> anyhow::Result<(ServerConfig, Vec<u8>)> {
+fn configure_server(packet_size: u16) -> anyhow::Result<(ServerConfig, Vec<u8>)> {
     let cert = rcgen::generate_simple_self_signed(vec!["localhost".into()])?;
     let cert_der = cert.serialize_der()?;
     let priv_key = cert.serialize_private_key_der();
@@ -130,7 +150,8 @@ fn configure_server() -> anyhow::Result<(ServerConfig, Vec<u8>)> {
     let mut server_config = ServerConfig::with_single_cert(cert_chain, priv_key)?;
     Arc::get_mut(&mut server_config.transport)
         .unwrap()
-        .max_concurrent_uni_streams(0_u8.into());
+        .max_concurrent_uni_streams(0_u8.into())
+        .initial_max_udp_payload_size(packet_size);
 
     Ok((server_config, cert_der))
 }
@@ -141,10 +162,10 @@ pub struct Endpoints {
     server_addr: SocketAddr,
 }
 
-pub fn make_endpoints() -> anyhow::Result<Endpoints> {
+pub fn make_endpoints(packet_size: u16) -> anyhow::Result<Endpoints> {
     let server_addr: SocketAddr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 12345));
-    let (server, server_certs) = make_server_endpoint(server_addr)?;
-    let client = make_client_endpoint("0.0.0.0:0".parse()?, &[&server_certs])?;
+    let (server, server_certs) = make_server_endpoint(server_addr, packet_size)?;
+    let client = make_client_endpoint("0.0.0.0:0".parse()?, &[&server_certs], packet_size)?;
     Ok(Endpoints {
         client,
         server,
@@ -170,7 +191,7 @@ async fn quinn_bench() -> anyhow::Result<()> {
         client,
         server,
         server_addr,
-    } = make_endpoints()?;
+    } = make_endpoints(PACKET_SIZE)?;
     let server_handle = run_server(server);
     let client_connection = client.connect(server_addr, "localhost")?.await?;
     let client_connection =
@@ -194,7 +215,7 @@ async fn quinn_raw() -> anyhow::Result<()> {
         client,
         server,
         server_addr,
-    } = make_endpoints()?;
+    } = make_endpoints(PACKET_SIZE)?;
     let server = tokio::task::spawn(async move {
         while let Some(connecting) = server.accept().await {
             let connection = connecting.await?;
