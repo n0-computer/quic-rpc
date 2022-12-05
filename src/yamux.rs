@@ -25,6 +25,8 @@ use yamux::Mode;
 
 pub trait InnerConnection: AsyncRead + AsyncWrite + Unpin + Send + 'static {}
 
+impl <T: AsyncRead + AsyncWrite + Unpin + Send + 'static> InnerConnection for T {}
+
 trait Ops: Send + Sync + 'static {
     fn poll_new_outbound(&self, cx: &mut Context<'_>) -> Poll<yamux::Result<yamux::Stream>>;
     fn poll_next_inbound(&self, cx: &mut Context<'_>)
@@ -51,6 +53,18 @@ impl<In: RpcMessage, Out: RpcMessage> Channel<In, Out> {
     pub fn new(conn: impl InnerConnection, config: yamux::Config, mode: Mode) -> Self {
         let conn = yamux::Connection::new(conn, config, mode);
         Self(Arc::new(Mutex::new(conn)), PhantomData)
+    }
+
+    pub async fn consume_incoming_streams(self) -> Result<(), yamux::ConnectionError> {
+        println!("consume_incoming_streams");
+        let ops = self.0;
+        let mut stream = futures::stream::poll_fn(move |cx| ops.poll_next_inbound(cx));
+        while let Some(stream) = stream.next().await {
+            println!("got stream {:?}", stream);
+            let stream = stream?;
+            panic!()
+        }
+        Ok(())
     }
 }
 
@@ -140,6 +154,7 @@ impl<'a, In: RpcMessage, Out: RpcMessage> Future for OpenBiFuture<'a, In, Out> {
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Self::Output> {
         self.0.poll_new_outbound(cx).map(|stream| {
+            println!("got open_bi stream {:?}", stream);
             let stream = stream?;
             // turn chunks of bytes into a stream of messages using length delimited codec
             let stream = Framed::new(stream.compat(), LengthDelimitedCodec::new());
@@ -147,7 +162,7 @@ impl<'a, In: RpcMessage, Out: RpcMessage> Future for OpenBiFuture<'a, In, Out> {
             // now switch to streams of WantRequestUpdate and WantResponse
             let send = SymmetricallyFramed::new(send, SymmetricalBincode::<Out>::default());
             let recv = SymmetricallyFramed::new(recv, SymmetricalBincode::<In>::default());
-            // box so we don't have to write down the insanely long type
+            // wrap so we don't have to write down the insanely long type
             let send = SendSink(send);
             let recv = RecvStream(recv);
             Ok((send, recv))
@@ -173,7 +188,7 @@ impl<'a, In, Out> Future for AcceptBiFuture<'a, In, Out> {
             // now switch to streams of WantRequestUpdate and WantResponse
             let send = SymmetricallyFramed::new(send, SymmetricalBincode::<Out>::default());
             let recv = SymmetricallyFramed::new(recv, SymmetricalBincode::<In>::default());
-            // box so we don't have to write down the insanely long type
+            // wrap so we don't have to write down the insanely long type
             let send = SendSink(send);
             let recv = RecvStream(recv);
             Ok((send, recv))
@@ -185,6 +200,7 @@ impl<In: RpcMessage, Out: RpcMessage> crate::Channel<In, Out, YamuxChannelTypes>
     for Channel<In, Out>
 {
     fn open_bi(&self) -> self::OpenBiFuture<'_, In, Out> {
+        println!("yamux open_bi");
         OpenBiFuture(&self.0, PhantomData)
     }
 
@@ -194,7 +210,7 @@ impl<In: RpcMessage, Out: RpcMessage> crate::Channel<In, Out, YamuxChannelTypes>
 }
 
 #[derive(Debug, Clone)]
-struct YamuxChannelTypes;
+pub struct YamuxChannelTypes;
 
 impl crate::ChannelTypes for YamuxChannelTypes {
     type SendSink<M: RpcMessage> = self::SendSink<M>;
