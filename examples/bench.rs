@@ -342,10 +342,52 @@ async fn yamux_raw() -> anyhow::Result<()> {
     Ok(())
 }
 
+
+/// Raw yamux benchmark, without anything related to quic-rpc
+///
+/// Just send big chunks over the wire and back
+async fn tcp_raw() -> anyhow::Result<()> {
+    let addr = "127.0.0.1:12010".parse()?;
+    let server_handle = tokio::task::spawn(async move {
+        let socket = TcpSocket::new_v4()?;
+        socket.bind(addr)?;
+        let listener = socket.listen(1024)?;
+        while let Ok((mut stream, addr)) = listener.accept().await {
+            tokio::task::spawn(async move {
+                let mut buffer = vec![0u8; 1024 * 1024];
+                loop {
+                    stream.read_exact(&mut buffer).await?;
+                    stream.write_all(&buffer).await?;
+                }
+                anyhow::Ok(())
+            });
+        }
+        anyhow::Ok(())
+    });
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    let mut stream = TcpStream::connect(addr).await?;
+    let mut buffer = vec![0u8; 1024 * 1024];
+    let t0 = Instant::now();
+    let n = 1000u64;
+    for i in 0..n {
+        stream.write_all(&buffer).await?;
+        stream.read_exact(&mut buffer).await?;
+    }
+    let rate = ((buffer.len() as u64 * n) as f64 / t0.elapsed().as_secs_f64()) as u64;
+    println!("{} bytes/s", rate);
+    server_handle.abort();
+    let _ = server_handle.await;
+    Ok(())
+}
+
 fn main() -> anyhow::Result<()> {
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()?;
+
+    println!("tcp raw");
+    rt.block_on(tcp_raw())?;
+
     println!("quinn raw");
     rt.block_on(quinn_raw())?;
 
