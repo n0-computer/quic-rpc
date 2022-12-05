@@ -245,6 +245,9 @@ async fn quinn_raw() -> anyhow::Result<()> {
 
 fn config() -> yamux::Config {
     let mut c = yamux::Config::default();
+    c.set_max_buffer_size(1024 * 1024);
+    c.set_split_send_size(1024 * 1024);
+    c.set_receive_window(1024 * 1024);
     c
 }
 
@@ -252,42 +255,51 @@ async fn yamux_bench() -> anyhow::Result<()> {
     type C = YamuxChannelTypes;
     type S = BenchService;
     let addr = "127.0.0.1:12121".parse()?;
-    let server_handle = tokio::task::spawn(async move {
-        let socket = TcpSocket::new_v4()?;
-        println!("created socket");
-        socket.bind(addr)?;
-        println!("bound to socket");
-        let listener = socket.listen(1024)?;
-        println!("got listener");
-        while let Ok((stream, _addr)) = listener.accept().await {
-            println!("accepted one!");
-            let connection = quic_rpc::yamux::Channel::<BenchRequest, BenchResponse>::new(
-                stream.compat(),
-                yamux::Config::default(),
-                yamux::Mode::Server,
-            );
-            let server = RpcServer::<S, C>::new(connection);
-            BenchService::server(server).await?;
-        }
-        anyhow::Ok(())
+    let server_handle = std::thread::spawn(move || {
+        let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
+        rt.block_on(async move {
+            let socket = TcpSocket::new_v4()?;
+            println!("created socket");
+            socket.bind(addr)?;
+            println!("bound to socket");
+            let listener = socket.listen(1024)?;
+            println!("got listener");
+            while let Ok((stream, _addr)) = listener.accept().await {
+                println!("accepted one!");
+                let connection = quic_rpc::yamux::Channel::<BenchRequest, BenchResponse>::new(
+                    stream.compat(),
+                    yamux::Config::default(),
+                    yamux::Mode::Server,
+                );
+                let server = RpcServer::<S, C>::new(connection);
+                BenchService::server(server).await?;
+            }
+            anyhow::Ok(())
+        }).unwrap();
     });
     tokio::time::sleep(Duration::from_secs(1)).await;
-    println!("calling connect {:?}", addr);
-    let socket = TcpStream::connect(addr).await?;
-    println!("connected to {:?}", addr);
-    let client_connection = quic_rpc::yamux::Channel::<BenchResponse, BenchRequest>::new(
-        socket.compat(),
-        yamux::Config::default(),
-        yamux::Mode::Client,
-    );
-    tokio::task::spawn(client_connection.clone().consume_incoming_streams());
-    let client = RpcClient::<S, C>::new(client_connection);
-    for i in 0..100 {
-        println!("sending message {}", i);
-        client.rpc(BulkRequest(vec![i as u8; 1024 * 1024])).await?;
-    }
-    server_handle.abort();
-    let _ = server_handle.await;
+    let client_handle = std::thread::spawn(move || {
+        let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
+        rt.block_on(async move {
+            println!("calling connect {:?}", addr);
+            let socket = TcpStream::connect(addr).await?;
+            println!("connected to {:?}", addr);
+            let client_connection = quic_rpc::yamux::Channel::<BenchResponse, BenchRequest>::new(
+                socket.compat(),
+                yamux::Config::default(),
+                yamux::Mode::Client,
+            );
+            tokio::task::spawn(client_connection.clone().consume_incoming_streams());
+            let client = RpcClient::<S, C>::new(client_connection);
+            for i in 0..100 {
+                println!("sending message {}", i);
+                client.rpc(BulkRequest(vec![i as u8; 1024 * 1024])).await?;
+            }
+            anyhow::Ok(())
+        }).unwrap();
+    });
+    client_handle.join().unwrap();
+    server_handle.join().unwrap();
     Ok(())
 }
 
