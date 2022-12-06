@@ -19,12 +19,14 @@ use hyper::{
 };
 use pin_project::pin_project;
 
-const MAX_FRAME_SIZE: u32 = 1024 * 1024 * 2;
+// add a bit of fudge factor to the max frame size
+const MAX_FRAME_SIZE: u32 = 1024 * 1024 + 1024;
 
 macro_rules! log {
     ($($arg:tt)*) => {
-        // println!($($arg)*);
-        let _ = format!($($arg)*);
+        if false {
+            println!($($arg)*);
+        }
     }
 }
 
@@ -38,8 +40,8 @@ impl<In: RpcMessage, Out: RpcMessage> Channel<In, Out> {
     pub fn client(uri: Uri) -> Self {
         let client = Client::builder()
             .http2_only(true)
-            // .http2_initial_connection_window_size(Some(1024 * 1024 *2))
-            // .http2_initial_stream_window_size(Some(1024 * 1024 *2))
+            .http2_initial_connection_window_size(Some(MAX_FRAME_SIZE))
+            .http2_initial_stream_window_size(Some(MAX_FRAME_SIZE))
             .http2_max_frame_size(Some(MAX_FRAME_SIZE))
             .http2_max_send_buf_size(MAX_FRAME_SIZE as usize)
             .build_http();
@@ -117,6 +119,8 @@ impl<In: RpcMessage, Out: RpcMessage> Channel<In, Out> {
         });
         let server = Server::bind(addr)
             .http2_only(true)
+            .http2_initial_connection_window_size(Some(MAX_FRAME_SIZE))
+            .http2_initial_stream_window_size(Some(MAX_FRAME_SIZE))
             .http2_max_frame_size(Some(MAX_FRAME_SIZE))
             .http2_max_send_buf_size(MAX_FRAME_SIZE as usize)
             .serve(service);
@@ -349,7 +353,12 @@ impl<In: RpcMessage, Out: RpcMessage> crate::Channel<In, Out, Http2ChannelTypes>
                 let (out_tx, out_rx) = flume::bounded::<Out>(1);
                 let out_stream = futures::stream::unfold(out_rx, |out_rx| async move {
                     match out_rx.recv_async().await {
-                        Ok(value) => Some((bincode::serialize(&value).map(Bytes::from), out_rx)),
+                        Ok(value) => {
+                            Some((bincode::serialize(&value).map(|x| {
+                                // println!("{}", x.len());
+                                Bytes::from(x)
+                            }), out_rx))
+                        },
                         Err(_cause) => None,
                     }
                 });
