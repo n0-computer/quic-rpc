@@ -26,7 +26,7 @@ impl fmt::Display for RecvError {
 impl error::Error for RecvError {}
 
 /// RecvStream for mem channels
-pub struct RecvStream<Res: RpcMessage>(flume::r#async::RecvStream<'static, Res>);
+pub struct RecvStream<Res: RpcMessage>(pub(crate) flume::r#async::RecvStream<'static, Res>);
 
 impl<In: RpcMessage> Clone for RecvStream<In> {
     fn clone(&self) -> Self {
@@ -49,7 +49,7 @@ impl<Res: RpcMessage> futures::Stream for RecvStream<Res> {
     }
 }
 
-type Socket<In, Out> = (self::SendSink<Out>, self::RecvStream<In>);
+pub(crate) type Socket<In, Out> = (self::SendSink<Out>, self::RecvStream<In>);
 
 /// A mem channel
 pub struct Channel<In: RpcMessage, Out: RpcMessage> {
@@ -150,7 +150,7 @@ impl<'a, In: RpcMessage, Out: RpcMessage> Future for AcceptBiFuture<'a, In, Out>
 }
 
 /// SendSink for mem channels
-pub struct SendSink<Out: RpcMessage>(flume::r#async::SendSink<'static, Out>);
+pub struct SendSink<Out: RpcMessage>(pub(crate) flume::r#async::SendSink<'static, Out>);
 
 impl<Out: RpcMessage> Sink<Out> for SendSink<Out> {
     type Error = SendError;

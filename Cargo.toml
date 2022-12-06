@@ -13,8 +13,11 @@ description = "A streaming rpc system based on quic"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+bincode = "1.3.3"
+bytes = "1.3.0"
 flume = "0.10.14"
 futures = "0.3.25"
+hyper = { version = "0.14.23", features = ["full"] }
 pin-project = "1"
 quinn = "0.9.0"
 serde = { version = "1" }
