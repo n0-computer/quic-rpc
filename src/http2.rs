@@ -2,12 +2,14 @@
 //!
 //! Note that we are using the framing from http2, so we have to make sure that
 //! the parameters on both client and server side are big enough.
-use std::{convert::Infallible, fmt, io, marker::PhantomData, net::SocketAddr, result, task::Poll};
+use std::{
+    convert::Infallible, error, fmt, io, marker::PhantomData, net::SocketAddr, result, task::Poll,
+};
 
 use crate::{ChannelTypes, RpcMessage};
 use bytes::Bytes;
 use flume::{r#async::RecvFut, Receiver, Sender};
-use futures::{Future, FutureExt, StreamExt};
+use futures::{future, never::Never, Future, FutureExt, StreamExt};
 use hyper::{
     body::HttpBody,
     client::{connect::dns::GaiResolver, HttpConnector, ResponseFuture},
@@ -18,6 +20,13 @@ use hyper::{
 use pin_project::pin_project;
 
 const MAX_FRAME_SIZE: u32 = 1024 * 1024 * 2;
+
+macro_rules! log {
+    ($($arg:tt)*) => {
+        // println!($($arg)*);
+        let _ = format!($($arg)*);
+    }
+}
 
 /// A channel using a hyper connection
 pub enum Channel<In: RpcMessage, Out: RpcMessage> {
@@ -49,30 +58,36 @@ impl<In: RpcMessage, Out: RpcMessage> Channel<In, Out> {
                 accept_tx
                     .send_async((req_rx, res_tx))
                     .await
-                    .map_err(|e| "unable to send")?;
+                    .map_err(|_e| "unable to send")?;
                 // task that reads request and deserializes it
-                tokio::task::spawn(async move {
+                let forwarder = async move {
                     let mut stream = req.into_body();
                     while let Some(chunk) = stream.next().await {
                         match chunk {
                             Ok(chunk) => match bincode::deserialize::<In>(chunk.as_ref()) {
-                                Ok(data) => match req_tx.send_async(data).await {
-                                    Ok(()) => {}
-                                    Err(cause) => {
-                                        break;
+                                Ok(msg) => {
+                                    log!("server got msg {:?}", msg);
+                                    match req_tx.send_async(msg).await {
+                                        Ok(()) => {}
+                                        Err(_cause) => {
+                                            break;
+                                        }
                                     }
-                                },
-                                Err(cause) => {
+                                }
+                                Err(_cause) => {
                                     break;
                                 }
                             },
-                            Err(cause) => {
+                            Err(_cause) => {
                                 break;
                             }
                         }
                     }
-                    Ok::<_, hyper::Error>(())
-                });
+                    future::pending::<Never>().await
+                };
+                // todo: can I piggyback on the polling of the stream below instead of having
+                // to spawn a task?
+                tokio::spawn(forwarder);
                 let body = res_rx.into_stream().map(|out| {
                     let data = bincode::serialize(&out)?;
                     // todo: check size
@@ -82,7 +97,7 @@ impl<In: RpcMessage, Out: RpcMessage> Channel<In, Out> {
                 let response = Response::builder()
                     .status(StatusCode::OK)
                     .body(Body::wrap_stream(body))
-                    .map_err(|e| "unable to set body")?;
+                    .map_err(|_e| "unable to set body")?;
 
                 Ok::<Response<Body>, &str>(response)
             }
@@ -90,6 +105,7 @@ impl<In: RpcMessage, Out: RpcMessage> Channel<In, Out> {
         // todo: can this stack of weird stuff be simplified?
         let service = make_service_fn(move |socket: &AddrStream| {
             let remote_addr = socket.remote_addr();
+            log!("connection from {:?}", remote_addr);
             let server_fn = server_fn.clone();
             async move {
                 let server_fn = server_fn.clone();
@@ -138,11 +154,11 @@ impl ChannelTypes for Http2ChannelTypes {
 
     type RecvError = crate::mem::RecvError;
 
-    type OpenBiError = hyper::http::Error;
+    type OpenBiError = self::OpenBiError;
 
     type OpenBiFuture<'a, In: RpcMessage, Out: RpcMessage> = self::OpenBiFuture<'a, In, Out>;
 
-    type AcceptBiError = hyper::http::Error;
+    type AcceptBiError = self::AcceptBiError;
 
     type AcceptBiFuture<'a, In: RpcMessage, Out: RpcMessage> = self::AcceptBiFuture<'a, In, Out>;
 
@@ -151,20 +167,38 @@ impl ChannelTypes for Http2ChannelTypes {
     type Channel<In: RpcMessage, Out: RpcMessage> = self::Channel<In, Out>;
 }
 
+/// OpenBiError for mem channels.
+#[derive(Debug)]
+pub enum OpenBiError {
+    HyperHttp(hyper::http::Error),
+    Hyper(hyper::Error),
+    /// The remote side of the channel was dropped
+    RemoteDropped,
+    Server,
+}
+
+impl fmt::Display for OpenBiError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Debug::fmt(self, f)
+    }
+}
+
+impl std::error::Error for OpenBiError {}
+
 #[pin_project]
 pub struct OpenBiFuture<'a, In, Out>(
-    Option<Result<(ResponseFuture, flume::Sender<Out>), hyper::http::Error>>,
+    Option<Result<(ResponseFuture, flume::Sender<Out>), OpenBiError>>,
     PhantomData<&'a (In, Out)>,
 );
 
 impl<'a, In: RpcMessage, Out: RpcMessage> OpenBiFuture<'a, In, Out> {
-    fn new(value: Result<(ResponseFuture, flume::Sender<Out>), hyper::http::Error>) -> Self {
+    fn new(value: Result<(ResponseFuture, flume::Sender<Out>), OpenBiError>) -> Self {
         Self(Some(value), PhantomData)
     }
 }
 
 impl<'a, In: RpcMessage, Out: RpcMessage> Future for OpenBiFuture<'a, In, Out> {
-    type Output = result::Result<crate::mem::Socket<In, Out>, hyper::http::Error>;
+    type Output = result::Result<crate::mem::Socket<In, Out>, OpenBiError>;
 
     fn poll(
         self: std::pin::Pin<&mut Self>,
@@ -175,6 +209,7 @@ impl<'a, In: RpcMessage, Out: RpcMessage> Future for OpenBiFuture<'a, In, Out> {
             Some(Ok((fut, _))) => {
                 match fut.poll_unpin(cx) {
                     Poll::Ready(Ok(mut res)) => {
+                        log!("OpenBiFuture got response");
                         let (_, out_tx) = this.0.take().unwrap().unwrap();
                         let (in_tx, in_rx) = flume::bounded::<In>(1);
                         let task = async move {
@@ -183,6 +218,7 @@ impl<'a, In: RpcMessage, Out: RpcMessage> Future for OpenBiFuture<'a, In, Out> {
                                     Ok(msg) => {
                                         match bincode::deserialize::<In>(msg.as_ref()) {
                                             Ok(msg) => {
+                                                log!("OpenBiFuture got response message {:?}", msg);
                                                 match in_tx.send_async(msg).await {
                                                     Ok(_) => {}
                                                     Err(_cause) => {
@@ -206,15 +242,15 @@ impl<'a, In: RpcMessage, Out: RpcMessage> Future for OpenBiFuture<'a, In, Out> {
                         };
                         // todo: push the task into a channel to be handled. That way
                         // we can have backpressure on the number of tasks if we want!
-                        tokio::task::spawn(task);
+                        tokio::spawn(task);
 
                         let out_tx = crate::mem::SendSink(out_tx.into_sink());
                         let in_rx = crate::mem::RecvStream(in_rx.into_stream());
                         Poll::Ready(Ok((out_tx, in_rx)))
                     }
-                    Poll::Ready(Err(_cause)) => {
+                    Poll::Ready(Err(cause)) => {
                         this.0.take();
-                        Poll::Ready(Err(todo!()))
+                        Poll::Ready(Err(OpenBiError::Hyper(cause)))
                     }
                     Poll::Pending => Poll::Pending,
                 }
@@ -233,19 +269,42 @@ impl<'a, In: RpcMessage, Out: RpcMessage> Future for OpenBiFuture<'a, In, Out> {
     }
 }
 
+/// AcceptBiError for mem channels.
+///
+/// There is not much that can go wrong with mem channels.
+#[derive(Debug)]
+pub enum AcceptBiError {
+    /// Hyper error
+    Hyper(hyper::http::Error),
+    /// The remote side of the channel was dropped
+    RemoteDropped,
+    /// Tried to accept on client side
+    Client,
+}
+
+impl fmt::Display for AcceptBiError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Debug::fmt(self, f)
+    }
+}
+
+impl error::Error for AcceptBiError {}
+
+#[allow(clippy::type_complexity)]
 #[pin_project]
 pub struct AcceptBiFuture<'a, In, Out>(
-    Option<Result<RecvFut<'a, (Receiver<In>, Sender<Out>)>, hyper::http::Error>>,
+    Option<Result<RecvFut<'a, (Receiver<In>, Sender<Out>)>, AcceptBiError>>,
 );
 
 impl<'a, In: RpcMessage, Out: RpcMessage> AcceptBiFuture<'a, In, Out> {
-    fn new(value: Result<RecvFut<'a, (Receiver<In>, Sender<Out>)>, hyper::http::Error>) -> Self {
+    #[allow(clippy::type_complexity)]
+    fn new(value: Result<RecvFut<'a, (Receiver<In>, Sender<Out>)>, AcceptBiError>) -> Self {
         Self(Some(value))
     }
 }
 
 impl<'a, In: RpcMessage, Out: RpcMessage> Future for AcceptBiFuture<'a, In, Out> {
-    type Output = result::Result<crate::mem::Socket<In, Out>, hyper::http::Error>;
+    type Output = result::Result<crate::mem::Socket<In, Out>, AcceptBiError>;
 
     fn poll(
         self: std::pin::Pin<&mut Self>,
@@ -260,7 +319,7 @@ impl<'a, In: RpcMessage, Out: RpcMessage> Future for AcceptBiFuture<'a, In, Out>
                 ))),
                 Poll::Ready(Err(_cause)) => {
                     this.0.take();
-                    Poll::Ready(Err(todo!()))
+                    Poll::Ready(Err(AcceptBiError::RemoteDropped))
                 }
                 Poll::Pending => Poll::Pending,
             },
@@ -284,6 +343,7 @@ impl<In: RpcMessage, Out: RpcMessage> crate::Channel<In, Out, Http2ChannelTypes>
     for Channel<In, Out>
 {
     fn open_bi(&self) -> OpenBiFuture<'_, In, Out> {
+        log!("open_bi");
         match self {
             Channel::Client(client, url) => {
                 let (out_tx, out_rx) = flume::bounded::<Out>(1);
@@ -293,19 +353,20 @@ impl<In: RpcMessage, Out: RpcMessage> crate::Channel<In, Out, Http2ChannelTypes>
                         Err(_cause) => None,
                     }
                 });
-                let req: Result<Request<Body>, hyper::http::Error> =
-                    Request::post(url).body(Body::wrap_stream(out_stream));
-                let res: Result<(ResponseFuture, flume::Sender<Out>), hyper::http::Error> =
+                let req: Result<Request<Body>, OpenBiError> = Request::post(url)
+                    .body(Body::wrap_stream(out_stream))
+                    .map_err(OpenBiError::HyperHttp);
+                let res: Result<(ResponseFuture, flume::Sender<Out>), OpenBiError> =
                     req.map(|req| (client.request(req), out_tx));
                 OpenBiFuture::new(res)
             }
-            Channel::Server(_) => OpenBiFuture::new(Err(panic!())),
+            Channel::Server(_) => OpenBiFuture::new(Err(OpenBiError::Server)),
         }
     }
 
     fn accept_bi(&self) -> AcceptBiFuture<'_, In, Out> {
         match self {
-            Channel::Client(_, _) => AcceptBiFuture::new(Err(panic!())),
+            Channel::Client(_, _) => AcceptBiFuture::new(Err(AcceptBiError::Client)),
             Channel::Server(server) => AcceptBiFuture::new(Ok(server.recv_async())),
         }
     }

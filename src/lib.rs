@@ -81,9 +81,12 @@ pub mod channel_factory;
 ///
 /// This does not seem like a big restriction. If you want a pure memory channel without the possibility
 /// to also use the quinn transport, you might want to use a mpsc channel directly.
-pub trait RpcMessage: Serialize + DeserializeOwned + Send + Sync + Unpin + 'static {}
+pub trait RpcMessage: Debug + Serialize + DeserializeOwned + Send + Sync + Unpin + 'static {}
 
-impl<T> RpcMessage for T where T: Serialize + DeserializeOwned + Send + Sync + Unpin + 'static {}
+impl<T> RpcMessage for T where
+    T: Debug + Serialize + DeserializeOwned + Send + Sync + Unpin + 'static
+{
+}
 
 /// requirements for an internal error
 ///

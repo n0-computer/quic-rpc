@@ -1,6 +1,7 @@
 use anyhow::Context;
 use quic_rpc::{quinn::QuinnChannelTypes, server::RpcServerError, ChannelTypes};
 
+#[allow(unused)]
 pub async fn check_termination_anyhow<C: ChannelTypes>(
     server_handle: tokio::task::JoinHandle<anyhow::Result<()>>,
 ) -> anyhow::Result<()> {
