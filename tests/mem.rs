@@ -9,7 +9,7 @@ use quic_rpc::{
 #[tokio::test]
 async fn mem_channel_bench() -> anyhow::Result<()> {
     type C = MemChannelTypes;
-    let (client, server) = mem::connection::<ComputeResponse, ComputeRequest>(1);
+    let (server, client) = mem::connection::<ComputeRequest, ComputeResponse>(1);
 
     let server = RpcServer::<ComputeService, MemChannelTypes>::new(server);
     let server_handle = tokio::task::spawn(ComputeService::server(server));
@@ -26,7 +26,7 @@ async fn mem_channel_bench() -> anyhow::Result<()> {
 /// simple happy path test for all 4 patterns
 #[tokio::test]
 async fn mem_channel_smoke() -> anyhow::Result<()> {
-    let (client, server) = mem::connection::<ComputeResponse, ComputeRequest>(1);
+    let (server, client) = mem::connection::<ComputeRequest, ComputeResponse>(1);
 
     let server = RpcServer::<ComputeService, MemChannelTypes>::new(server);
     let server_handle = tokio::task::spawn(ComputeService::server(server));

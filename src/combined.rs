@@ -15,12 +15,14 @@ use std::{
 };
 
 /// A channel that combines two other channels
-pub struct Channel<A: ChannelTypes, B: ChannelTypes, In: RpcMessage, Out: RpcMessage> {
-    a: Option<A::Channel<In, Out>>,
-    b: Option<B::Channel<In, Out>>,
+pub struct ClientChannel<A: ChannelTypes, B: ChannelTypes, In: RpcMessage, Out: RpcMessage> {
+    a: Option<A::ClientChannel<In, Out>>,
+    b: Option<B::ClientChannel<In, Out>>,
 }
 
-impl<A: ChannelTypes, B: ChannelTypes, In: RpcMessage, Out: RpcMessage> Channel<A, B, In, Out> {
+impl<A: ChannelTypes, B: ChannelTypes, In: RpcMessage, Out: RpcMessage>
+    ClientChannel<A, B, In, Out>
+{
     /// Create a combined channel from two other channels
     ///
     /// When opening a channel with [`crate::Channel::open_bi`], the first configured channel will be used,
@@ -30,13 +32,13 @@ impl<A: ChannelTypes, B: ChannelTypes, In: RpcMessage, Out: RpcMessage> Channel<
     /// When listening for incoming channels with [`crate::Channel::accept_bi`], all configured channels will
     /// be listened on, and the first to receive a connection will be used. If no channels are
     /// configured, accept_bi will wait forever.
-    pub fn new(a: Option<A::Channel<In, Out>>, b: Option<B::Channel<In, Out>>) -> Self {
+    pub fn new(a: Option<A::ClientChannel<In, Out>>, b: Option<B::ClientChannel<In, Out>>) -> Self {
         Self { a, b }
     }
 }
 
 impl<A: ChannelTypes, B: ChannelTypes, In: RpcMessage, Out: RpcMessage> Clone
-    for Channel<A, B, In, Out>
+    for ClientChannel<A, B, In, Out>
 {
     fn clone(&self) -> Self {
         Self {
@@ -47,7 +49,52 @@ impl<A: ChannelTypes, B: ChannelTypes, In: RpcMessage, Out: RpcMessage> Clone
 }
 
 impl<A: ChannelTypes, B: ChannelTypes, In: RpcMessage, Out: RpcMessage> Debug
-    for Channel<A, B, In, Out>
+    for ClientChannel<A, B, In, Out>
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Channel")
+            .field("a", &self.a)
+            .field("b", &self.b)
+            .finish()
+    }
+}
+
+/// A channel that combines two other channels
+pub struct ServerChannel<A: ChannelTypes, B: ChannelTypes, In: RpcMessage, Out: RpcMessage> {
+    a: Option<A::ServerChannel<In, Out>>,
+    b: Option<B::ServerChannel<In, Out>>,
+}
+
+impl<A: ChannelTypes, B: ChannelTypes, In: RpcMessage, Out: RpcMessage>
+    ServerChannel<A, B, In, Out>
+{
+    /// Create a combined channel from two other channels
+    ///
+    /// When opening a channel with [`crate::Channel::open_bi`], the first configured channel will be used,
+    /// and no attempt will be made to use the second channel in case of failure. If no channels are
+    /// configred, open_bi will immediately fail with [`OpenBiError::NoChannel`].
+    ///
+    /// When listening for incoming channels with [`crate::Channel::accept_bi`], all configured channels will
+    /// be listened on, and the first to receive a connection will be used. If no channels are
+    /// configured, accept_bi will wait forever.
+    pub fn new(a: Option<A::ServerChannel<In, Out>>, b: Option<B::ServerChannel<In, Out>>) -> Self {
+        Self { a, b }
+    }
+}
+
+impl<A: ChannelTypes, B: ChannelTypes, In: RpcMessage, Out: RpcMessage> Clone
+    for ServerChannel<A, B, In, Out>
+{
+    fn clone(&self) -> Self {
+        Self {
+            a: self.a.clone(),
+            b: self.b.clone(),
+        }
+    }
+}
+
+impl<A: ChannelTypes, B: ChannelTypes, In: RpcMessage, Out: RpcMessage> Debug
+    for ServerChannel<A, B, In, Out>
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Channel")
@@ -242,11 +289,13 @@ impl<A: ChannelTypes, B: ChannelTypes> crate::ChannelTypes for CombinedChannelTy
     type AcceptBiFuture<'a, In: RpcMessage, Out: RpcMessage> =
         self::AcceptBiFuture<'a, A, B, In, Out>;
 
-    type Channel<In: RpcMessage, Out: RpcMessage> = self::Channel<A, B, In, Out>;
+    type ClientChannel<In: RpcMessage, Out: RpcMessage> = self::ClientChannel<A, B, In, Out>;
+
+    type ServerChannel<In: RpcMessage, Out: RpcMessage> = self::ServerChannel<A, B, In, Out>;
 }
 
 impl<A: ChannelTypes, B: ChannelTypes, In: RpcMessage, Out: RpcMessage>
-    crate::Channel<In, Out, CombinedChannelTypes<A, B>> for Channel<A, B, In, Out>
+    crate::ClientChannel<In, Out, CombinedChannelTypes<A, B>> for ClientChannel<A, B, In, Out>
 {
     fn open_bi(&self) -> OpenBiFuture<'_, A, B, In, Out> {
         async {
@@ -263,7 +312,11 @@ impl<A: ChannelTypes, B: ChannelTypes, In: RpcMessage, Out: RpcMessage>
         }
         .boxed()
     }
+}
 
+impl<A: ChannelTypes, B: ChannelTypes, In: RpcMessage, Out: RpcMessage>
+    crate::ServerChannel<In, Out, CombinedChannelTypes<A, B>> for ServerChannel<A, B, In, Out>
+{
     fn accept_bi(&self) -> AcceptBiFuture<'_, A, B, In, Out> {
         let a_fut = if let Some(a) = &self.a {
             a.accept_bi()
@@ -304,13 +357,14 @@ impl<A: ChannelTypes, B: ChannelTypes, In: RpcMessage, Out: RpcMessage>
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{combined, mem, Channel};
+    use crate::{combined, mem, ClientChannel};
 
     #[tokio::test]
     async fn open_empty_channel() {
-        let channel = combined::Channel::<mem::MemChannelTypes, mem::MemChannelTypes, (), ()>::new(
-            None, None,
-        );
+        let channel =
+            combined::ClientChannel::<mem::MemChannelTypes, mem::MemChannelTypes, (), ()>::new(
+                None, None,
+            );
         let res = channel.open_bi().await;
         assert!(matches!(res, Err(OpenBiError::NoChannel)));
     }

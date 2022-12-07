@@ -11,7 +11,7 @@ mod util;
 
 fn run_server(addr: &SocketAddr) -> JoinHandle<anyhow::Result<()>> {
     let (channel, hyper) =
-        quic_rpc::http2::Channel::<ComputeRequest, ComputeResponse>::server(addr).unwrap();
+        quic_rpc::http2::ServerChannel::<ComputeRequest, ComputeResponse>::new(addr).unwrap();
     let server = RpcServer::<ComputeService, Http2ChannelTypes>::new(channel);
     tokio::spawn(hyper);
     tokio::spawn(async move {
@@ -30,7 +30,7 @@ async fn http2_channel_bench() -> anyhow::Result<()> {
     let addr: SocketAddr = "127.0.0.1:3000".parse()?;
     let uri: Uri = "http://127.0.0.1:3000".parse()?;
     let server_handle = run_server(&addr);
-    let client = quic_rpc::http2::Channel::client(uri);
+    let client = quic_rpc::http2::ClientChannel::new(uri);
     let client = RpcClient::<ComputeService, C>::new(client);
     bench(client, 50000).await?;
     println!("terminating server");
@@ -46,7 +46,7 @@ async fn http2_channel_smoke() -> anyhow::Result<()> {
     let addr: SocketAddr = "127.0.0.1:3000".parse()?;
     let uri: Uri = "http://127.0.0.1:3000".parse()?;
     let server_handle = run_server(&addr);
-    let client = quic_rpc::http2::Channel::client(uri);
+    let client = quic_rpc::http2::ClientChannel::new(uri);
     smoke_test::<C>(client).await?;
     server_handle.abort();
     let _ = server_handle.await;

@@ -105,7 +105,7 @@ create_store_client!(StoreClient);
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let (client, server) = mem::connection::<StoreResponse, StoreRequest>(1);
+    let (server, client) = mem::connection::<StoreRequest, StoreResponse>(1);
     let server_handle = tokio::task::spawn(async move {
         let target = Store;
         run_server_loop(

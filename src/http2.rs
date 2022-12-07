@@ -3,7 +3,7 @@
 //! Note that we are using the framing from http2, so we have to make sure that
 //! the parameters on both client and server side are big enough.
 use std::{
-    convert::Infallible, error, fmt, io, marker::PhantomData, net::SocketAddr, result, task::Poll,
+    convert::Infallible, error, fmt, marker::PhantomData, net::SocketAddr, result, task::Poll,
 };
 
 use crate::{ChannelTypes, RpcMessage};
@@ -77,17 +77,16 @@ macro_rules! log {
 //     }
 // }
 
-/// A channel using a hyper connection
-pub enum Channel<In: RpcMessage, Out: RpcMessage> {
-    /// client mode
-    Client(Client<HttpConnector<GaiResolver>, Body>, Uri),
-    /// server mode
-    Server(flume::Receiver<(flume::Receiver<In>, flume::Sender<Out>)>),
-}
+/// Client channel
+pub struct ClientChannel<In: RpcMessage, Out: RpcMessage>(
+    Client<HttpConnector<GaiResolver>, Body>,
+    Uri,
+    PhantomData<(In, Out)>,
+);
 
-impl<In: RpcMessage, Out: RpcMessage> Channel<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> ClientChannel<In, Out> {
     /// create a client given an uri
-    pub fn client(uri: Uri) -> Self {
+    pub fn new(uri: Uri) -> Self {
         let mut connector = HttpConnector::new();
         connector.set_nodelay(true);
         let client = Client::builder()
@@ -97,11 +96,33 @@ impl<In: RpcMessage, Out: RpcMessage> Channel<In, Out> {
             .http2_max_frame_size(Some(MAX_FRAME_SIZE))
             .http2_max_send_buf_size(MAX_FRAME_SIZE as usize)
             .build(connector);
-        Self::Client(client, uri)
+        Self(client, uri, PhantomData)
     }
+}
 
+impl<In: RpcMessage, Out: RpcMessage> fmt::Debug for ClientChannel<In, Out> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("ClientChannel")
+            .field(&self.0)
+            .field(&self.1)
+            .finish()
+    }
+}
+
+impl<In: RpcMessage, Out: RpcMessage> Clone for ClientChannel<In, Out> {
+    fn clone(&self) -> Self {
+        Self(self.0.clone(), self.1.clone(), PhantomData)
+    }
+}
+
+/// A channel using a hyper connection
+pub struct ServerChannel<In: RpcMessage, Out: RpcMessage>(
+    flume::Receiver<(flume::Receiver<In>, flume::Sender<Out>)>,
+);
+
+impl<In: RpcMessage, Out: RpcMessage> ServerChannel<In, Out> {
     /// create a server given a socket addr
-    pub fn server(
+    pub fn new(
         addr: &SocketAddr,
     ) -> hyper::Result<(Self, impl Future<Output = result::Result<(), hyper::Error>>)> {
         let (accept_tx, accept_rx) = flume::bounded(32);
@@ -125,15 +146,18 @@ impl<In: RpcMessage, Out: RpcMessage> Channel<In, Out> {
                                     match req_tx.send_async(msg).await {
                                         Ok(()) => {}
                                         Err(_cause) => {
+                                            // channel closed
                                             break;
                                         }
                                     }
                                 }
                                 Err(_cause) => {
+                                    // deserialize error
                                     break;
                                 }
                             },
                             Err(_cause) => {
+                                // error from the network layer
                                 break;
                             }
                         }
@@ -177,25 +201,19 @@ impl<In: RpcMessage, Out: RpcMessage> Channel<In, Out> {
             .http2_max_frame_size(Some(MAX_FRAME_SIZE))
             .http2_max_send_buf_size(MAX_FRAME_SIZE as usize)
             .serve(service);
-        Ok((Self::Server(accept_rx), server))
+        Ok((Self(accept_rx), server))
     }
 }
 
-impl<In: RpcMessage, Out: RpcMessage> fmt::Debug for Channel<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> fmt::Debug for ServerChannel<In, Out> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Client(arg0, arg1) => f.debug_tuple("Client").field(arg0).field(arg1).finish(),
-            Self::Server(arg0) => f.debug_tuple("Server").field(arg0).finish(),
-        }
+        f.debug_tuple("ServerChannel").field(&self.0).finish()
     }
 }
 
-impl<In: RpcMessage, Out: RpcMessage> Clone for Channel<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> Clone for ServerChannel<In, Out> {
     fn clone(&self) -> Self {
-        match self {
-            Self::Client(arg0, arg1) => Self::Client(arg0.clone(), arg1.clone()),
-            Self::Server(arg0) => Self::Server(arg0.clone()),
-        }
+        Self(self.0.clone())
     }
 }
 
@@ -237,7 +255,9 @@ impl ChannelTypes for Http2ChannelTypes {
 
     type CreateChannelError = self::CreateChannelError;
 
-    type Channel<In: RpcMessage, Out: RpcMessage> = self::Channel<In, Out>;
+    type ClientChannel<In: RpcMessage, Out: RpcMessage> = self::ClientChannel<In, Out>;
+
+    type ServerChannel<In: RpcMessage, Out: RpcMessage> = self::ServerChannel<In, Out>;
 }
 
 /// OpenBiError for mem channels.
@@ -249,8 +269,6 @@ pub enum OpenBiError {
     Hyper(hyper::Error),
     /// The remote side of the channel was dropped
     RemoteDropped,
-    /// Tried to open a channel on a server
-    Server,
 }
 
 impl fmt::Display for OpenBiError {
@@ -356,8 +374,6 @@ pub enum AcceptBiError {
     Hyper(hyper::http::Error),
     /// The remote side of the channel was dropped
     RemoteDropped,
-    /// Tried to accept on client side
-    Client,
 }
 
 impl fmt::Display for AcceptBiError {
@@ -418,44 +434,31 @@ impl<'a, In: RpcMessage, Out: RpcMessage> Future for AcceptBiFuture<'a, In, Out>
     }
 }
 
-impl<In: RpcMessage, Out: RpcMessage> crate::Channel<In, Out, Http2ChannelTypes>
-    for Channel<In, Out>
+impl<In: RpcMessage, Out: RpcMessage> crate::ClientChannel<In, Out, Http2ChannelTypes>
+    for ClientChannel<In, Out>
 {
     fn open_bi(&self) -> OpenBiFuture<'_, In, Out> {
-        log!("open_bi");
-        match self {
-            Channel::Client(client, url) => {
-                log!("open_bi {}", url);
-                let (out_tx, out_rx) = flume::bounded::<Out>(32);
-                let out_stream = futures::stream::unfold(out_rx, |out_rx| async move {
-                    match out_rx.recv_async().await {
-                        Ok(value) => {
-                            Some((
-                                bincode::serialize(&value).map(|x| {
-                                    // println!("{}", x.len());
-                                    Bytes::from(x)
-                                }),
-                                out_rx,
-                            ))
-                        }
-                        Err(_cause) => None,
-                    }
-                });
-                let req: Result<Request<Body>, OpenBiError> = Request::post(url)
-                    .body(Body::wrap_stream(out_stream))
-                    .map_err(OpenBiError::HyperHttp);
-                let res: Result<(ResponseFuture, flume::Sender<Out>), OpenBiError> =
-                    req.map(|req| (client.request(req), out_tx));
-                OpenBiFuture::new(res)
+        log!("open_bi {}", self.1);
+        let (out_tx, out_rx) = flume::bounded::<Out>(32);
+        let out_stream = futures::stream::unfold(out_rx, |out_rx| async move {
+            match out_rx.recv_async().await {
+                Ok(value) => Some((bincode::serialize(&value).map(Bytes::from), out_rx)),
+                Err(_cause) => None,
             }
-            Channel::Server(_) => OpenBiFuture::new(Err(OpenBiError::Server)),
-        }
+        });
+        let req: Result<Request<Body>, OpenBiError> = Request::post(&self.1)
+            .body(Body::wrap_stream(out_stream))
+            .map_err(OpenBiError::HyperHttp);
+        let res: Result<(ResponseFuture, flume::Sender<Out>), OpenBiError> =
+            req.map(|req| (self.0.request(req), out_tx));
+        OpenBiFuture::new(res)
     }
+}
 
+impl<In: RpcMessage, Out: RpcMessage> crate::ServerChannel<In, Out, Http2ChannelTypes>
+    for ServerChannel<In, Out>
+{
     fn accept_bi(&self) -> AcceptBiFuture<'_, In, Out> {
-        match self {
-            Channel::Client(_, _) => AcceptBiFuture::new(Err(AcceptBiError::Client)),
-            Channel::Server(server) => AcceptBiFuture::new(Ok(server.recv_async())),
-        }
+        AcceptBiFuture::new(Ok(self.0.recv_async()))
     }
 }

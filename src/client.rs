@@ -4,7 +4,7 @@
 use crate::{
     channel_factory::{ChannelFactory, ConstantChannelFactory},
     message::{BidiStreaming, ClientStreaming, Msg, Rpc, ServerStreaming},
-    Channel, ChannelTypes, Service,
+    ChannelTypes, ClientChannel, Service,
 };
 use futures::{
     future::BoxFuture, stream::BoxStream, FutureExt, Sink, SinkExt, Stream, StreamExt, TryFutureExt,
@@ -83,7 +83,7 @@ enum ClientOpenBiError<C: ChannelTypes> {
 
 impl<S: Service, C: ChannelTypes> RpcClient<S, C> {
     /// Create a new rpc client from a channel
-    pub fn new(channel: C::Channel<S::Res, S::Req>) -> Self {
+    pub fn new(channel: C::ClientChannel<S::Res, S::Req>) -> Self {
         Self::from_factory(Arc::new(ConstantChannelFactory(channel)))
     }
 

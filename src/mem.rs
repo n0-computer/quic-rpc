@@ -52,24 +52,41 @@ impl<Res: RpcMessage> futures::Stream for RecvStream<Res> {
 pub(crate) type Socket<In, Out> = (self::SendSink<Out>, self::RecvStream<In>);
 
 /// A mem channel
-pub struct Channel<In: RpcMessage, Out: RpcMessage> {
+pub struct ServerChannel<In: RpcMessage, Out: RpcMessage> {
     stream: flume::Receiver<Socket<In, Out>>,
-    sink: flume::Sender<Socket<Out, In>>,
 }
 
-impl<In: RpcMessage, Out: RpcMessage> Clone for Channel<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> Clone for ServerChannel<In, Out> {
     fn clone(&self) -> Self {
         Self {
             stream: self.stream.clone(),
+        }
+    }
+}
+
+impl<In: RpcMessage, Out: RpcMessage> fmt::Debug for ServerChannel<In, Out> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ServerChannel")
+            .field("stream", &self.stream)
+            .finish()
+    }
+}
+/// A mem channel
+pub struct ClientChannel<In: RpcMessage, Out: RpcMessage> {
+    sink: flume::Sender<Socket<Out, In>>,
+}
+
+impl<In: RpcMessage, Out: RpcMessage> Clone for ClientChannel<In, Out> {
+    fn clone(&self) -> Self {
+        Self {
             sink: self.sink.clone(),
         }
     }
 }
 
-impl<In: RpcMessage, Out: RpcMessage> fmt::Debug for Channel<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> fmt::Debug for ClientChannel<In, Out> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Channel")
-            .field("stream", &self.stream)
+        f.debug_struct("ClientChannel")
             .field("sink", &self.sink)
             .finish()
     }
@@ -259,11 +276,13 @@ impl crate::ChannelTypes for MemChannelTypes {
 
     type AcceptBiFuture<'a, In: RpcMessage, Out: RpcMessage> = self::AcceptBiFuture<'a, In, Out>;
 
-    type Channel<In: RpcMessage, Out: RpcMessage> = self::Channel<In, Out>;
+    type ClientChannel<In: RpcMessage, Out: RpcMessage> = self::ClientChannel<In, Out>;
+
+    type ServerChannel<In: RpcMessage, Out: RpcMessage> = self::ServerChannel<In, Out>;
 }
 
-impl<In: RpcMessage, Out: RpcMessage> crate::Channel<In, Out, MemChannelTypes>
-    for Channel<In, Out>
+impl<In: RpcMessage, Out: RpcMessage> crate::ClientChannel<In, Out, MemChannelTypes>
+    for ClientChannel<In, Out>
 {
     fn open_bi(&self) -> OpenBiFuture<'_, In, Out> {
         let (local_send, remote_recv) = flume::bounded::<Out>(128);
@@ -275,7 +294,11 @@ impl<In: RpcMessage, Out: RpcMessage> crate::Channel<In, Out, MemChannelTypes>
         let inner = self.sink.send_async((remote_send, remote_recv));
         OpenBiFuture::new(inner, (local_send, local_recv))
     }
+}
 
+impl<In: RpcMessage, Out: RpcMessage> crate::ServerChannel<In, Out, MemChannelTypes>
+    for ServerChannel<In, Out>
+{
     fn accept_bi(&self) -> AcceptBiFuture<'_, In, Out> {
         AcceptBiFuture(self.stream.recv_async())
     }
@@ -286,17 +309,7 @@ impl<In: RpcMessage, Out: RpcMessage> crate::Channel<In, Out, MemChannelTypes>
 /// `buffer` the size of the buffer for each channel. Keep this at a low value to get backpressure
 pub fn connection<Req: RpcMessage, Res: RpcMessage>(
     buffer: usize,
-) -> (Channel<Req, Res>, Channel<Res, Req>) {
-    let (send1, recv1) = flume::bounded::<Socket<Req, Res>>(buffer);
-    let (send2, recv2) = flume::bounded::<Socket<Res, Req>>(buffer);
-    (
-        Channel {
-            stream: recv1,
-            sink: send2,
-        },
-        Channel {
-            stream: recv2,
-            sink: send1,
-        },
-    )
+) -> (ServerChannel<Req, Res>, ClientChannel<Res, Req>) {
+    let (sink, stream) = flume::bounded::<Socket<Req, Res>>(buffer);
+    (ServerChannel { stream }, ClientChannel { sink })
 }

@@ -15,12 +15,12 @@ pub struct ChannelId(pub u64);
 /// A channel with an id to uniquely identify it
 #[allow(type_alias_bounds)]
 pub(crate) type NumberedChannel<In: RpcMessage, Out: RpcMessage, C: ChannelTypes> =
-    (C::Channel<In, Out>, ChannelId);
+    (C::ClientChannel<In, Out>, ChannelId);
 
 /// Result when attempting to open a channel
 #[allow(type_alias_bounds)]
 pub(crate) type CreateChannelResult<In: RpcMessage, Out: RpcMessage, C: ChannelTypes> =
-    Result<C::Channel<In, Out>, C::CreateChannelError>;
+    Result<C::ClientChannel<In, Out>, C::CreateChannelError>;
 
 /// Result containing a numbered channel or an error
 #[allow(type_alias_bounds)]
@@ -48,7 +48,7 @@ pub trait ChannelFactory<In: RpcMessage, Out: RpcMessage, C: ChannelTypes>:
 }
 
 pub(crate) struct ConstantChannelFactory<In: RpcMessage, Out: RpcMessage, C: ChannelTypes>(
-    pub C::Channel<In, Out>,
+    pub C::ClientChannel<In, Out>,
 );
 
 impl<In: RpcMessage, Out: RpcMessage, C: ChannelTypes> ChannelFactory<In, Out, C>

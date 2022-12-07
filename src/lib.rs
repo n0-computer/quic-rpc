@@ -148,7 +148,10 @@ pub trait ChannelTypes: Debug + Sized + Send + Sync + Unpin + Clone + 'static {
     type CreateChannelError: RpcError;
 
     /// Channel type
-    type Channel<In: RpcMessage, Out: RpcMessage>: crate::Channel<In, Out, Self>;
+    type ClientChannel<In: RpcMessage, Out: RpcMessage>: crate::ClientChannel<In, Out, Self>;
+
+    /// Channel type
+    type ServerChannel<In: RpcMessage, Out: RpcMessage>: crate::ServerChannel<In, Out, Self>;
 }
 
 /// An abstract channel with typed input and output
@@ -157,11 +160,22 @@ pub trait ChannelTypes: Debug + Sized + Send + Sync + Unpin + Clone + 'static {
 ///
 /// Heavily inspired by quinn, but uses concrete `In` and `Out` types instead of bytes. The reason for this is that
 /// we want to be able to write a memory channel that does not serialize and deserialize.
-pub trait Channel<In: RpcMessage, Out: RpcMessage, T: ChannelTypes>:
+pub trait ClientChannel<In: RpcMessage, Out: RpcMessage, T: ChannelTypes>:
     Debug + Clone + Send + Sync + 'static
 {
     /// Open a bidirectional stream
     fn open_bi(&self) -> T::OpenBiFuture<'_, In, Out>;
+}
+
+/// An abstract channel with typed input and output
+///
+/// This assumes cheap streams, so every interaction uses a new stream.
+///
+/// Heavily inspired by quinn, but uses concrete `In` and `Out` types instead of bytes. The reason for this is that
+/// we want to be able to write a memory channel that does not serialize and deserialize.
+pub trait ServerChannel<In: RpcMessage, Out: RpcMessage, T: ChannelTypes>:
+    Debug + Clone + Send + Sync + 'static
+{
     /// Accept a bidirectional stream
     fn accept_bi(&self) -> T::AcceptBiFuture<'_, In, Out>;
 }

@@ -210,7 +210,7 @@ impl ComputeService {
 }
 
 pub async fn smoke_test<C: ChannelTypes>(
-    client: C::Channel<ComputeResponse, ComputeRequest>,
+    client: C::ClientChannel<ComputeResponse, ComputeRequest>,
 ) -> anyhow::Result<()> {
     let client = RpcClient::<ComputeService, C>::new(client);
     // a rpc call

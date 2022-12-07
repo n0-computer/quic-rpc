@@ -3,7 +3,7 @@
 //! This defines the RPC server DSL
 use crate::{
     message::{BidiStreaming, ClientStreaming, Msg, Rpc, ServerStreaming},
-    Channel, ChannelTypes, Service,
+    ChannelTypes, ServerChannel, Service,
 };
 use futures::{channel::oneshot, task, task::Poll, Future, FutureExt, SinkExt, Stream, StreamExt};
 use pin_project::pin_project;
@@ -15,7 +15,7 @@ use std::{error, fmt, fmt::Debug, marker::PhantomData, pin::Pin, result};
 /// `S` is the service type, `C` is the channel type.
 #[derive(Debug)]
 pub struct RpcServer<S: Service, C: ChannelTypes> {
-    channel: C::Channel<S::Req, S::Res>,
+    channel: C::ServerChannel<S::Req, S::Res>,
     _s: std::marker::PhantomData<(S, C)>,
 }
 
@@ -30,7 +30,7 @@ impl<S: Service, C: ChannelTypes> Clone for RpcServer<S, C> {
 
 impl<S: Service, C: ChannelTypes> RpcServer<S, C> {
     /// Create a new server channel from a channel and a service type
-    pub fn new(channel: C::Channel<S::Req, S::Res>) -> Self {
+    pub fn new(channel: C::ServerChannel<S::Req, S::Res>) -> Self {
         Self {
             channel,
             _s: std::marker::PhantomData,
@@ -345,7 +345,7 @@ async fn race2<T, A: Future<Output = T>, B: Future<Output = T>>(f1: A, f2: B) ->
 pub async fn run_server_loop<S, C, T, F, Fut>(
     _service_type: S,
     _channel_type: C,
-    conn: C::Channel<S::Req, S::Res>,
+    conn: C::ServerChannel<S::Req, S::Res>,
     target: T,
     mut handler: F,
 ) -> Result<(), RpcServerError<C>>

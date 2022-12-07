@@ -184,16 +184,22 @@ impl crate::ChannelTypes for QuinnChannelTypes {
 
     type AcceptBiFuture<'a, In: RpcMessage, Out: RpcMessage> = self::AcceptBiFuture<'a, In, Out>;
 
-    type Channel<In: RpcMessage, Out: RpcMessage> = self::Channel<In, Out>;
+    type ClientChannel<In: RpcMessage, Out: RpcMessage> = self::Channel<In, Out>;
+
+    type ServerChannel<In: RpcMessage, Out: RpcMessage> = self::Channel<In, Out>;
 }
 
-impl<In: RpcMessage + Sync, Out: RpcMessage + Sync> crate::Channel<In, Out, QuinnChannelTypes>
+impl<In: RpcMessage + Sync, Out: RpcMessage + Sync> crate::ClientChannel<In, Out, QuinnChannelTypes>
     for self::Channel<In, Out>
 {
     fn open_bi(&self) -> OpenBiFuture<'_, In, Out> {
         OpenBiFuture(self.0.open_bi(), PhantomData)
     }
+}
 
+impl<In: RpcMessage + Sync, Out: RpcMessage + Sync> crate::ServerChannel<In, Out, QuinnChannelTypes>
+    for self::Channel<In, Out>
+{
     fn accept_bi(&self) -> AcceptBiFuture<'_, In, Out> {
         AcceptBiFuture(self.0.accept_bi(), PhantomData)
     }

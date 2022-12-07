@@ -7,7 +7,7 @@ use quic_rpc::{
     mem::MemChannelTypes,
     message::{BidiStreaming, ClientStreaming, Msg, ServerStreaming},
     server::RpcServerError,
-    Channel, *,
+    ClientChannel, *,
 };
 use serde::{Deserialize, Serialize};
 use std::{fmt::Debug, result};
@@ -200,7 +200,7 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
-    let (client, server) = mem::connection::<StoreResponse, StoreRequest>(1);
+    let (server, client) = mem::connection::<StoreRequest, StoreResponse>(1);
     let client = RpcClient::<StoreService, MemChannelTypes>::new(client);
     let server = RpcServer::<StoreService, MemChannelTypes>::new(server);
     let server_handle = tokio::task::spawn(server_future(server));
