@@ -149,17 +149,21 @@ impl ComputeService {
         let service = ComputeService;
         loop {
             let (req, chan) = s.accept_one().await?;
-            use ComputeRequest::*;
+            let s = s.clone();
             let service = service.clone();
-            #[rustfmt::skip]
-            match req {
-                Sqr(msg) => s.rpc(msg, chan, service, ComputeService::sqr).await,
-                Sum(msg) => s.client_streaming(msg, chan, service, ComputeService::sum).await,
-                Fibonacci(msg) => s.server_streaming(msg, chan, service, ComputeService::fibonacci).await,
-                Multiply(msg) => s.bidi_streaming(msg, chan, service, ComputeService::multiply).await,
-                SumUpdate(_) => Err(RpcServerError::UnexpectedStartMessage)?,
-                MultiplyUpdate(_) => Err(RpcServerError::UnexpectedStartMessage)?,
-            }?;
+            tokio::spawn(async move {
+                use ComputeRequest::*;
+                #[rustfmt::skip]
+                match req {
+                    Sqr(msg) => s.rpc(msg, chan, service, ComputeService::sqr).await,
+                    Sum(msg) => s.client_streaming(msg, chan, service, ComputeService::sum).await,
+                    Fibonacci(msg) => s.server_streaming(msg, chan, service, ComputeService::fibonacci).await,
+                    Multiply(msg) => s.bidi_streaming(msg, chan, service, ComputeService::multiply).await,
+                    SumUpdate(_) => Err(RpcServerError::UnexpectedStartMessage)?,
+                    MultiplyUpdate(_) => Err(RpcServerError::UnexpectedStartMessage)?,
+                }?;
+                Ok::<_, RpcServerError<C>>(())
+            });
         }
     }
 
@@ -242,6 +246,10 @@ pub async fn smoke_test<C: ChannelTypes>(
     Ok(())
 }
 
+fn clear_line() {
+    print!("\r{}\r", " ".repeat(80));
+}
+
 pub async fn bench<C: ChannelTypes>(
     client: RpcClient<ComputeService, C>,
     n: u64,
@@ -262,7 +270,8 @@ where
         }
         let rps = ((n as f64) / t0.elapsed().as_secs_f64()).round();
         assert_eq!(sum, sum_of_squares(n));
-        println!("\nRPC seq {} rps", rps.separate_with_underscores(),);
+        clear_line();
+        println!("RPC seq {} rps", rps.separate_with_underscores(),);
     }
     // parallel RPCs
     {
@@ -282,7 +291,8 @@ where
         let sum = resp.into_iter().sum::<u128>();
         let rps = ((n as f64) / t0.elapsed().as_secs_f64()).round();
         assert_eq!(sum, sum_of_squares(n));
-        println!("\nRPC par {} rps", rps.separate_with_underscores(),);
+        clear_line();
+        println!("RPC par {} rps", rps.separate_with_underscores(),);
     }
     // sequential streaming
     {
@@ -306,7 +316,8 @@ where
         }
         assert_eq!(sum, (0..n as u128).map(|x| x * 2).sum());
         let rps = ((n as f64) / t0.elapsed().as_secs_f64()).round();
-        println!("\nbidi seq {} rps", rps.separate_with_underscores(),);
+        clear_line();
+        println!("bidi seq {} rps", rps.separate_with_underscores(),);
 
         handle.await??;
     }

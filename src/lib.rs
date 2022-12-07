@@ -67,8 +67,11 @@ pub mod combined;
 pub mod macros;
 pub mod mem;
 pub mod message;
+#[cfg(feature = "quic")]
 pub mod quinn;
 pub use client::RpcClient;
+#[cfg(feature = "http2")]
+pub mod http2;
 pub mod server;
 pub use server::RpcServer;
 pub mod channel_factory;
@@ -80,9 +83,12 @@ pub mod channel_factory;
 ///
 /// This does not seem like a big restriction. If you want a pure memory channel without the possibility
 /// to also use the quinn transport, you might want to use a mpsc channel directly.
-pub trait RpcMessage: Serialize + DeserializeOwned + Send + Sync + Unpin + 'static {}
+pub trait RpcMessage: Debug + Serialize + DeserializeOwned + Send + Sync + Unpin + 'static {}
 
-impl<T> RpcMessage for T where T: Serialize + DeserializeOwned + Send + Sync + Unpin + 'static {}
+impl<T> RpcMessage for T where
+    T: Debug + Serialize + DeserializeOwned + Send + Sync + Unpin + 'static
+{
+}
 
 /// requirements for an internal error
 ///
@@ -102,7 +108,7 @@ pub trait Service: Send + Sync + Debug + Clone + 'static {
 /// Defines a set of types for a kind of channel
 ///
 /// Every distinct kind of channel has its own ChannelType. See e.g.
-/// [crate::mem::MemChannelTypes] and [crate::quinn::QuinnChannelTypes].
+/// [crate::mem::MemChannelTypes].
 pub trait ChannelTypes: Debug + Sized + Send + Sync + Unpin + Clone + 'static {
     /// The sink used for sending either requests or responses on this channel
     type SendSink<M: RpcMessage>: Sink<M, Error = Self::SendError> + Send + Unpin + 'static;

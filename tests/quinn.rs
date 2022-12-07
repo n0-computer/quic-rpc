@@ -1,3 +1,4 @@
+#![cfg(feature = "quic")]
 use std::{
     net::{Ipv4Addr, SocketAddr, SocketAddrV4},
     sync::Arc,

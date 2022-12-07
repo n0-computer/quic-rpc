@@ -304,14 +304,13 @@ impl<A: ChannelTypes, B: ChannelTypes, In: RpcMessage, Out: RpcMessage>
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{combined, mem, quinn, Channel};
+    use crate::{combined, mem, Channel};
 
     #[tokio::test]
     async fn open_empty_channel() {
-        let channel =
-            combined::Channel::<mem::MemChannelTypes, quinn::QuinnChannelTypes, (), ()>::new(
-                None, None,
-            );
+        let channel = combined::Channel::<mem::MemChannelTypes, mem::MemChannelTypes, (), ()>::new(
+            None, None,
+        );
         let res = channel.open_bi().await;
         assert!(matches!(res, Err(OpenBiError::NoChannel)));
     }
