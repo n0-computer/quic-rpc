@@ -54,7 +54,7 @@
 //! # Ok(())
 //! # }
 //! ```
-// #![deny(missing_docs)]
+#![deny(missing_docs)]
 #![deny(rustdoc::broken_intra_doc_links)]
 use futures::{Future, Sink, Stream};
 use serde::{de::DeserializeOwned, Serialize};
@@ -67,8 +67,10 @@ pub mod combined;
 pub mod macros;
 pub mod mem;
 pub mod message;
+#[cfg(feature = "quic")]
 pub mod quinn;
 pub use client::RpcClient;
+#[cfg(feature = "http2")]
 pub mod http2;
 pub mod server;
 pub use server::RpcServer;
@@ -106,7 +108,7 @@ pub trait Service: Send + Sync + Debug + Clone + 'static {
 /// Defines a set of types for a kind of channel
 ///
 /// Every distinct kind of channel has its own ChannelType. See e.g.
-/// [crate::mem::MemChannelTypes] and [crate::quinn::QuinnChannelTypes].
+/// [crate::mem::MemChannelTypes].
 pub trait ChannelTypes: Debug + Sized + Send + Sync + Unpin + Clone + 'static {
     /// The sink used for sending either requests or responses on this channel
     type SendSink<M: RpcMessage>: Sink<M, Error = Self::SendError> + Send + Unpin + 'static;

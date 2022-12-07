@@ -1,5 +1,5 @@
 use anyhow::Context;
-use quic_rpc::{quinn::QuinnChannelTypes, server::RpcServerError, ChannelTypes};
+use quic_rpc::{server::RpcServerError, ChannelTypes};
 
 #[allow(unused)]
 pub async fn check_termination_anyhow<C: ChannelTypes>(
@@ -8,8 +8,7 @@ pub async fn check_termination_anyhow<C: ChannelTypes>(
     // dropping the client will cause the server to terminate
     match server_handle.await? {
         Err(e) => {
-            let err: RpcServerError<QuinnChannelTypes> =
-                e.downcast().context("unexpected termination result")?;
+            let err: RpcServerError<C> = e.downcast().context("unexpected termination result")?;
             match err {
                 RpcServerError::AcceptBiError(_) => {}
                 e => panic!("unexpected termination error {:?}", e),

@@ -8,7 +8,7 @@ edition = "2021"
 [dependencies]
 anyhow = "1"
 futures = "0.3.25"
-quic-rpc = { path = "../../.." }
+quic-rpc = { path = "../../..", features = ["quic"] }
 quinn = "0.9.0"
 rustls = { version = "0.20.7", features = ["dangerous_configuration"] }
 serde = { version = "1", features = ["derive"] }

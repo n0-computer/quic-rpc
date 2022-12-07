@@ -3,17 +3,17 @@
 //! Note that we are using the framing from http2, so we have to make sure that
 //! the parameters on both client and server side are big enough.
 use std::{
-    convert::Infallible, error, fmt, io, marker::PhantomData, net::{SocketAddr}, result, task::Poll, pin::Pin,
+    convert::Infallible, error, fmt, io, marker::PhantomData, net::SocketAddr, result, task::Poll,
 };
 
 use crate::{ChannelTypes, RpcMessage};
 use bytes::Bytes;
 use flume::{r#async::RecvFut, Receiver, Sender};
-use futures::{Future, FutureExt, StreamExt, Stream};
+use futures::{Future, FutureExt, StreamExt};
 use hyper::{
     body::HttpBody,
     client::{connect::dns::GaiResolver, HttpConnector, ResponseFuture},
-    server::conn::{AddrStream, AddrIncoming},
+    server::conn::{AddrIncoming, AddrStream},
     service::{make_service_fn, service_fn},
     Body, Client, Request, Response, Server, StatusCode, Uri,
 };
@@ -30,60 +30,63 @@ macro_rules! log {
     }
 }
 
-/// concatenate the given stream and result from the future
-///
-/// Even if the future does not complete, the stream is nevertheless completed
-/// once the inner stream completes.
-#[pin_project]
-struct TakeUntilEither<S, F>(Option<(S, F)>);
+// /// concatenate the given stream and result from the future
+// ///
+// /// Even if the future does not complete, the stream is nevertheless completed
+// /// once the inner stream completes.
+// #[pin_project]
+// struct TakeUntilEither<S, F>(Option<(S, F)>);
 
-impl<S, F> TakeUntilEither<S, F>
-where
-    S: Stream + Unpin,
-    F: Future<Output = S::Item> + Unpin,
-{
-    fn new(stream: S, future: F) -> Self {
-        Self(Some((stream, future)))
-    }
-}
+// impl<S, F> TakeUntilEither<S, F>
+// where
+//     S: Stream + Unpin,
+//     F: Future<Output = S::Item> + Unpin,
+// {
+//     fn new(stream: S, future: F) -> Self {
+//         Self(Some((stream, future)))
+//     }
+// }
 
-impl<S, F> Stream for TakeUntilEither<S, F>
-where
-    S: Stream + Unpin,
-    F: Future<Output = S::Item> + Unpin,
-{
-    type Item = S::Item;
+// impl<S, F> Stream for TakeUntilEither<S, F>
+// where
+//     S: Stream + Unpin,
+//     F: Future<Output = S::Item> + Unpin,
+// {
+//     type Item = S::Item;
 
-    fn poll_next(mut self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Option<Self::Item>> {
-        match &mut self.0 {
-            Some((s, f)) => {
-                match s.poll_next_unpin(cx) {
-                    Poll::Ready(Some(x)) => Poll::Ready(Some(x)),
-                    Poll::Ready(None) => {
-                        self.0.take();
-                        Poll::Ready(None)
-                    },
-                    Poll::Pending => match f.poll_unpin(cx) {
-                        Poll::Ready(x) => {
-                            self.0.take();
-                            Poll::Ready(Some(x))
-                        }
-                        Poll::Pending => Poll::Pending,
-                    },
-                }
-            }
-            None => Poll::Ready(None),
-        }
-    }
-}
+//     fn poll_next(mut self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Option<Self::Item>> {
+//         match &mut self.0 {
+//             Some((s, f)) => {
+//                 match s.poll_next_unpin(cx) {
+//                     Poll::Ready(Some(x)) => Poll::Ready(Some(x)),
+//                     Poll::Ready(None) => {
+//                         self.0.take();
+//                         Poll::Ready(None)
+//                     },
+//                     Poll::Pending => match f.poll_unpin(cx) {
+//                         Poll::Ready(x) => {
+//                             self.0.take();
+//                             Poll::Ready(Some(x))
+//                         }
+//                         Poll::Pending => Poll::Pending,
+//                     },
+//                 }
+//             }
+//             None => Poll::Ready(None),
+//         }
+//     }
+// }
 
 /// A channel using a hyper connection
 pub enum Channel<In: RpcMessage, Out: RpcMessage> {
+    /// client mode
     Client(Client<HttpConnector<GaiResolver>, Body>, Uri),
+    /// server mode
     Server(flume::Receiver<(flume::Receiver<In>, flume::Sender<Out>)>),
 }
 
 impl<In: RpcMessage, Out: RpcMessage> Channel<In, Out> {
+    /// create a client given an uri
     pub fn client(uri: Uri) -> Self {
         let mut connector = HttpConnector::new();
         connector.set_nodelay(true);
@@ -97,9 +100,10 @@ impl<In: RpcMessage, Out: RpcMessage> Channel<In, Out> {
         Self::Client(client, uri)
     }
 
+    /// create a server given a socket addr
     pub fn server(
         addr: &SocketAddr,
-    ) -> (Self, impl Future<Output = result::Result<(), hyper::Error>>) {
+    ) -> hyper::Result<(Self, impl Future<Output = result::Result<(), hyper::Error>>)> {
         let (accept_tx, accept_rx) = flume::bounded(32);
         let server_fn = move |req: Request<Body>| {
             async move {
@@ -164,7 +168,7 @@ impl<In: RpcMessage, Out: RpcMessage> Channel<In, Out> {
                 }))
             }
         });
-        let mut addr_incomping = AddrIncoming::bind(addr).unwrap();
+        let mut addr_incomping = AddrIncoming::bind(addr)?;
         addr_incomping.set_nodelay(true);
         let server = Server::builder(addr_incomping)
             .http2_only(true)
@@ -173,7 +177,7 @@ impl<In: RpcMessage, Out: RpcMessage> Channel<In, Out> {
             .http2_max_frame_size(Some(MAX_FRAME_SIZE))
             .http2_max_send_buf_size(MAX_FRAME_SIZE as usize)
             .serve(service);
-        (Self::Server(accept_rx), server)
+        Ok((Self::Server(accept_rx), server))
     }
 }
 
@@ -195,6 +199,7 @@ impl<In: RpcMessage, Out: RpcMessage> Clone for Channel<In, Out> {
     }
 }
 
+/// Http2 channel types
 #[derive(Debug, Clone)]
 pub struct Http2ChannelTypes;
 
@@ -215,7 +220,7 @@ impl ChannelTypes for Http2ChannelTypes {
 
     type AcceptBiFuture<'a, In: RpcMessage, Out: RpcMessage> = self::AcceptBiFuture<'a, In, Out>;
 
-    type CreateChannelError = io::Error;
+    type CreateChannelError = hyper::Error;
 
     type Channel<In: RpcMessage, Out: RpcMessage> = self::Channel<In, Out>;
 }
@@ -223,10 +228,13 @@ impl ChannelTypes for Http2ChannelTypes {
 /// OpenBiError for mem channels.
 #[derive(Debug)]
 pub enum OpenBiError {
+    /// Hyper http error
     HyperHttp(hyper::http::Error),
+    /// Generic hyper error
     Hyper(hyper::Error),
     /// The remote side of the channel was dropped
     RemoteDropped,
+    /// Tried to open a channel on a server
     Server,
 }
 
@@ -238,6 +246,7 @@ impl fmt::Display for OpenBiError {
 
 impl std::error::Error for OpenBiError {}
 
+/// Future returned by `Channel::open_bi`.
 #[pin_project]
 pub struct OpenBiFuture<'a, In, Out>(
     Option<Result<(ResponseFuture, flume::Sender<Out>), OpenBiError>>,
@@ -343,6 +352,7 @@ impl fmt::Display for AcceptBiError {
 
 impl error::Error for AcceptBiError {}
 
+/// Future returned by `Channel::accept_bi`.
 #[allow(clippy::type_complexity)]
 #[pin_project]
 pub struct AcceptBiFuture<'a, In, Out>(
@@ -403,11 +413,14 @@ impl<In: RpcMessage, Out: RpcMessage> crate::Channel<In, Out, Http2ChannelTypes>
                 let out_stream = futures::stream::unfold(out_rx, |out_rx| async move {
                     match out_rx.recv_async().await {
                         Ok(value) => {
-                            Some((bincode::serialize(&value).map(|x| {
-                                // println!("{}", x.len());
-                                Bytes::from(x)
-                            }), out_rx))
-                        },
+                            Some((
+                                bincode::serialize(&value).map(|x| {
+                                    // println!("{}", x.len());
+                                    Bytes::from(x)
+                                }),
+                                out_rx,
+                            ))
+                        }
                         Err(_cause) => None,
                     }
                 });

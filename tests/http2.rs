@@ -1,3 +1,4 @@
+#![cfg(feature = "http2")]
 use std::net::SocketAddr;
 
 use hyper::Uri;
@@ -10,7 +11,7 @@ mod util;
 
 fn run_server(addr: &SocketAddr) -> JoinHandle<anyhow::Result<()>> {
     let (channel, hyper) =
-        quic_rpc::http2::Channel::<ComputeRequest, ComputeResponse>::server(addr);
+        quic_rpc::http2::Channel::<ComputeRequest, ComputeResponse>::server(addr).unwrap();
     let server = RpcServer::<ComputeService, Http2ChannelTypes>::new(channel);
     tokio::spawn(hyper);
     tokio::spawn(async move {
