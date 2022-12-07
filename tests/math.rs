@@ -149,17 +149,21 @@ impl ComputeService {
         let service = ComputeService;
         loop {
             let (req, chan) = s.accept_one().await?;
-            use ComputeRequest::*;
+            let s = s.clone();
             let service = service.clone();
-            #[rustfmt::skip]
-            match req {
-                Sqr(msg) => s.rpc(msg, chan, service, ComputeService::sqr).await,
-                Sum(msg) => s.client_streaming(msg, chan, service, ComputeService::sum).await,
-                Fibonacci(msg) => s.server_streaming(msg, chan, service, ComputeService::fibonacci).await,
-                Multiply(msg) => s.bidi_streaming(msg, chan, service, ComputeService::multiply).await,
-                SumUpdate(_) => Err(RpcServerError::UnexpectedStartMessage)?,
-                MultiplyUpdate(_) => Err(RpcServerError::UnexpectedStartMessage)?,
-            }?;
+            tokio::spawn(async move {
+                use ComputeRequest::*;
+                #[rustfmt::skip]
+                match req {
+                    Sqr(msg) => s.rpc(msg, chan, service, ComputeService::sqr).await,
+                    Sum(msg) => s.client_streaming(msg, chan, service, ComputeService::sum).await,
+                    Fibonacci(msg) => s.server_streaming(msg, chan, service, ComputeService::fibonacci).await,
+                    Multiply(msg) => s.bidi_streaming(msg, chan, service, ComputeService::multiply).await,
+                    SumUpdate(_) => Err(RpcServerError::UnexpectedStartMessage)?,
+                    MultiplyUpdate(_) => Err(RpcServerError::UnexpectedStartMessage)?,
+                }?;
+                Ok::<_, RpcServerError<C>>(())
+            });
         }
     }
 

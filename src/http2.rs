@@ -3,17 +3,17 @@
 //! Note that we are using the framing from http2, so we have to make sure that
 //! the parameters on both client and server side are big enough.
 use std::{
-    convert::Infallible, error, fmt, io, marker::PhantomData, net::SocketAddr, result, task::Poll,
+    convert::Infallible, error, fmt, io, marker::PhantomData, net::{SocketAddr}, result, task::Poll, pin::Pin,
 };
 
 use crate::{ChannelTypes, RpcMessage};
 use bytes::Bytes;
 use flume::{r#async::RecvFut, Receiver, Sender};
-use futures::{future, never::Never, Future, FutureExt, StreamExt};
+use futures::{Future, FutureExt, StreamExt, Stream};
 use hyper::{
     body::HttpBody,
     client::{connect::dns::GaiResolver, HttpConnector, ResponseFuture},
-    server::conn::AddrStream,
+    server::conn::{AddrStream, AddrIncoming},
     service::{make_service_fn, service_fn},
     Body, Client, Request, Response, Server, StatusCode, Uri,
 };
@@ -30,6 +30,53 @@ macro_rules! log {
     }
 }
 
+/// concatenate the given stream and result from the future
+///
+/// Even if the future does not complete, the stream is nevertheless completed
+/// once the inner stream completes.
+#[pin_project]
+struct TakeUntilEither<S, F>(Option<(S, F)>);
+
+impl<S, F> TakeUntilEither<S, F>
+where
+    S: Stream + Unpin,
+    F: Future<Output = S::Item> + Unpin,
+{
+    fn new(stream: S, future: F) -> Self {
+        Self(Some((stream, future)))
+    }
+}
+
+impl<S, F> Stream for TakeUntilEither<S, F>
+where
+    S: Stream + Unpin,
+    F: Future<Output = S::Item> + Unpin,
+{
+    type Item = S::Item;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Option<Self::Item>> {
+        match &mut self.0 {
+            Some((s, f)) => {
+                match s.poll_next_unpin(cx) {
+                    Poll::Ready(Some(x)) => Poll::Ready(Some(x)),
+                    Poll::Ready(None) => {
+                        self.0.take();
+                        Poll::Ready(None)
+                    },
+                    Poll::Pending => match f.poll_unpin(cx) {
+                        Poll::Ready(x) => {
+                            self.0.take();
+                            Poll::Ready(Some(x))
+                        }
+                        Poll::Pending => Poll::Pending,
+                    },
+                }
+            }
+            None => Poll::Ready(None),
+        }
+    }
+}
+
 /// A channel using a hyper connection
 pub enum Channel<In: RpcMessage, Out: RpcMessage> {
     Client(Client<HttpConnector<GaiResolver>, Body>, Uri),
@@ -38,30 +85,32 @@ pub enum Channel<In: RpcMessage, Out: RpcMessage> {
 
 impl<In: RpcMessage, Out: RpcMessage> Channel<In, Out> {
     pub fn client(uri: Uri) -> Self {
+        let mut connector = HttpConnector::new();
+        connector.set_nodelay(true);
         let client = Client::builder()
             .http2_only(true)
             .http2_initial_connection_window_size(Some(MAX_FRAME_SIZE))
             .http2_initial_stream_window_size(Some(MAX_FRAME_SIZE))
             .http2_max_frame_size(Some(MAX_FRAME_SIZE))
             .http2_max_send_buf_size(MAX_FRAME_SIZE as usize)
-            .build_http();
+            .build(connector);
         Self::Client(client, uri)
     }
 
     pub fn server(
         addr: &SocketAddr,
     ) -> (Self, impl Future<Output = result::Result<(), hyper::Error>>) {
-        let (accept_tx, accept_rx) = flume::bounded(1);
+        let (accept_tx, accept_rx) = flume::bounded(32);
         let server_fn = move |req: Request<Body>| {
             async move {
                 // Create Flume channels for the request body and response body
-                let (req_tx, req_rx) = flume::bounded::<In>(1);
-                let (res_tx, res_rx) = flume::bounded::<Out>(1);
+                let (req_tx, req_rx) = flume::bounded::<In>(32);
+                let (res_tx, res_rx) = flume::bounded::<Out>(32);
                 accept_tx
                     .send_async((req_rx, res_tx))
                     .await
                     .map_err(|_e| "unable to send")?;
-                // task that reads request and deserializes it
+                // task that reads requests, deserializes them, and forwards them to the flume channel
                 let forwarder = async move {
                     let mut stream = req.into_body();
                     while let Some(chunk) = stream.next().await {
@@ -85,23 +134,21 @@ impl<In: RpcMessage, Out: RpcMessage> Channel<In, Out> {
                             }
                         }
                     }
-                    future::pending::<Never>().await
                 };
-                // todo: can I piggyback on the polling of the stream below instead of having
-                // to spawn a task?
-                tokio::spawn(forwarder);
                 let body = res_rx.into_stream().map(|out| {
                     let data = bincode::serialize(&out)?;
                     // todo: check size
                     Ok::<Vec<u8>, bincode::Error>(data)
                 });
+                tokio::spawn(forwarder);
+                // let body = TakeUntilEither::new(body, forwarder);
                 // Create a response with the response body channel as the response body
                 let response = Response::builder()
                     .status(StatusCode::OK)
                     .body(Body::wrap_stream(body))
                     .map_err(|_e| "unable to set body")?;
 
-                Ok::<Response<Body>, &str>(response)
+                Ok::<Response<Body>, String>(response)
             }
         };
         // todo: can this stack of weird stuff be simplified?
@@ -117,7 +164,9 @@ impl<In: RpcMessage, Out: RpcMessage> Channel<In, Out> {
                 }))
             }
         });
-        let server = Server::bind(addr)
+        let mut addr_incomping = AddrIncoming::bind(addr).unwrap();
+        addr_incomping.set_nodelay(true);
+        let server = Server::builder(addr_incomping)
             .http2_only(true)
             .http2_initial_connection_window_size(Some(MAX_FRAME_SIZE))
             .http2_initial_stream_window_size(Some(MAX_FRAME_SIZE))
@@ -192,7 +241,7 @@ impl std::error::Error for OpenBiError {}
 #[pin_project]
 pub struct OpenBiFuture<'a, In, Out>(
     Option<Result<(ResponseFuture, flume::Sender<Out>), OpenBiError>>,
-    PhantomData<&'a (In, Out)>,
+    PhantomData<&'a In>,
 );
 
 impl<'a, In: RpcMessage, Out: RpcMessage> OpenBiFuture<'a, In, Out> {
@@ -215,7 +264,7 @@ impl<'a, In: RpcMessage, Out: RpcMessage> Future for OpenBiFuture<'a, In, Out> {
                     Poll::Ready(Ok(mut res)) => {
                         log!("OpenBiFuture got response");
                         let (_, out_tx) = this.0.take().unwrap().unwrap();
-                        let (in_tx, in_rx) = flume::bounded::<In>(1);
+                        let (in_tx, in_rx) = flume::bounded::<In>(32);
                         let task = async move {
                             while let Some(item) = res.body_mut().data().await {
                                 match item {
@@ -350,7 +399,7 @@ impl<In: RpcMessage, Out: RpcMessage> crate::Channel<In, Out, Http2ChannelTypes>
         log!("open_bi");
         match self {
             Channel::Client(client, url) => {
-                let (out_tx, out_rx) = flume::bounded::<Out>(1);
+                let (out_tx, out_rx) = flume::bounded::<Out>(32);
                 let out_stream = futures::stream::unfold(out_rx, |out_rx| async move {
                     match out_rx.recv_async().await {
                         Ok(value) => {
