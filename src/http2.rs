@@ -199,18 +199,33 @@ impl<In: RpcMessage, Out: RpcMessage> Clone for Channel<In, Out> {
     }
 }
 
+/// todo
+pub type RecvStream<M> = crate::mem::RecvStream<M>;
+
+/// todo
+pub type SendSink<M> = crate::mem::SendSink<M>;
+
+/// todo
+pub type SendError = crate::mem::SendError;
+
+/// todo
+pub type RecvError = crate::mem::RecvError;
+
+/// todo
+pub type CreateChannelError = hyper::Error;
+
 /// Http2 channel types
 #[derive(Debug, Clone)]
 pub struct Http2ChannelTypes;
 
 impl ChannelTypes for Http2ChannelTypes {
-    type SendSink<M: RpcMessage> = crate::mem::SendSink<M>;
+    type SendSink<M: RpcMessage> = self::SendSink<M>;
 
-    type RecvStream<M: RpcMessage> = crate::mem::RecvStream<M>;
+    type RecvStream<M: RpcMessage> = self::RecvStream<M>;
 
-    type SendError = crate::mem::SendError;
+    type SendError = self::SendError;
 
-    type RecvError = crate::mem::RecvError;
+    type RecvError = self::RecvError;
 
     type OpenBiError = self::OpenBiError;
 
@@ -220,7 +235,7 @@ impl ChannelTypes for Http2ChannelTypes {
 
     type AcceptBiFuture<'a, In: RpcMessage, Out: RpcMessage> = self::AcceptBiFuture<'a, In, Out>;
 
-    type CreateChannelError = hyper::Error;
+    type CreateChannelError = self::CreateChannelError;
 
     type Channel<In: RpcMessage, Out: RpcMessage> = self::Channel<In, Out>;
 }
@@ -311,6 +326,7 @@ impl<'a, In: RpcMessage, Out: RpcMessage> Future for OpenBiFuture<'a, In, Out> {
                         Poll::Ready(Ok((out_tx, in_rx)))
                     }
                     Poll::Ready(Err(cause)) => {
+                        log!("OpenBiFuture got error {}", cause);
                         this.0.take();
                         Poll::Ready(Err(OpenBiError::Hyper(cause)))
                     }
@@ -409,6 +425,7 @@ impl<In: RpcMessage, Out: RpcMessage> crate::Channel<In, Out, Http2ChannelTypes>
         log!("open_bi");
         match self {
             Channel::Client(client, url) => {
+                log!("open_bi {}", url);
                 let (out_tx, out_rx) = flume::bounded::<Out>(32);
                 let out_stream = futures::stream::unfold(out_rx, |out_rx| async move {
                     match out_rx.recv_async().await {
