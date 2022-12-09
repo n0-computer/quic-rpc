@@ -4,7 +4,7 @@ use derive_more::{From, TryInto};
 use futures::{SinkExt, Stream, StreamExt};
 use message::RpcMsg;
 use quic_rpc::{
-    mem::MemChannelTypes,
+    transport::mem::{MemChannelTypes, self},
     message::{BidiStreaming, ClientStreaming, Msg, ServerStreaming},
     server::RpcServerError,
     ClientChannel, *,

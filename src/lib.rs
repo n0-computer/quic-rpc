@@ -62,17 +62,12 @@ use std::{
     fmt::{Debug, Display},
     result,
 };
+pub mod transport;
 pub mod client;
-pub mod combined;
 pub mod macros;
-pub mod mem;
 pub mod message;
-#[cfg(feature = "quic")]
-pub mod quinn;
-pub use client::RpcClient;
-#[cfg(feature = "http2")]
-pub mod http2;
 pub mod server;
+pub use client::RpcClient;
 pub use server::RpcServer;
 pub mod channel_factory;
 
@@ -154,12 +149,7 @@ pub trait ChannelTypes: Debug + Sized + Send + Sync + Unpin + Clone + 'static {
     type ServerChannel<In: RpcMessage, Out: RpcMessage>: crate::ServerChannel<In, Out, Self>;
 }
 
-/// An abstract channel with typed input and output
-///
-/// This assumes cheap streams, so every interaction uses a new stream.
-///
-/// Heavily inspired by quinn, but uses concrete `In` and `Out` types instead of bytes. The reason for this is that
-/// we want to be able to write a memory channel that does not serialize and deserialize.
+/// An abstract client channel with typed input and output
 pub trait ClientChannel<In: RpcMessage, Out: RpcMessage, T: ChannelTypes>:
     Debug + Clone + Send + Sync + 'static
 {
@@ -167,12 +157,7 @@ pub trait ClientChannel<In: RpcMessage, Out: RpcMessage, T: ChannelTypes>:
     fn open_bi(&self) -> T::OpenBiFuture<'_, In, Out>;
 }
 
-/// An abstract channel with typed input and output
-///
-/// This assumes cheap streams, so every interaction uses a new stream.
-///
-/// Heavily inspired by quinn, but uses concrete `In` and `Out` types instead of bytes. The reason for this is that
-/// we want to be able to write a memory channel that does not serialize and deserialize.
+/// An abstract server with typed input and output
 pub trait ServerChannel<In: RpcMessage, Out: RpcMessage, T: ChannelTypes>:
     Debug + Clone + Send + Sync + 'static
 {

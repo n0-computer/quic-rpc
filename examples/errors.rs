@@ -1,5 +1,5 @@
 use derive_more::{Display, From, TryInto};
-use quic_rpc::{mem::MemChannelTypes, message::RpcMsg, RpcClient, RpcServer, Service};
+use quic_rpc::{transport::mem::MemChannelTypes, message::RpcMsg, RpcClient, RpcServer, Service};
 use serde::{Deserialize, Serialize};
 use std::result;
 
@@ -55,7 +55,7 @@ impl Fs {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let fs = Fs;
-    let (server, client) = quic_rpc::mem::connection(1);
+    let (server, client) = quic_rpc::transport::mem::connection(1);
     let client = RpcClient::<IoService, MemChannelTypes>::new(client);
     let server = RpcServer::<IoService, MemChannelTypes>::new(server);
     let handle = tokio::task::spawn(async move {

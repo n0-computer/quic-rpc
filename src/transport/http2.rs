@@ -218,16 +218,16 @@ impl<In: RpcMessage, Out: RpcMessage> Clone for ServerChannel<In, Out> {
 }
 
 /// todo
-pub type RecvStream<M> = crate::mem::RecvStream<M>;
+pub type RecvStream<M> = super::mem::RecvStream<M>;
 
 /// todo
-pub type SendSink<M> = crate::mem::SendSink<M>;
+pub type SendSink<M> = super::mem::SendSink<M>;
 
 /// todo
-pub type SendError = crate::mem::SendError;
+pub type SendError = super::mem::SendError;
 
 /// todo
-pub type RecvError = crate::mem::RecvError;
+pub type RecvError = super::mem::RecvError;
 
 /// todo
 pub type CreateChannelError = hyper::Error;
@@ -293,7 +293,7 @@ impl<'a, In: RpcMessage, Out: RpcMessage> OpenBiFuture<'a, In, Out> {
 }
 
 impl<'a, In: RpcMessage, Out: RpcMessage> Future for OpenBiFuture<'a, In, Out> {
-    type Output = result::Result<crate::mem::Socket<In, Out>, OpenBiError>;
+    type Output = result::Result<super::mem::Socket<In, Out>, OpenBiError>;
 
     fn poll(
         self: std::pin::Pin<&mut Self>,
@@ -339,8 +339,8 @@ impl<'a, In: RpcMessage, Out: RpcMessage> Future for OpenBiFuture<'a, In, Out> {
                         // we can have backpressure on the number of tasks if we want!
                         tokio::spawn(task);
 
-                        let out_tx = crate::mem::SendSink(out_tx.into_sink());
-                        let in_rx = crate::mem::RecvStream(in_rx.into_stream());
+                        let out_tx = super::mem::SendSink(out_tx.into_sink());
+                        let in_rx = super::mem::RecvStream(in_rx.into_stream());
                         Poll::Ready(Ok((out_tx, in_rx)))
                     }
                     Poll::Ready(Err(cause)) => {
@@ -399,7 +399,7 @@ impl<'a, In: RpcMessage, Out: RpcMessage> AcceptBiFuture<'a, In, Out> {
 }
 
 impl<'a, In: RpcMessage, Out: RpcMessage> Future for AcceptBiFuture<'a, In, Out> {
-    type Output = result::Result<crate::mem::Socket<In, Out>, AcceptBiError>;
+    type Output = result::Result<super::mem::Socket<In, Out>, AcceptBiError>;
 
     fn poll(
         self: std::pin::Pin<&mut Self>,
@@ -409,8 +409,8 @@ impl<'a, In: RpcMessage, Out: RpcMessage> Future for AcceptBiFuture<'a, In, Out>
         match this.0 {
             Some(Ok(fut)) => match fut.poll_unpin(cx) {
                 Poll::Ready(Ok((recv, send))) => Poll::Ready(Ok((
-                    crate::mem::SendSink(send.into_sink()),
-                    crate::mem::RecvStream(recv.into_stream()),
+                    super::mem::SendSink(send.into_sink()),
+                    super::mem::RecvStream(recv.into_stream()),
                 ))),
                 Poll::Ready(Err(_cause)) => {
                     this.0.take();

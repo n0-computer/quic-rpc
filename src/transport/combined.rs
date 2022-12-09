@@ -357,7 +357,7 @@ impl<A: ChannelTypes, B: ChannelTypes, In: RpcMessage, Out: RpcMessage>
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{combined, mem, ClientChannel};
+    use crate::{transport::{combined, mem}, ClientChannel};
 
     #[tokio::test]
     async fn open_empty_channel() {

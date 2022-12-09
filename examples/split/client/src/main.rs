@@ -1,6 +1,6 @@
 use futures::sink::SinkExt;
 use futures::stream::StreamExt;
-use quic_rpc::{quinn::QuinnChannelTypes, RpcClient};
+use quic_rpc::{transport::quinn::QuinnChannelTypes, RpcClient};
 use quinn::{ClientConfig, Endpoint};
 use std::io;
 use std::net::SocketAddr;
@@ -14,7 +14,7 @@ async fn main() -> anyhow::Result<()> {
     let server_addr: SocketAddr = "127.0.0.1:12345".parse()?;
     let endpoint = make_insecure_client_endpoint("0.0.0.0:0".parse()?)?;
     let client = endpoint.connect(server_addr, "localhost")?.await?;
-    let client = quic_rpc::quinn::Channel::new(client);
+    let client = quic_rpc::transport::quinn::Channel::new(client);
     let client = RpcClient::<ComputeService, QuinnChannelTypes>::new(client);
     let mut client = ComputeClient(client);
 

@@ -1,7 +1,7 @@
 mod math;
 use math::*;
 use quic_rpc::{
-    mem::{self, MemChannelTypes},
+    transport::mem::{self, MemChannelTypes},
     server::RpcServerError,
     RpcClient, RpcServer,
 };

@@ -135,11 +135,14 @@ impl<'a, In: RpcMessage, Out: RpcMessage> Future for OpenBiFuture<'a, In, Out> {
     ) -> std::task::Poll<Self::Output> {
         let mut this = self.project();
         match this.inner.poll_unpin(cx) {
-            Poll::Ready(Ok(())) => this
+            Poll::Ready(Ok(())) => {
+                println!("got rid of channel!");
+                this
                 .res
                 .take()
                 .map(|x| Poll::Ready(Ok(x)))
-                .unwrap_or(Poll::Pending),
+                .unwrap_or(Poll::Pending)
+            },
             Poll::Ready(Err(_)) => Poll::Ready(Err(self::OpenBiError::RemoteDropped)),
             Poll::Pending => Poll::Pending,
         }

@@ -1,7 +1,7 @@
 use anyhow::Context;
 use async_stream::stream;
 use futures::stream::{Stream, StreamExt};
-use quic_rpc::{quinn::QuinnChannelTypes, server::run_server_loop};
+use quic_rpc::{transport::quinn::QuinnChannelTypes, server::run_server_loop};
 use quinn::{Endpoint, ServerConfig};
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -66,7 +66,7 @@ async fn main() -> anyhow::Result<()> {
         tokio::task::spawn(async move {
             let remote = accept.remote_address();
             eprintln!("new connection from {remote}");
-            let connection = quic_rpc::quinn::Channel::new(accept);
+            let connection = quic_rpc::transport::quinn::Channel::new(accept);
             let target = Compute;
             match run_server_loop(
                 ComputeService,

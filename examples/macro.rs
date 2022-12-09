@@ -52,7 +52,7 @@ mod store_rpc {
 use async_stream::stream;
 use futures::{SinkExt, Stream, StreamExt};
 use quic_rpc::client::RpcClient;
-use quic_rpc::mem::{self, MemChannelTypes};
+use quic_rpc::transport::mem::{self, MemChannelTypes};
 use quic_rpc::server::run_server_loop;
 use store_rpc::*;
 
