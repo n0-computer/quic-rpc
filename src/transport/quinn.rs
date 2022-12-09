@@ -106,7 +106,7 @@ pub type AcceptBiError = quinn::ConnectionError;
 ///
 /// This exposes the types from quinn directly without attempting to wrap them.
 #[derive(Debug, Clone, Copy)]
-pub struct QuinnChannelTypes;
+pub struct ChannelTypes;
 
 /// Future returned by open_bi
 #[pin_project]
@@ -165,7 +165,7 @@ impl<'a, In, Out> Future for AcceptBiFuture<'a, In, Out> {
 // pub type AcceptBiFuture<'a, In, Out> =
 //     BoxFuture<'a, result::Result<self::Socket<In, Out>, self::AcceptBiError>>;
 
-impl crate::ChannelTypes for QuinnChannelTypes {
+impl crate::ChannelTypes for ChannelTypes {
     type CreateChannelError = self::CreateChannelError;
 
     type SendSink<M: RpcMessage> = self::SendSink<M>;
@@ -189,7 +189,7 @@ impl crate::ChannelTypes for QuinnChannelTypes {
     type ServerChannel<In: RpcMessage, Out: RpcMessage> = self::Channel<In, Out>;
 }
 
-impl<In: RpcMessage + Sync, Out: RpcMessage + Sync> crate::ClientChannel<In, Out, QuinnChannelTypes>
+impl<In: RpcMessage + Sync, Out: RpcMessage + Sync> crate::ClientChannel<In, Out, ChannelTypes>
     for self::Channel<In, Out>
 {
     fn open_bi(&self) -> OpenBiFuture<'_, In, Out> {
@@ -197,7 +197,7 @@ impl<In: RpcMessage + Sync, Out: RpcMessage + Sync> crate::ClientChannel<In, Out
     }
 }
 
-impl<In: RpcMessage + Sync, Out: RpcMessage + Sync> crate::ServerChannel<In, Out, QuinnChannelTypes>
+impl<In: RpcMessage + Sync, Out: RpcMessage + Sync> crate::ServerChannel<In, Out, ChannelTypes>
     for self::Channel<In, Out>
 {
     fn accept_bi(&self) -> AcceptBiFuture<'_, In, Out> {

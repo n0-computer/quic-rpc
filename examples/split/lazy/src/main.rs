@@ -5,7 +5,7 @@
 //! To try this out, start and stop the server in a separate terminal. You should see
 //! the client reconnecting to the server after some time.
 use quic_rpc::channel_factory::LazyChannelFactory;
-use quic_rpc::{transport::quinn::QuinnChannelTypes, RpcClient};
+use quic_rpc::{transport::QuinnChannelTypes, RpcClient};
 use quinn::{ClientConfig, Endpoint};
 use std::io;
 use std::net::SocketAddr;

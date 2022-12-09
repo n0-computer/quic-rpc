@@ -137,12 +137,11 @@ impl<'a, In: RpcMessage, Out: RpcMessage> Future for OpenBiFuture<'a, In, Out> {
         match this.inner.poll_unpin(cx) {
             Poll::Ready(Ok(())) => {
                 println!("got rid of channel!");
-                this
-                .res
-                .take()
-                .map(|x| Poll::Ready(Ok(x)))
-                .unwrap_or(Poll::Pending)
-            },
+                this.res
+                    .take()
+                    .map(|x| Poll::Ready(Ok(x)))
+                    .unwrap_or(Poll::Pending)
+            }
             Poll::Ready(Err(_)) => Poll::Ready(Err(self::OpenBiError::RemoteDropped)),
             Poll::Pending => Poll::Pending,
         }
@@ -258,9 +257,9 @@ impl std::error::Error for CreateChannelError {}
 
 /// Types for mem channels.
 #[derive(Debug, Clone, Copy)]
-pub struct MemChannelTypes;
+pub struct ChannelTypes;
 
-impl crate::ChannelTypes for MemChannelTypes {
+impl crate::ChannelTypes for ChannelTypes {
     type CreateChannelError = self::CreateChannelError;
 
     type SendSink<M: RpcMessage> = self::SendSink<M>;
@@ -284,7 +283,7 @@ impl crate::ChannelTypes for MemChannelTypes {
     type ServerChannel<In: RpcMessage, Out: RpcMessage> = self::ServerChannel<In, Out>;
 }
 
-impl<In: RpcMessage, Out: RpcMessage> crate::ClientChannel<In, Out, MemChannelTypes>
+impl<In: RpcMessage, Out: RpcMessage> crate::ClientChannel<In, Out, ChannelTypes>
     for ClientChannel<In, Out>
 {
     fn open_bi(&self) -> OpenBiFuture<'_, In, Out> {
@@ -299,7 +298,7 @@ impl<In: RpcMessage, Out: RpcMessage> crate::ClientChannel<In, Out, MemChannelTy
     }
 }
 
-impl<In: RpcMessage, Out: RpcMessage> crate::ServerChannel<In, Out, MemChannelTypes>
+impl<In: RpcMessage, Out: RpcMessage> crate::ServerChannel<In, Out, ChannelTypes>
     for ServerChannel<In, Out>
 {
     fn accept_bi(&self) -> AcceptBiFuture<'_, In, Out> {

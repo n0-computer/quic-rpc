@@ -5,7 +5,7 @@ use std::{
 };
 
 use anyhow::Context;
-use quic_rpc::{transport::quinn::QuinnChannelTypes, RpcClient, RpcServer};
+use quic_rpc::{transport::QuinnChannelTypes, RpcClient, RpcServer};
 use quinn::{ClientConfig, Endpoint, ServerConfig};
 use tokio::task::JoinHandle;
 
@@ -94,8 +94,9 @@ pub fn make_endpoints() -> anyhow::Result<Endpoints> {
 
 fn run_server(server: quinn::Endpoint) -> JoinHandle<anyhow::Result<()>> {
     tokio::task::spawn(async move {
-        let connection =
-            quic_rpc::transport::quinn::Channel::new(server.accept().await.context("accept failed")?.await?);
+        let connection = quic_rpc::transport::quinn::Channel::new(
+            server.accept().await.context("accept failed")?.await?,
+        );
         let server = RpcServer::<ComputeService, QuinnChannelTypes>::new(connection);
         ComputeService::server(server).await?;
         anyhow::Ok(())

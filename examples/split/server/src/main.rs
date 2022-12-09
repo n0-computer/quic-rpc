@@ -1,7 +1,7 @@
 use anyhow::Context;
 use async_stream::stream;
 use futures::stream::{Stream, StreamExt};
-use quic_rpc::{transport::quinn::QuinnChannelTypes, server::run_server_loop};
+use quic_rpc::{server::run_server_loop, transport::QuinnChannelTypes};
 use quinn::{Endpoint, ServerConfig};
 use std::net::SocketAddr;
 use std::sync::Arc;

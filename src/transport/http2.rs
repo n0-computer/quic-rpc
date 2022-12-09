@@ -6,7 +6,7 @@ use std::{
     convert::Infallible, error, fmt, marker::PhantomData, net::SocketAddr, result, task::Poll,
 };
 
-use crate::{ChannelTypes, RpcMessage};
+use crate::RpcMessage;
 use bytes::Bytes;
 use flume::{r#async::RecvFut, Receiver, Sender};
 use futures::{Future, FutureExt, StreamExt};
@@ -234,9 +234,9 @@ pub type CreateChannelError = hyper::Error;
 
 /// Http2 channel types
 #[derive(Debug, Clone)]
-pub struct Http2ChannelTypes;
+pub struct ChannelTypes;
 
-impl ChannelTypes for Http2ChannelTypes {
+impl crate::ChannelTypes for ChannelTypes {
     type SendSink<M: RpcMessage> = self::SendSink<M>;
 
     type RecvStream<M: RpcMessage> = self::RecvStream<M>;
@@ -434,7 +434,7 @@ impl<'a, In: RpcMessage, Out: RpcMessage> Future for AcceptBiFuture<'a, In, Out>
     }
 }
 
-impl<In: RpcMessage, Out: RpcMessage> crate::ClientChannel<In, Out, Http2ChannelTypes>
+impl<In: RpcMessage, Out: RpcMessage> crate::ClientChannel<In, Out, ChannelTypes>
     for ClientChannel<In, Out>
 {
     fn open_bi(&self) -> OpenBiFuture<'_, In, Out> {
@@ -455,7 +455,7 @@ impl<In: RpcMessage, Out: RpcMessage> crate::ClientChannel<In, Out, Http2Channel
     }
 }
 
-impl<In: RpcMessage, Out: RpcMessage> crate::ServerChannel<In, Out, Http2ChannelTypes>
+impl<In: RpcMessage, Out: RpcMessage> crate::ServerChannel<In, Out, ChannelTypes>
     for ServerChannel<In, Out>
 {
     fn accept_bi(&self) -> AcceptBiFuture<'_, In, Out> {

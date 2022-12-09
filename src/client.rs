@@ -22,7 +22,7 @@ use std::{
 
 /// A client for a specific service
 ///
-/// This is a wrapper around a [crate::Channel] that serves as the entry point for the client DSL.
+/// This is a wrapper around a [crate::ClientChannel] that serves as the entry point for the client DSL.
 /// `S` is the service type, `C` is the channel type.
 #[derive(Debug)]
 pub struct RpcClient<S: Service, C: ChannelTypes> {

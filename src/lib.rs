@@ -7,7 +7,7 @@
 //! # Example
 //! ```
 //! # async fn example() -> anyhow::Result<()> {
-//! use quic_rpc::{message::RpcMsg, Service, RpcClient, mem::MemChannelTypes};
+//! use quic_rpc::{message::RpcMsg, Service, RpcClient, transport::MemChannelTypes};
 //! use serde::{Serialize, Deserialize};
 //! use derive_more::{From, TryInto};
 //!
@@ -44,7 +44,7 @@
 //! }
 //!
 //! // create a transport channel
-//! let (server, client) = quic_rpc::mem::connection::<PingRequest, PingResponse>(1);
+//! let (server, client) = quic_rpc::transport::mem::connection::<PingRequest, PingResponse>(1);
 //!
 //! // create the rpc client given the channel and the service type
 //! let mut client = RpcClient::<PingService, MemChannelTypes>::new(client);
@@ -62,11 +62,11 @@ use std::{
     fmt::{Debug, Display},
     result,
 };
-pub mod transport;
 pub mod client;
 pub mod macros;
 pub mod message;
 pub mod server;
+pub mod transport;
 pub use client::RpcClient;
 pub use server::RpcServer;
 pub mod channel_factory;
@@ -103,7 +103,7 @@ pub trait Service: Send + Sync + Debug + Clone + 'static {
 /// Defines a set of types for a kind of channel
 ///
 /// Every distinct kind of channel has its own ChannelType. See e.g.
-/// [crate::mem::MemChannelTypes].
+/// [crate::transport::MemChannelTypes].
 pub trait ChannelTypes: Debug + Sized + Send + Sync + Unpin + Clone + 'static {
     /// The sink used for sending either requests or responses on this channel
     type SendSink<M: RpcMessage>: Sink<M, Error = Self::SendError> + Send + Unpin + 'static;

@@ -2,7 +2,7 @@
 use std::net::SocketAddr;
 
 use hyper::Uri;
-use quic_rpc::{transport::http2::{Http2ChannelTypes, self}, RpcClient, RpcServer};
+use quic_rpc::{transport::http2, RpcClient, RpcServer};
 use tokio::task::JoinHandle;
 
 mod math;
@@ -12,7 +12,7 @@ mod util;
 fn run_server(addr: &SocketAddr) -> JoinHandle<anyhow::Result<()>> {
     let (channel, hyper) =
         http2::ServerChannel::<ComputeRequest, ComputeResponse>::new(addr).unwrap();
-    let server = RpcServer::<ComputeService, Http2ChannelTypes>::new(channel);
+    let server = RpcServer::<ComputeService, http2::ChannelTypes>::new(channel);
     tokio::spawn(hyper);
     tokio::spawn(async move {
         loop {
@@ -26,7 +26,7 @@ fn run_server(addr: &SocketAddr) -> JoinHandle<anyhow::Result<()>> {
 
 #[tokio::test]
 async fn http2_channel_bench() -> anyhow::Result<()> {
-    type C = Http2ChannelTypes;
+    type C = http2::ChannelTypes;
     let addr: SocketAddr = "127.0.0.1:3000".parse()?;
     let uri: Uri = "http://127.0.0.1:3000".parse()?;
     let server_handle = run_server(&addr);
@@ -42,7 +42,7 @@ async fn http2_channel_bench() -> anyhow::Result<()> {
 #[tokio::test]
 #[ignore]
 async fn http2_channel_smoke() -> anyhow::Result<()> {
-    type C = Http2ChannelTypes;
+    type C = http2::ChannelTypes;
     let addr: SocketAddr = "127.0.0.1:3000".parse()?;
     let uri: Uri = "http://127.0.0.1:3000".parse()?;
     let server_handle = run_server(&addr);
