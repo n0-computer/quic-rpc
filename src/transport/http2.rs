@@ -229,9 +229,6 @@ pub type SendError = super::mem::SendError;
 /// todo
 pub type RecvError = super::mem::RecvError;
 
-/// todo
-pub type CreateChannelError = hyper::Error;
-
 /// Http2 channel types
 #[derive(Debug, Clone)]
 pub struct ChannelTypes;
@@ -252,8 +249,6 @@ impl crate::ChannelTypes for ChannelTypes {
     type AcceptBiError = self::AcceptBiError;
 
     type AcceptBiFuture<'a, In: RpcMessage, Out: RpcMessage> = self::AcceptBiFuture<'a, In, Out>;
-
-    type CreateChannelError = self::CreateChannelError;
 
     type ClientChannel<In: RpcMessage, Out: RpcMessage> = self::ClientChannel<In, Out>;
 

@@ -66,7 +66,7 @@ async fn main() -> anyhow::Result<()> {
         tokio::task::spawn(async move {
             let remote = accept.remote_address();
             eprintln!("new connection from {remote}");
-            let connection = quic_rpc::transport::quinn::Channel::new(accept);
+            let connection = quic_rpc::transport::quinn::ServerChannel::new(accept);
             let target = Compute;
             match run_server_loop(
                 ComputeService,

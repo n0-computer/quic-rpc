@@ -94,7 +94,7 @@ pub fn make_endpoints() -> anyhow::Result<Endpoints> {
 
 fn run_server(server: quinn::Endpoint) -> JoinHandle<anyhow::Result<()>> {
     tokio::task::spawn(async move {
-        let connection = quic_rpc::transport::quinn::Channel::new(
+        let connection = quic_rpc::transport::quinn::ServerChannel::new(
             server.accept().await.context("accept failed")?.await?,
         );
         let server = RpcServer::<ComputeService, QuinnChannelTypes>::new(connection);
@@ -113,7 +113,7 @@ async fn quinn_channel_bench() -> anyhow::Result<()> {
     } = make_endpoints()?;
     let server_handle = run_server(server);
     let client = client.connect(server_addr, "localhost")?.await?;
-    let client = quic_rpc::transport::quinn::Channel::new(client);
+    let client = quic_rpc::transport::quinn::ClientChannel::new(client);
     let client = RpcClient::<ComputeService, C>::new(client);
     bench(client, 50000).await?;
     println!("waiting for server");
@@ -132,7 +132,7 @@ async fn quinn_channel_smoke() -> anyhow::Result<()> {
     } = make_endpoints()?;
     let server_handle = run_server(server);
     let client_connection = client.connect(server_addr, "localhost")?.await?;
-    let client_connection = quic_rpc::transport::quinn::Channel::new(client_connection);
+    let client_connection = quic_rpc::transport::quinn::ClientChannel::new(client_connection);
     smoke_test::<C>(client_connection).await?;
     check_termination_anyhow::<C>(server_handle).await?;
     Ok(())

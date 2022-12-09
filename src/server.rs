@@ -16,14 +16,12 @@ use std::{error, fmt, fmt::Debug, marker::PhantomData, pin::Pin, result};
 #[derive(Debug)]
 pub struct RpcServer<S: Service, C: ChannelTypes> {
     channel: C::ServerChannel<S::Req, S::Res>,
-    _s: std::marker::PhantomData<(S, C)>,
 }
 
 impl<S: Service, C: ChannelTypes> Clone for RpcServer<S, C> {
     fn clone(&self) -> Self {
         Self {
             channel: self.channel.clone(),
-            _s: std::marker::PhantomData,
         }
     }
 }
@@ -31,10 +29,7 @@ impl<S: Service, C: ChannelTypes> Clone for RpcServer<S, C> {
 impl<S: Service, C: ChannelTypes> RpcServer<S, C> {
     /// Create a new server channel from a channel and a service type
     pub fn new(channel: C::ServerChannel<S::Req, S::Res>) -> Self {
-        Self {
-            channel,
-            _s: std::marker::PhantomData,
-        }
+        Self { channel }
     }
 }
 

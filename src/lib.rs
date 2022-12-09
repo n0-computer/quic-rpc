@@ -69,7 +69,6 @@ pub mod server;
 pub mod transport;
 pub use client::RpcClient;
 pub use server::RpcServer;
-pub mod channel_factory;
 
 /// requirements for a RPC message
 ///
@@ -138,9 +137,6 @@ pub trait ChannelTypes: Debug + Sized + Send + Sync + Unpin + Clone + 'static {
         + 'a
     where
         Self: 'a;
-
-    /// Errors that can happen when creating a channel
-    type CreateChannelError: RpcError;
 
     /// Channel type
     type ClientChannel<In: RpcMessage, Out: RpcMessage>: crate::ClientChannel<In, Out, Self>;

@@ -9,26 +9,57 @@ use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
 
 type Socket<In, Out> = (SendSink<Out>, RecvStream<In>);
 
-/// A channel using a quinn connection
-pub struct Channel<In: RpcMessage, Out: RpcMessage>(quinn::Connection, PhantomData<(In, Out)>);
+/// A server channel using a quinn connection
+pub struct ServerChannel<In: RpcMessage, Out: RpcMessage>(
+    quinn::Connection,
+    PhantomData<(In, Out)>,
+);
 
-impl<In: RpcMessage, Out: RpcMessage> Channel<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> ServerChannel<In, Out> {
     /// Create a new channel
     pub fn new(conn: quinn::Connection) -> Self {
         Self(conn, PhantomData)
     }
 }
 
-impl<In: RpcMessage, Out: RpcMessage> fmt::Debug for Channel<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> fmt::Debug for ServerChannel<In, Out> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_tuple("Channel")
+        f.debug_tuple("ServerChannel")
             .field(&self.0)
             .field(&self.1)
             .finish()
     }
 }
 
-impl<In: RpcMessage, Out: RpcMessage> Clone for Channel<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> Clone for ServerChannel<In, Out> {
+    fn clone(&self) -> Self {
+        Self(self.0.clone(), PhantomData)
+    }
+}
+
+/// A server channel using a quinn connection
+pub struct ClientChannel<In: RpcMessage, Out: RpcMessage>(
+    quinn::Connection,
+    PhantomData<(In, Out)>,
+);
+
+impl<In: RpcMessage, Out: RpcMessage> ClientChannel<In, Out> {
+    /// Create a new channel
+    pub fn new(conn: quinn::Connection) -> Self {
+        Self(conn, PhantomData)
+    }
+}
+
+impl<In: RpcMessage, Out: RpcMessage> fmt::Debug for ClientChannel<In, Out> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("ClientChannel")
+            .field(&self.0)
+            .field(&self.1)
+            .finish()
+    }
+}
+
+impl<In: RpcMessage, Out: RpcMessage> Clone for ClientChannel<In, Out> {
     fn clone(&self) -> Self {
         Self(self.0.clone(), PhantomData)
     }
@@ -166,8 +197,6 @@ impl<'a, In, Out> Future for AcceptBiFuture<'a, In, Out> {
 //     BoxFuture<'a, result::Result<self::Socket<In, Out>, self::AcceptBiError>>;
 
 impl crate::ChannelTypes for ChannelTypes {
-    type CreateChannelError = self::CreateChannelError;
-
     type SendSink<M: RpcMessage> = self::SendSink<M>;
 
     type RecvStream<M: RpcMessage> = self::RecvStream<M>;
@@ -184,13 +213,13 @@ impl crate::ChannelTypes for ChannelTypes {
 
     type AcceptBiFuture<'a, In: RpcMessage, Out: RpcMessage> = self::AcceptBiFuture<'a, In, Out>;
 
-    type ClientChannel<In: RpcMessage, Out: RpcMessage> = self::Channel<In, Out>;
+    type ClientChannel<In: RpcMessage, Out: RpcMessage> = self::ClientChannel<In, Out>;
 
-    type ServerChannel<In: RpcMessage, Out: RpcMessage> = self::Channel<In, Out>;
+    type ServerChannel<In: RpcMessage, Out: RpcMessage> = self::ServerChannel<In, Out>;
 }
 
 impl<In: RpcMessage + Sync, Out: RpcMessage + Sync> crate::ClientChannel<In, Out, ChannelTypes>
-    for self::Channel<In, Out>
+    for self::ClientChannel<In, Out>
 {
     fn open_bi(&self) -> OpenBiFuture<'_, In, Out> {
         OpenBiFuture(self.0.open_bi(), PhantomData)
@@ -198,7 +227,7 @@ impl<In: RpcMessage + Sync, Out: RpcMessage + Sync> crate::ClientChannel<In, Out
 }
 
 impl<In: RpcMessage + Sync, Out: RpcMessage + Sync> crate::ServerChannel<In, Out, ChannelTypes>
-    for self::Channel<In, Out>
+    for self::ServerChannel<In, Out>
 {
     fn accept_bi(&self) -> AcceptBiFuture<'_, In, Out> {
         AcceptBiFuture(self.0.accept_bi(), PhantomData)
