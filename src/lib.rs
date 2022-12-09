@@ -70,7 +70,7 @@ pub use client::RpcClient;
 pub use server::RpcServer;
 mod macros;
 
-/// requirements for a RPC message
+/// Requirements for a RPC message
 ///
 /// Even when just using the mem transport, we require messages to be Serializable and Deserializable.
 /// Likewise, even when using the quinn transport, we require messages to be Send.
@@ -84,7 +84,7 @@ impl<T> RpcMessage for T where
 {
 }
 
-/// requirements for an internal error
+/// Requirements for an internal error
 ///
 /// All errors have to be Send and 'static so they can be sent across threads.
 pub trait RpcError: Debug + Display + Send + Sync + Unpin + 'static {}

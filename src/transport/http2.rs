@@ -217,16 +217,30 @@ impl<In: RpcMessage, Out: RpcMessage> Clone for ServerChannel<In, Out> {
     }
 }
 
-/// todo
+/// Receive stream for http2 channels.
+///
+/// This is just a mem channel that is fed from a task that reads from the hyper stream.
 pub type RecvStream<M> = super::mem::RecvStream<M>;
 
-/// todo
+/// Send sink for http2 channels.
+///
+/// This is just a mem channel that is read from a task that writes to the hyper stream.
 pub type SendSink<M> = super::mem::SendSink<M>;
 
-/// todo
+/// Send error for http2 channels.
+///
+/// The only thing that can go wrong is that the task that writes to the hyper stream has died.
 pub type SendError = super::mem::SendError;
 
-/// todo
+/// Receive error for http2 channels.
+///
+/// Currently there can be no error. When the hyper stream is closed or errors, the stream will
+/// just terminate.
+///
+/// TODO: there should be a way to signal abnormal termination, so the two interaction patterns
+/// that rely on updates from the client can distinguish between normal and abnormal termination.
+///
+/// You can obviously work around this by having a "finish" message in your application level protocol.
 pub type RecvError = super::mem::RecvError;
 
 /// Http2 channel types
