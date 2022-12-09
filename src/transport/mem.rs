@@ -260,8 +260,6 @@ impl std::error::Error for CreateChannelError {}
 pub struct ChannelTypes;
 
 impl crate::ChannelTypes for ChannelTypes {
-    type CreateChannelError = self::CreateChannelError;
-
     type SendSink<M: RpcMessage> = self::SendSink<M>;
 
     type RecvStream<M: RpcMessage> = self::RecvStream<M>;
