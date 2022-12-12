@@ -136,7 +136,6 @@ impl<'a, In: RpcMessage, Out: RpcMessage> Future for OpenBiFuture<'a, In, Out> {
         let mut this = self.project();
         match this.inner.poll_unpin(cx) {
             Poll::Ready(Ok(())) => {
-                println!("got rid of channel!");
                 this.res
                     .take()
                     .map(|x| Poll::Ready(Ok(x)))
