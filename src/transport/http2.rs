@@ -18,17 +18,10 @@ use hyper::{
     Body, Client, Request, Response, Server, StatusCode, Uri,
 };
 use pin_project::pin_project;
+use tracing::{error, event, Level};
 
 // add a bit of fudge factor to the max frame size
 const MAX_FRAME_SIZE: u32 = 1024 * 1024 + 1024;
-
-macro_rules! log {
-    ($($arg:tt)*) => {
-        if false {
-            println!($($arg)*);
-        }
-    }
-}
 
 // /// concatenate the given stream and result from the future
 // ///
@@ -142,22 +135,22 @@ impl<In: RpcMessage, Out: RpcMessage> ServerChannel<In, Out> {
                         match chunk {
                             Ok(chunk) => match bincode::deserialize::<In>(chunk.as_ref()) {
                                 Ok(msg) => {
-                                    log!("server got msg {:?}", msg);
+                                    event!(Level::TRACE, "server got msg {:?}", msg);
                                     match req_tx.send_async(msg).await {
                                         Ok(()) => {}
-                                        Err(_cause) => {
-                                            // channel closed
+                                        Err(cause) => {
+                                            error!("Flume request channel closed: {}", cause);
                                             break;
                                         }
                                     }
                                 }
-                                Err(_cause) => {
-                                    // deserialize error
+                                Err(cause) => {
+                                    error!("Failed to deserialise request as bincode: {}", cause);
                                     break;
                                 }
                             },
-                            Err(_cause) => {
-                                // error from the network layer
+                            Err(cause) => {
+                                error!("Failed to read request from network: {}", cause);
                                 break;
                             }
                         }
@@ -182,7 +175,7 @@ impl<In: RpcMessage, Out: RpcMessage> ServerChannel<In, Out> {
         // todo: can this stack of weird stuff be simplified?
         let service = make_service_fn(move |socket: &AddrStream| {
             let remote_addr = socket.remote_addr();
-            log!("connection from {:?}", remote_addr);
+            event!(Level::TRACE, "connection from {:?}", remote_addr);
             let server_fn = server_fn.clone();
             async move {
                 let server_fn = server_fn.clone();
@@ -313,7 +306,7 @@ impl<'a, In: RpcMessage, Out: RpcMessage> Future for OpenBiFuture<'a, In, Out> {
             Some(Ok((fut, _))) => {
                 match fut.poll_unpin(cx) {
                     Poll::Ready(Ok(mut res)) => {
-                        log!("OpenBiFuture got response");
+                        event!(Level::TRACE, "OpenBiFuture got response");
                         let (_, out_tx) = this.0.take().unwrap().unwrap();
                         let (in_tx, in_rx) = flume::bounded::<In>(32);
                         let task = async move {
@@ -322,7 +315,11 @@ impl<'a, In: RpcMessage, Out: RpcMessage> Future for OpenBiFuture<'a, In, Out> {
                                     Ok(msg) => {
                                         match bincode::deserialize::<In>(msg.as_ref()) {
                                             Ok(msg) => {
-                                                log!("OpenBiFuture got response message {:?}", msg);
+                                                event!(
+                                                    Level::TRACE,
+                                                    "OpenBiFuture got response message {:?}",
+                                                    msg
+                                                );
                                                 match in_tx.send_async(msg).await {
                                                     Ok(_) => {}
                                                     Err(_cause) => {
@@ -353,7 +350,7 @@ impl<'a, In: RpcMessage, Out: RpcMessage> Future for OpenBiFuture<'a, In, Out> {
                         Poll::Ready(Ok((out_tx, in_rx)))
                     }
                     Poll::Ready(Err(cause)) => {
-                        log!("OpenBiFuture got error {}", cause);
+                        event!(Level::TRACE, "OpenBiFuture got error {}", cause);
                         this.0.take();
                         Poll::Ready(Err(OpenBiError::Hyper(cause)))
                     }
@@ -447,7 +444,7 @@ impl<In: RpcMessage, Out: RpcMessage> crate::ClientChannel<In, Out, ChannelTypes
     for ClientChannel<In, Out>
 {
     fn open_bi(&self) -> OpenBiFuture<'_, In, Out> {
-        log!("open_bi {}", self.1);
+        event!(Level::TRACE, "open_bi {}", self.1);
         let (out_tx, out_rx) = flume::bounded::<Out>(32);
         let out_stream = futures::stream::unfold(out_rx, |out_rx| async move {
             match out_rx.recv_async().await {
