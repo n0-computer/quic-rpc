@@ -18,6 +18,8 @@ use hyper::{
     Body, Client, Request, Response, Server, StatusCode, Uri,
 };
 use pin_project::pin_project;
+use tokio::sync::mpsc;
+use tokio::task::JoinHandle;
 
 // add a bit of fudge factor to the max frame size
 const MAX_FRAME_SIZE: u32 = 1024 * 1024 + 1024;
@@ -115,83 +117,47 @@ impl<In: RpcMessage, Out: RpcMessage> Clone for ClientChannel<In, Out> {
     }
 }
 
-/// A channel using a hyper connection
-pub struct ServerChannel<In: RpcMessage, Out: RpcMessage>(
-    flume::Receiver<(flume::Receiver<In>, flume::Sender<Out>)>,
-);
+/// A server-side channel using a hyper connection
+///
+/// Each request made by the any client connection this channel will yield a `(recv, send)`
+/// pair which allows receiving the request and sending the response.  Both these are
+/// channels themselves to support streaming requests and responses.
+///
+/// Creating this spawns a tokio task which runs the server, once dropped this task is shut
+/// down: no new connections will be accepted and existing channels will stop.
+#[derive(Debug)]
+pub struct ServerChannel<In: RpcMessage, Out: RpcMessage> {
+    /// The channel.
+    channel: Receiver<(Receiver<In>, Sender<Out>)>,
+    /// The sender to stop the server.
+    ///
+    /// We never send anything over this really, simply dropping it makes the receiver
+    /// complete and will shut down the hyper server.
+    stop_tx: mpsc::Sender<()>,
+}
 
 impl<In: RpcMessage, Out: RpcMessage> ServerChannel<In, Out> {
-    /// create a server given a socket addr
-    pub fn new(
-        addr: &SocketAddr,
-    ) -> hyper::Result<(Self, impl Future<Output = result::Result<(), hyper::Error>>)> {
+    /// Creates a server listening on the [`SocketAddr`].
+    pub fn new(addr: &SocketAddr) -> hyper::Result<Self> {
         let (accept_tx, accept_rx) = flume::bounded(32);
-        let server_fn = move |req: Request<Body>| {
-            async move {
-                // Create Flume channels for the request body and response body
-                let (req_tx, req_rx) = flume::bounded::<In>(32);
-                let (res_tx, res_rx) = flume::bounded::<Out>(32);
-                accept_tx
-                    .send_async((req_rx, res_tx))
-                    .await
-                    .map_err(|_e| "unable to send")?;
-                // task that reads requests, deserializes them, and forwards them to the flume channel
-                let forwarder = async move {
-                    let mut stream = req.into_body();
-                    while let Some(chunk) = stream.next().await {
-                        match chunk {
-                            Ok(chunk) => match bincode::deserialize::<In>(chunk.as_ref()) {
-                                Ok(msg) => {
-                                    log!("server got msg {:?}", msg);
-                                    match req_tx.send_async(msg).await {
-                                        Ok(()) => {}
-                                        Err(_cause) => {
-                                            // channel closed
-                                            break;
-                                        }
-                                    }
-                                }
-                                Err(_cause) => {
-                                    // deserialize error
-                                    break;
-                                }
-                            },
-                            Err(_cause) => {
-                                // error from the network layer
-                                break;
-                            }
-                        }
-                    }
-                };
-                let body = res_rx.into_stream().map(|out| {
-                    let data = bincode::serialize(&out)?;
-                    // todo: check size
-                    Ok::<Vec<u8>, bincode::Error>(data)
-                });
-                tokio::spawn(forwarder);
-                // let body = TakeUntilEither::new(body, forwarder);
-                // Create a response with the response body channel as the response body
-                let response = Response::builder()
-                    .status(StatusCode::OK)
-                    .body(Body::wrap_stream(body))
-                    .map_err(|_e| "unable to set body")?;
 
-                Ok::<Response<Body>, String>(response)
-            }
-        };
-        // todo: can this stack of weird stuff be simplified?
+        // The hyper "MakeService" which is called for each connection that is made to the
+        // server.  It creates another Service which handles a single request.
         let service = make_service_fn(move |socket: &AddrStream| {
             let remote_addr = socket.remote_addr();
             log!("connection from {:?}", remote_addr);
-            let server_fn = server_fn.clone();
+
+            // Need a new accept_tx to move to the future on every call of this FnMut.
+            let accept_tx = accept_tx.clone();
             async move {
-                let server_fn = server_fn.clone();
-                Ok::<_, Infallible>(service_fn(move |req: Request<Body>| {
-                    let server_fn = server_fn.clone();
-                    server_fn(req)
-                }))
+                let one_req_service = service_fn(move |req: Request<Body>| {
+                    // This closure is an FnMut as well, so clone accept_tx once more.
+                    Self::handle_one_http2_request(req, accept_tx.clone())
+                });
+                Ok::<_, Infallible>(one_req_service)
             }
         });
+
         let mut addr_incomping = AddrIncoming::bind(addr)?;
         addr_incomping.set_nodelay(true);
         let server = Server::builder(addr_incomping)
@@ -201,19 +167,104 @@ impl<In: RpcMessage, Out: RpcMessage> ServerChannel<In, Out> {
             .http2_max_frame_size(Some(MAX_FRAME_SIZE))
             .http2_max_send_buf_size(MAX_FRAME_SIZE as usize)
             .serve(service);
-        Ok((Self(accept_rx), server))
+
+        let (stop_tx, mut stop_rx) = mpsc::channel::<()>(1);
+        let server = server.with_graceful_shutdown(async move {
+            // If the sender is dropped this will also gracefully terminate the server.
+            stop_rx.recv().await;
+        });
+        tokio::spawn(server);
+
+        Ok(Self {
+            channel: accept_rx,
+            stop_tx,
+        })
+    }
+
+    /// Handles a single HTTP2 request.
+    ///
+    /// This creates the channels to communicate the (optionally streaming) request and
+    /// response and sends them to the [`ServerChannel`].
+    async fn handle_one_http2_request(
+        req: Request<Body>,
+        accept_tx: Sender<(Receiver<In>, Sender<Out>)>,
+    ) -> Result<Response<Body>, String> {
+        let (req_tx, req_rx) = flume::bounded::<In>(32);
+        let (res_tx, res_rx) = flume::bounded::<Out>(32);
+        accept_tx
+            .send_async((req_rx, res_tx))
+            .await
+            .map_err(|_e| "unable to send")?;
+
+        Self::spawn_recv_forwarder(req, req_tx);
+        let body = res_rx.into_stream().map(|out| {
+            let data = bincode::serialize(&out)?;
+            // TODO: check size
+            Ok::<Vec<u8>, bincode::Error>(data)
+        });
+
+        // Create a response with the response body channel as the response body
+        let response = Response::builder()
+            .status(StatusCode::OK)
+            .body(Body::wrap_stream(body))
+            .map_err(|_| "unable to set body")?;
+        Ok(response)
+    }
+
+    /// Spawns a task which forwards requests from the network to a flume channel.
+    ///
+    /// This task will read frames from the network, decodes them using bincode and forward them
+    /// to the flume channel used to receive a request stream.
+    ///
+    /// Could also have been implemented as a stream map.
+    ///
+    /// If there is a network error, decoding failure, the flume channel closes or the request
+    /// stream is simply ended this task will terminate.  So it is fine to ignore the returned
+    /// [`JoinHandle`].
+    ///
+    /// The HTTP2 request comes from *req* and the decoded version is sent to `req_tx`.
+    fn spawn_recv_forwarder(req: Request<Body>, req_tx: Sender<In>) -> JoinHandle<()> {
+        tokio::spawn(async move {
+            let mut stream = req.into_body();
+
+            // This assumes each chunk received corresponds to a single HTTP2 frame.
+            while let Some(chunk) = stream.next().await {
+                match chunk {
+                    Ok(chunk) => match bincode::deserialize::<In>(chunk.as_ref()) {
+                        Ok(msg) => {
+                            log!("server got msg {msg:?}");
+                            match req_tx.send_async(msg).await {
+                                Ok(()) => {}
+                                Err(_cause) => {
+                                    // channel closed
+                                    break;
+                                }
+                            }
+                        }
+                        Err(_cause) => {
+                            // deserialize error
+                            break;
+                        }
+                    },
+                    Err(_cause) => {
+                        // error from the network layer
+                        break;
+                    }
+                }
+            }
+        })
     }
 }
 
-impl<In: RpcMessage, Out: RpcMessage> fmt::Debug for ServerChannel<In, Out> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_tuple("ServerChannel").field(&self.0).finish()
-    }
-}
-
+// This does not want or need RpcMessage to be clone but still want to clone the
+// ServerChannel and it's containing channels itself.  The derive macro can't cope with this
+// so this needs to be written by hand.
 impl<In: RpcMessage, Out: RpcMessage> Clone for ServerChannel<In, Out> {
     fn clone(&self) -> Self {
-        Self(self.0.clone())
+        Self {
+            channel: self.channel.clone(),
+            stop_tx: self.stop_tx.clone(),
+        }
     }
 }
 
@@ -443,8 +494,10 @@ impl<'a, In: RpcMessage, Out: RpcMessage> Future for AcceptBiFuture<'a, In, Out>
     }
 }
 
-impl<In: RpcMessage, Out: RpcMessage> crate::ClientChannel<In, Out, ChannelTypes>
-    for ClientChannel<In, Out>
+impl<In, Out> crate::ClientChannel<In, Out, ChannelTypes> for ClientChannel<In, Out>
+where
+    In: RpcMessage,
+    Out: RpcMessage,
 {
     fn open_bi(&self) -> OpenBiFuture<'_, In, Out> {
         log!("open_bi {}", self.1);
@@ -468,6 +521,6 @@ impl<In: RpcMessage, Out: RpcMessage> crate::ServerChannel<In, Out, ChannelTypes
     for ServerChannel<In, Out>
 {
     fn accept_bi(&self) -> AcceptBiFuture<'_, In, Out> {
-        AcceptBiFuture::new(Ok(self.0.recv_async()))
+        AcceptBiFuture::new(Ok(self.channel.recv_async()))
     }
 }
