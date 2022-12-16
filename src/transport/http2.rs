@@ -138,7 +138,7 @@ pub struct ServerChannel<In: RpcMessage, Out: RpcMessage> {
 
 impl<In: RpcMessage, Out: RpcMessage> ServerChannel<In, Out> {
     /// Creates a server listening on the [`SocketAddr`].
-    pub fn new(addr: &SocketAddr) -> hyper::Result<Self> {
+    pub fn serve(addr: &SocketAddr) -> hyper::Result<Self> {
         let (accept_tx, accept_rx) = flume::bounded(32);
 
         // The hyper "MakeService" which is called for each connection that is made to the
