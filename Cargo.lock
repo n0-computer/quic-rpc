@@ -603,6 +603,7 @@ dependencies = [
  "tokio",
  "tokio-serde",
  "tokio-util",
+ "tracing",
 ]
 
 [[package]]
