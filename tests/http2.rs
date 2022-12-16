@@ -10,10 +10,8 @@ use math::*;
 mod util;
 
 fn run_server(addr: &SocketAddr) -> JoinHandle<anyhow::Result<()>> {
-    let (channel, hyper) =
-        http2::ServerChannel::<ComputeRequest, ComputeResponse>::new(addr).unwrap();
+    let channel = http2::ServerChannel::<ComputeRequest, ComputeResponse>::serve(addr).unwrap();
     let server = RpcServer::<ComputeService, http2::ChannelTypes>::new(channel);
-    tokio::spawn(hyper);
     tokio::spawn(async move {
         loop {
             let server = server.clone();
