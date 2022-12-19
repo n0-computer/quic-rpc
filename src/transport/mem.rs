@@ -49,7 +49,7 @@ impl<Res: RpcMessage> futures::Stream for RecvStream<Res> {
     }
 }
 
-pub(crate) type Socket<In, Out> = (self::SendSink<Out>, self::RecvStream<In>);
+type Socket<In, Out> = (self::SendSink<Out>, self::RecvStream<In>);
 
 /// A mem channel
 pub struct ServerChannel<In: RpcMessage, Out: RpcMessage> {

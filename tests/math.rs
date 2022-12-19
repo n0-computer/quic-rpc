@@ -307,7 +307,7 @@ where
         tokio::pin!(recv);
         let mut i = 0;
         while let Some(res) = recv.next().await {
-            sum += res?.0;
+            sum += res.unwrap().0;
             if i % 10000 == 0 {
                 print!(".");
                 io::stdout().flush()?;
