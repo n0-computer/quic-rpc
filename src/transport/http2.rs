@@ -24,54 +24,7 @@ use tracing::{error, event, Level};
 
 // add a bit of fudge factor to the max frame size
 const MAX_PAYLOAD_SIZE: u32 = 1024 * 1024;
-const MAX_FRAME_SIZE: u32 = MAX_PAYLOAD_SIZE + 1024;
-
-// /// concatenate the given stream and result from the future
-// ///
-// /// Even if the future does not complete, the stream is nevertheless completed
-// /// once the inner stream completes.
-// #[pin_project]
-// struct TakeUntilEither<S, F>(Option<(S, F)>);
-
-// impl<S, F> TakeUntilEither<S, F>
-// where
-//     S: Stream + Unpin,
-//     F: Future<Output = S::Item> + Unpin,
-// {
-//     fn new(stream: S, future: F) -> Self {
-//         Self(Some((stream, future)))
-//     }
-// }
-
-// impl<S, F> Stream for TakeUntilEither<S, F>
-// where
-//     S: Stream + Unpin,
-//     F: Future<Output = S::Item> + Unpin,
-// {
-//     type Item = S::Item;
-
-//     fn poll_next(mut self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Option<Self::Item>> {
-//         match &mut self.0 {
-//             Some((s, f)) => {
-//                 match s.poll_next_unpin(cx) {
-//                     Poll::Ready(Some(x)) => Poll::Ready(Some(x)),
-//                     Poll::Ready(None) => {
-//                         self.0.take();
-//                         Poll::Ready(None)
-//                     },
-//                     Poll::Pending => match f.poll_unpin(cx) {
-//                         Poll::Ready(x) => {
-//                             self.0.take();
-//                             Poll::Ready(Some(x))
-//                         }
-//                         Poll::Pending => Poll::Pending,
-//                     },
-//                 }
-//             }
-//             None => Poll::Ready(None),
-//         }
-//     }
-// }
+const MAX_FRAME_SIZE: u32 = MAX_PAYLOAD_SIZE + 4096;
 
 /// Client channel
 pub struct ClientChannel<In: RpcMessage, Out: RpcMessage>(
@@ -228,7 +181,7 @@ fn spawn_recv_forwarder(req: Body, req_tx: Sender<hyper::Result<Bytes>>) -> Join
             let exit = match chunk.as_ref() {
                 Ok(chunk) => {
                     if chunk.is_empty() {
-                        // Ignore empty chunks
+                        // Ignore empty chunks. we won't send empty chunks.
                         continue;
                     }
                     event!(Level::TRACE, "Server got msg: {} bytes", chunk.len());
@@ -239,13 +192,10 @@ fn spawn_recv_forwarder(req: Body, req_tx: Sender<hyper::Result<Bytes>>) -> Join
                     true
                 }
             };
-            match req_tx.send_async(chunk).await {
-                Ok(()) => {}
-                Err(_cause) => {
-                    // don't log the cause. It does not contain any useful information.
-                    error!("Flume request channel closed");
-                    break;
-                }
+            if let Err(_cause) = req_tx.send_async(chunk).await {
+                // don't log the cause. It does not contain any useful information.
+                error!("Flume receiver dropped");
+                break;
             }
             if exit {
                 break;
