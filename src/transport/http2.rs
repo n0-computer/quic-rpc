@@ -319,11 +319,11 @@ impl<Out: RpcMessage> Sink<Out> for SendSink<Out> {
 /// The only thing that can go wrong is that the task that writes to the hyper stream has died.
 #[derive(Debug)]
 pub enum SendError {
-    /// todo
+    /// Error when bincode serializing the message.
     SerializeError(bincode::Error),
-    /// todo
+    /// The message is too large to be sent, or zero size.
     SizeError(usize),
-    /// todo
+    /// The connection has been closed.
     ReceiverDropped,
 }
 
@@ -336,19 +336,11 @@ impl fmt::Display for SendError {
 impl error::Error for SendError {}
 
 /// Receive error for http2 channels.
-///
-/// Currently there can be no error. When the hyper stream is closed or errors, the stream will
-/// just terminate.
-///
-/// TODO: there should be a way to signal abnormal termination, so the two interaction patterns
-/// that rely on updates from the client can distinguish between normal and abnormal termination.
-///
-/// You can obviously work around this by having a "finish" message in your application level protocol.
 #[derive(Debug)]
 pub enum RecvError {
-    /// todo
+    /// Error when bincode deserializing the message.
     DeserializeError(bincode::Error),
-    /// todo
+    /// Hyper network error.
     NetworkError(hyper::Error),
 }
 
