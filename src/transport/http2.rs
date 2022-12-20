@@ -176,7 +176,7 @@ pub struct ServerChannel<In: RpcMessage, Out: RpcMessage> {
     ///
     /// This is useful when the listen address uses a random port, `:0`, to find out which
     /// port was bound by the kernel.
-    local_addr: Vec<LocalAddr>,
+    local_addr: [LocalAddr; 1],
 }
 
 impl<In: RpcMessage, Out: RpcMessage> ServerChannel<In, Out> {
@@ -227,7 +227,7 @@ impl<In: RpcMessage, Out: RpcMessage> ServerChannel<In, Out> {
         Ok(Self {
             channel: accept_rx,
             stop_tx,
-            local_addr: vec![LocalAddr::Socket(local_addr)],
+            local_addr: [LocalAddr::Socket(local_addr)],
         })
     }
 
