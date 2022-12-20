@@ -4,7 +4,7 @@
 //! the parameters on both client and server side are big enough.
 use std::{
     convert::Infallible, error, fmt, io, marker::PhantomData, net::SocketAddr, pin::Pin, result,
-    task::Poll,
+    sync::Arc, task::Poll,
 };
 
 use crate::RpcMessage;
@@ -12,61 +12,135 @@ use bytes::Bytes;
 use flume::{r#async::RecvFut, Receiver, Sender};
 use futures::{Future, FutureExt, Sink, SinkExt, StreamExt};
 use hyper::{
-    client::{connect::dns::GaiResolver, HttpConnector, ResponseFuture},
-    server::conn::{AddrIncoming, AddrStream},
+    client::{connect::Connect, HttpConnector, ResponseFuture},
+    server::conn::AddrIncoming,
     service::{make_service_fn, service_fn},
     Body, Client, Request, Response, Server, StatusCode, Uri,
 };
 use pin_project::pin_project;
-use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
+use tokio::{
+    io::{AsyncRead, AsyncWrite},
+    sync::mpsc,
+};
 use tracing::{error, event, Level};
 
-// add a bit of fudge factor to the max frame size
-const MAX_PAYLOAD_SIZE: u32 = 1024 * 1024;
-const MAX_FRAME_SIZE: u32 = MAX_PAYLOAD_SIZE + 4096;
-
 /// Client channel
-pub struct ClientChannel<In: RpcMessage, Out: RpcMessage>(
-    Client<HttpConnector<GaiResolver>, Body>,
-    Uri,
-    PhantomData<(In, Out)>,
-);
+///
+/// TODO: this calls for ClientChannelInner...
+pub struct ClientChannel<In: RpcMessage, Out: RpcMessage> {
+    client: Arc<dyn Requester>,
+    config: Arc<ChannelConfig>,
+    uri: Uri,
+    _p: PhantomData<(In, Out)>,
+}
+
+/// Trait so we don't have to drag around the hyper internals
+trait Requester: Send + Sync + 'static {
+    fn request(&self, req: Request<Body>) -> ResponseFuture;
+}
+
+impl<C: Connect + Clone + Send + Sync + 'static> Requester for Client<C, Body> {
+    fn request(&self, req: Request<Body>) -> ResponseFuture {
+        self.request(req)
+    }
+}
 
 impl<In: RpcMessage, Out: RpcMessage> ClientChannel<In, Out> {
-    /// create a client given an uri
+    /// create a client given an uri and the default configuration
     pub fn new(uri: Uri) -> Self {
         let mut connector = HttpConnector::new();
         connector.set_nodelay(true);
+        Self::new_with_connector(connector, uri, Arc::new(ChannelConfig::default()))
+    }
+
+    /// create a client given an uri and a custom configuration
+    pub fn new_with_connector<C: Connect + Clone + Send + Sync + 'static>(
+        connector: C,
+        uri: Uri,
+        config: Arc<ChannelConfig>,
+    ) -> Self {
         let client = Client::builder()
             .http2_only(true)
-            .http2_initial_connection_window_size(Some(MAX_FRAME_SIZE))
-            .http2_initial_stream_window_size(Some(MAX_FRAME_SIZE))
-            .http2_max_frame_size(Some(MAX_FRAME_SIZE))
-            .http2_max_send_buf_size(MAX_FRAME_SIZE as usize)
+            .http2_initial_connection_window_size(Some(config.max_frame_size))
+            .http2_initial_stream_window_size(Some(config.max_frame_size))
+            .http2_max_frame_size(Some(config.max_frame_size))
+            .http2_max_send_buf_size(config.max_frame_size.try_into().unwrap())
             .build(connector);
-        Self(client, uri, PhantomData)
+        Self {
+            client: Arc::new(client),
+            uri,
+            config,
+            _p: PhantomData,
+        }
     }
 }
 
 impl<In: RpcMessage, Out: RpcMessage> fmt::Debug for ClientChannel<In, Out> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_tuple("ClientChannel")
-            .field(&self.0)
-            .field(&self.1)
+        f.debug_struct("ClientChannel")
+            .field("uri", &self.uri)
+            .field("config", &self.config)
             .finish()
     }
 }
 
 impl<In: RpcMessage, Out: RpcMessage> Clone for ClientChannel<In, Out> {
     fn clone(&self) -> Self {
-        Self(self.0.clone(), self.1.clone(), PhantomData)
+        Self {
+            client: self.client.clone(),
+            uri: self.uri.clone(),
+            config: self.config.clone(),
+            _p: PhantomData,
+        }
     }
 }
 
 type Socket<In, Out> = (self::SendSink<Out>, self::RecvStream<In>);
 
 type InternalChannel = (Receiver<hyper::Result<Bytes>>, Sender<io::Result<Bytes>>);
+/// Error when setting a channel configuration
+#[derive(Debug, Clone)]
+pub enum ChannelConfigError {
+    /// The maximum frame size is invalid
+    InvalidMaxFrameSize(u32),
+}
+
+impl fmt::Display for ChannelConfigError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Debug::fmt(&self, f)
+    }
+}
+
+impl error::Error for ChannelConfigError {}
+
+/// Channel configuration
+///
+/// These settings apply to both client and server channels.
+#[derive(Debug, Clone)]
+pub struct ChannelConfig {
+    /// The maximum frame size to use.
+    max_frame_size: u32,
+}
+
+impl ChannelConfig {
+    /// Set the maximum frame size.
+    pub fn max_frame_size(mut self, value: u32) -> result::Result<Self, ChannelConfigError> {
+        if !(0x4000..=0xFFFFFF).contains(&value) {
+            return Err(ChannelConfigError::InvalidMaxFrameSize(value));
+        }
+        self.max_frame_size = value;
+        Ok(self)
+    }
+}
+
+impl Default for ChannelConfig {
+    fn default() -> Self {
+        Self {
+            max_frame_size: 0xFFFFFF,
+        }
+    }
+}
 
 /// A server-side channel using a hyper connection
 ///
@@ -80,6 +154,8 @@ type InternalChannel = (Receiver<hyper::Result<Bytes>>, Sender<io::Result<Bytes>
 pub struct ServerChannel<In: RpcMessage, Out: RpcMessage> {
     /// The channel.
     channel: Receiver<InternalChannel>,
+    /// The configuration.
+    config: Arc<ChannelConfig>,
     /// The sender to stop the server.
     ///
     /// We never send anything over this really, simply dropping it makes the receiver
@@ -90,15 +166,37 @@ pub struct ServerChannel<In: RpcMessage, Out: RpcMessage> {
 }
 
 impl<In: RpcMessage, Out: RpcMessage> ServerChannel<In, Out> {
-    /// Creates a server listening on the [`SocketAddr`].
+    /// Creates a server listening on the [`SocketAddr`], with the default configuration.
     pub fn serve(addr: &SocketAddr) -> hyper::Result<Self> {
+        let mut addr_incoming = AddrIncoming::bind(addr)?;
+        addr_incoming.set_nodelay(true);
+        Self::serve0(addr_incoming, Default::default())
+    }
+
+    /// Creates a server listener given an arbitrary incoming and a custom configuration.
+    pub fn serve_with_incoming<I>(incoming: I, config: Arc<ChannelConfig>) -> hyper::Result<Self>
+    where
+        I: hyper::server::accept::Accept + Send + 'static,
+        I::Conn: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+        I::Error: Into<Box<dyn error::Error + Send + Sync>>,
+    {
+        Self::serve0(incoming, config)
+    }
+
+    fn serve0<I>(incoming: I, config: Arc<ChannelConfig>) -> hyper::Result<Self>
+    where
+        I: hyper::server::accept::Accept + Send + 'static,
+        I::Conn: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+        I::Error: Into<Box<dyn error::Error + Send + Sync>>,
+    {
         let (accept_tx, accept_rx) = flume::bounded(32);
 
         // The hyper "MakeService" which is called for each connection that is made to the
         // server.  It creates another Service which handles a single request.
-        let service = make_service_fn(move |socket: &AddrStream| {
-            let remote_addr = socket.remote_addr();
-            event!(Level::TRACE, "Connection from {:?}", remote_addr);
+        let service = make_service_fn(move |_socket: &I::Conn| {
+            // TODO: log remote address
+            // let remote_addr = socket.remote_addr();
+            // event!(Level::TRACE, "Connection from {:?}", remote_addr);
 
             // Need a new accept_tx to move to the future on every call of this FnMut.
             let accept_tx = accept_tx.clone();
@@ -111,14 +209,12 @@ impl<In: RpcMessage, Out: RpcMessage> ServerChannel<In, Out> {
             }
         });
 
-        let mut addr_incomping = AddrIncoming::bind(addr)?;
-        addr_incomping.set_nodelay(true);
-        let server = Server::builder(addr_incomping)
+        let server = Server::builder(incoming)
             .http2_only(true)
-            .http2_initial_connection_window_size(Some(MAX_FRAME_SIZE))
-            .http2_initial_stream_window_size(Some(MAX_FRAME_SIZE))
-            .http2_max_frame_size(Some(MAX_FRAME_SIZE))
-            .http2_max_send_buf_size(MAX_FRAME_SIZE as usize)
+            .http2_initial_connection_window_size(Some(config.max_frame_size))
+            .http2_initial_stream_window_size(Some(config.max_frame_size))
+            .http2_max_frame_size(Some(config.max_frame_size))
+            .http2_max_send_buf_size(config.max_frame_size.try_into().unwrap())
             .serve(service);
 
         let (stop_tx, mut stop_rx) = mpsc::channel::<()>(1);
@@ -130,6 +226,7 @@ impl<In: RpcMessage, Out: RpcMessage> ServerChannel<In, Out> {
 
         Ok(Self {
             channel: accept_rx,
+            config,
             stop_tx,
             _p: PhantomData,
         })
@@ -212,6 +309,7 @@ impl<In: RpcMessage, Out: RpcMessage> Clone for ServerChannel<In, Out> {
         Self {
             channel: self.channel.clone(),
             stop_tx: self.stop_tx.clone(),
+            config: self.config.clone(),
             _p: PhantomData,
         }
     }
@@ -219,9 +317,16 @@ impl<In: RpcMessage, Out: RpcMessage> Clone for ServerChannel<In, Out> {
 
 /// Receive stream for http2 channels.
 pub struct RecvStream<Res: RpcMessage>(
-    pub(crate) flume::r#async::RecvStream<'static, hyper::Result<Bytes>>,
+    flume::r#async::RecvStream<'static, hyper::Result<Bytes>>,
     PhantomData<Res>,
 );
+
+impl<Res: RpcMessage> RecvStream<Res> {
+    /// Creates a new [`RecvStream`] from a [`flume::Receiver`].
+    pub fn new(recv: flume::Receiver<hyper::Result<Bytes>>) -> Self {
+        Self(recv.into_stream(), PhantomData)
+    }
+}
 
 impl<In: RpcMessage> Clone for RecvStream<In> {
     fn clone(&self) -> Self {
@@ -252,15 +357,24 @@ impl<Res: RpcMessage> futures::Stream for RecvStream<Res> {
 }
 
 /// SendSink for http2 channels
-pub struct SendSink<Out: RpcMessage>(
-    pub(crate) flume::r#async::SendSink<'static, io::Result<Bytes>>,
-    PhantomData<Out>,
-);
+pub struct SendSink<Out: RpcMessage> {
+    sink: flume::r#async::SendSink<'static, io::Result<Bytes>>,
+    config: Arc<ChannelConfig>,
+    _p: PhantomData<Out>,
+}
 
 impl<Out: RpcMessage> SendSink<Out> {
-    fn serialize(item: Out) -> Result<Bytes, SendError> {
+    fn new(sender: flume::Sender<io::Result<Bytes>>, config: Arc<ChannelConfig>) -> Self {
+        Self {
+            sink: sender.into_sink(),
+            config,
+            _p: PhantomData,
+        }
+    }
+    fn serialize(&self, item: Out) -> Result<Bytes, SendError> {
         let data = bincode::serialize(&item).map_err(SendError::SerializeError)?;
-        if data.is_empty() || data.len() > MAX_PAYLOAD_SIZE as usize {
+        let max_payload_size = self.config.max_frame_size as usize - 1024;
+        if data.is_empty() || data.len() > max_payload_size {
             return Err(SendError::SizeError(data.len()));
         }
         Ok(data.into())
@@ -274,14 +388,14 @@ impl<Out: RpcMessage> Sink<Out> for SendSink<Out> {
         mut self: Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> Poll<Result<(), Self::Error>> {
-        self.0
+        self.sink
             .poll_ready_unpin(cx)
             .map_err(|_| SendError::ReceiverDropped)
     }
 
     fn start_send(mut self: Pin<&mut Self>, item: Out) -> Result<(), Self::Error> {
         // figure out what to send and what to return
-        let (send, res) = match Self::serialize(item) {
+        let (send, res) = match self.serialize(item) {
             Ok(data) => (Ok(data), Ok(())),
             Err(cause) => (
                 Err(io::Error::new(io::ErrorKind::Other, cause.to_string())),
@@ -289,7 +403,7 @@ impl<Out: RpcMessage> Sink<Out> for SendSink<Out> {
             ),
         };
         // attempt sending
-        self.0
+        self.sink
             .start_send_unpin(send)
             .map_err(|_| SendError::ReceiverDropped)?;
         res
@@ -299,7 +413,7 @@ impl<Out: RpcMessage> Sink<Out> for SendSink<Out> {
         mut self: Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> Poll<Result<(), Self::Error>> {
-        self.0
+        self.sink
             .poll_flush_unpin(cx)
             .map_err(|_| SendError::ReceiverDropped)
     }
@@ -308,7 +422,7 @@ impl<Out: RpcMessage> Sink<Out> for SendSink<Out> {
         mut self: Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> Poll<Result<(), Self::Error>> {
-        self.0
+        self.sink
             .poll_close_unpin(cx)
             .map_err(|_| SendError::ReceiverDropped)
     }
@@ -398,14 +512,36 @@ impl std::error::Error for OpenBiError {}
 /// Future returned by `Channel::open_bi`.
 #[allow(clippy::type_complexity)]
 #[pin_project]
-pub struct OpenBiFuture<'a, In, Out>(
-    Option<Result<(ResponseFuture, flume::Sender<io::Result<Bytes>>), OpenBiError>>,
-    PhantomData<&'a (In, Out)>,
-);
+pub struct OpenBiFuture<'a, In, Out> {
+    chan: Option<
+        Result<
+            (
+                ResponseFuture,
+                flume::Sender<io::Result<Bytes>>,
+                Arc<ChannelConfig>,
+            ),
+            OpenBiError,
+        >,
+    >,
+    _p: PhantomData<&'a (In, Out)>,
+}
 
+#[allow(clippy::type_complexity)]
 impl<'a, In: RpcMessage, Out: RpcMessage> OpenBiFuture<'a, In, Out> {
-    fn new(value: Result<(ResponseFuture, flume::Sender<io::Result<Bytes>>), OpenBiError>) -> Self {
-        Self(Some(value), PhantomData)
+    fn new(
+        value: Result<
+            (
+                ResponseFuture,
+                flume::Sender<io::Result<Bytes>>,
+                Arc<ChannelConfig>,
+            ),
+            OpenBiError,
+        >,
+    ) -> Self {
+        Self {
+            chan: Some(value),
+            _p: PhantomData,
+        }
     }
 }
 
@@ -417,28 +553,28 @@ impl<'a, In: RpcMessage, Out: RpcMessage> Future for OpenBiFuture<'a, In, Out> {
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Self::Output> {
         let this = self.project();
-        match this.0 {
-            Some(Ok((fut, _))) => match fut.poll_unpin(cx) {
+        match this.chan {
+            Some(Ok((fut, _, _))) => match fut.poll_unpin(cx) {
                 Poll::Ready(Ok(res)) => {
                     event!(Level::TRACE, "OpenBiFuture got response");
-                    let (_, out_tx) = this.0.take().unwrap().unwrap();
+                    let (_, out_tx, config) = this.chan.take().unwrap().unwrap();
                     let (in_tx, in_rx) = flume::bounded::<hyper::Result<Bytes>>(32);
                     spawn_recv_forwarder(res.into_body(), in_tx);
 
-                    let out_tx = self::SendSink(out_tx.into_sink(), PhantomData);
-                    let in_rx = self::RecvStream(in_rx.into_stream(), PhantomData);
+                    let out_tx = self::SendSink::new(out_tx, config);
+                    let in_rx = self::RecvStream::new(in_rx);
                     Poll::Ready(Ok((out_tx, in_rx)))
                 }
                 Poll::Ready(Err(cause)) => {
                     event!(Level::TRACE, "OpenBiFuture got error {}", cause);
-                    this.0.take();
+                    this.chan.take();
                     Poll::Ready(Err(OpenBiError::Hyper(cause)))
                 }
                 Poll::Pending => Poll::Pending,
             },
             Some(Err(_)) => {
                 // this is guaranteed to work since we are in Some(Err(_))
-                let err = this.0.take().unwrap().unwrap_err();
+                let err = this.chan.take().unwrap().unwrap_err();
                 Poll::Ready(Err(err))
             }
             None => {
@@ -472,25 +608,24 @@ impl error::Error for AcceptBiError {}
 /// Future returned by `Channel::accept_bi`.
 #[allow(clippy::type_complexity)]
 #[pin_project]
-pub struct AcceptBiFuture<'a, In, Out>(
-    Option<
-        Result<
-            RecvFut<'a, (Receiver<hyper::Result<Bytes>>, Sender<io::Result<Bytes>>)>,
-            AcceptBiError,
-        >,
-    >,
-    PhantomData<(In, Out)>,
-);
+pub struct AcceptBiFuture<'a, In, Out> {
+    chan: Option<(
+        RecvFut<'a, (Receiver<hyper::Result<Bytes>>, Sender<io::Result<Bytes>>)>,
+        Arc<ChannelConfig>,
+    )>,
+    _p: PhantomData<(In, Out)>,
+}
 
 impl<'a, In: RpcMessage, Out: RpcMessage> AcceptBiFuture<'a, In, Out> {
     #[allow(clippy::type_complexity)]
     fn new(
-        value: Result<
-            RecvFut<'a, (Receiver<hyper::Result<Bytes>>, Sender<io::Result<Bytes>>)>,
-            AcceptBiError,
-        >,
+        fut: RecvFut<'a, (Receiver<hyper::Result<Bytes>>, Sender<io::Result<Bytes>>)>,
+        config: Arc<ChannelConfig>,
     ) -> Self {
-        Self(Some(value), PhantomData)
+        Self {
+            chan: Some((fut, config)),
+            _p: PhantomData,
+        }
     }
 }
 
@@ -502,25 +637,21 @@ impl<'a, In: RpcMessage, Out: RpcMessage> Future for AcceptBiFuture<'a, In, Out>
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Self::Output> {
         let this = self.project();
-        match this.0 {
-            Some(Ok(fut)) => match fut.poll_unpin(cx) {
-                Poll::Ready(Ok((recv, send))) => Poll::Ready(Ok((
-                    self::SendSink(send.into_sink(), PhantomData),
-                    self::RecvStream(recv.into_stream(), PhantomData),
-                ))),
+        match this.chan {
+            Some((fut, _)) => match fut.poll_unpin(cx) {
+                Poll::Ready(Ok((recv, send))) => {
+                    let (_, config) = this.chan.take().unwrap();
+                    Poll::Ready(Ok((
+                        self::SendSink::new(send, config),
+                        self::RecvStream::new(recv),
+                    )))
+                }
                 Poll::Ready(Err(_cause)) => {
-                    this.0.take();
+                    this.chan.take();
                     Poll::Ready(Err(AcceptBiError::RemoteDropped))
                 }
                 Poll::Pending => Poll::Pending,
             },
-            Some(Err(_)) => {
-                // this is guaranteed to work since we are in Some(Err(_))
-                match this.0.take() {
-                    Some(Err(err)) => Poll::Ready(Err(err)),
-                    _ => unreachable!(),
-                }
-            }
             None => {
                 // return pending once the option is none, as per the contract
                 // for a fused future
@@ -536,13 +667,12 @@ where
     Out: RpcMessage,
 {
     fn open_bi(&self) -> OpenBiFuture<'_, In, Out> {
-        event!(Level::TRACE, "open_bi {}", self.1);
+        event!(Level::TRACE, "open_bi {}", self.uri);
         let (out_tx, out_rx) = flume::bounded::<io::Result<Bytes>>(32);
-        let req: Result<Request<Body>, OpenBiError> = Request::post(&self.1)
+        let req: Result<Request<Body>, OpenBiError> = Request::post(&self.uri)
             .body(Body::wrap_stream(out_rx.into_stream()))
             .map_err(OpenBiError::HyperHttp);
-        let res: Result<(ResponseFuture, flume::Sender<io::Result<Bytes>>), OpenBiError> =
-            req.map(|req| (self.0.request(req), out_tx));
+        let res = req.map(|req| (self.client.request(req), out_tx, self.config.clone()));
         OpenBiFuture::new(res)
     }
 }
@@ -551,6 +681,6 @@ impl<In: RpcMessage, Out: RpcMessage> crate::ServerChannel<In, Out, ChannelTypes
     for ServerChannel<In, Out>
 {
     fn accept_bi(&self) -> AcceptBiFuture<'_, In, Out> {
-        AcceptBiFuture::new(Ok(self.channel.recv_async()))
+        AcceptBiFuture::new(self.channel.recv_async(), self.config.clone())
     }
 }

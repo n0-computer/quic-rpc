@@ -1,6 +1,6 @@
 [package]
 name = "quic-rpc"
-version = "0.2.2"
+version = "0.2.3"
 edition = "2021"
 authors = ["Rüdiger Klaehn <rklaehn@protonmail.com>"]
 keywords = ["api", "protocol", "network", "rpc"]
@@ -36,6 +36,7 @@ quinn = "0.9.0"
 rcgen = "0.10.0"
 rustls = "0.20.7"
 thousands = "0.2.0"
+tower = { version = "0.4.13", features = ["full"] }
 
 [features]
 http2 = ["hyper", "bincode", "bytes"]
