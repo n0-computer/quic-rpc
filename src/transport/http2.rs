@@ -22,9 +22,6 @@ use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use tracing::{error, event, Level};
 
-// add a bit of fudge factor to the max frame size
-const MAX_FRAME_SIZE: u32 = 1024 * 1024 + 1024;
-
 // /// concatenate the given stream and result from the future
 // ///
 // /// Even if the future does not complete, the stream is nevertheless completed
@@ -80,16 +77,21 @@ pub struct ClientChannel<In: RpcMessage, Out: RpcMessage>(
 );
 
 impl<In: RpcMessage, Out: RpcMessage> ClientChannel<In, Out> {
-    /// create a client given an uri
+    /// create a client given an uri and the default configuration
     pub fn new(uri: Uri) -> Self {
+        Self::new_with_config(uri, ChannelConfig::default())
+    }
+
+    /// create a client given an uri and a custom configuration
+    pub fn new_with_config(uri: Uri, config: ChannelConfig) -> Self {
         let mut connector = HttpConnector::new();
         connector.set_nodelay(true);
         let client = Client::builder()
             .http2_only(true)
-            .http2_initial_connection_window_size(Some(MAX_FRAME_SIZE))
-            .http2_initial_stream_window_size(Some(MAX_FRAME_SIZE))
-            .http2_max_frame_size(Some(MAX_FRAME_SIZE))
-            .http2_max_send_buf_size(MAX_FRAME_SIZE as usize)
+            .http2_initial_connection_window_size(Some(config.max_frame_size))
+            .http2_initial_stream_window_size(Some(config.max_frame_size))
+            .http2_max_frame_size(Some(config.max_frame_size))
+            .http2_max_send_buf_size(config.max_frame_size.try_into().unwrap())
             .build(connector);
         Self(client, uri, PhantomData)
     }
@@ -107,6 +109,49 @@ impl<In: RpcMessage, Out: RpcMessage> fmt::Debug for ClientChannel<In, Out> {
 impl<In: RpcMessage, Out: RpcMessage> Clone for ClientChannel<In, Out> {
     fn clone(&self) -> Self {
         Self(self.0.clone(), self.1.clone(), PhantomData)
+    }
+}
+
+/// Error when setting a channel configuration
+#[derive(Debug, Clone)]
+pub enum ChannelConfigError {
+    /// The maximum frame size is invalid
+    InvalidMaxFrameSize(u32),
+}
+
+impl fmt::Display for ChannelConfigError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Debug::fmt(&self, f)
+    }
+}
+
+impl error::Error for ChannelConfigError {}
+
+/// Channel configuration
+///
+/// These settings apply to both client and server channels.
+#[derive(Debug, Clone)]
+pub struct ChannelConfig {
+    /// The maximum frame size to use.
+    max_frame_size: u32,
+}
+
+impl ChannelConfig {
+    /// Set the maximum frame size.
+    pub fn max_frame_size(mut self, value: u32) -> result::Result<Self, ChannelConfigError> {
+        if !(0x4000..=0xFFFFFF).contains(&value) {
+            return Err(ChannelConfigError::InvalidMaxFrameSize(value));
+        }
+        self.max_frame_size = value;
+        Ok(self)
+    }
+}
+
+impl Default for ChannelConfig {
+    fn default() -> Self {
+        Self {
+            max_frame_size: 0xFFFFFF,
+        }
     }
 }
 
@@ -130,8 +175,13 @@ pub struct ServerChannel<In: RpcMessage, Out: RpcMessage> {
 }
 
 impl<In: RpcMessage, Out: RpcMessage> ServerChannel<In, Out> {
-    /// Creates a server listening on the [`SocketAddr`].
+    /// Creates a server listening on the [`SocketAddr`], with the default configuration.
     pub fn serve(addr: &SocketAddr) -> hyper::Result<Self> {
+        Self::serve_with_config(addr, ChannelConfig::default())
+    }
+
+    /// Creates a server listening on the [`SocketAddr`] with a custom configuration.
+    pub fn serve_with_config(addr: &SocketAddr, config: ChannelConfig) -> hyper::Result<Self> {
         let (accept_tx, accept_rx) = flume::bounded(32);
 
         // The hyper "MakeService" which is called for each connection that is made to the
@@ -155,10 +205,10 @@ impl<In: RpcMessage, Out: RpcMessage> ServerChannel<In, Out> {
         addr_incomping.set_nodelay(true);
         let server = Server::builder(addr_incomping)
             .http2_only(true)
-            .http2_initial_connection_window_size(Some(MAX_FRAME_SIZE))
-            .http2_initial_stream_window_size(Some(MAX_FRAME_SIZE))
-            .http2_max_frame_size(Some(MAX_FRAME_SIZE))
-            .http2_max_send_buf_size(MAX_FRAME_SIZE as usize)
+            .http2_initial_connection_window_size(Some(config.max_frame_size))
+            .http2_initial_stream_window_size(Some(config.max_frame_size))
+            .http2_max_frame_size(Some(config.max_frame_size))
+            .http2_max_send_buf_size(config.max_frame_size.try_into().unwrap())
             .serve(service);
 
         let (stop_tx, mut stop_rx) = mpsc::channel::<()>(1);
