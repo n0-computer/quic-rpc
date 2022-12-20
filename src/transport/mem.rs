@@ -54,14 +54,12 @@ pub(crate) type Socket<In, Out> = (self::SendSink<Out>, self::RecvStream<In>);
 /// A mem channel
 pub struct ServerChannel<In: RpcMessage, Out: RpcMessage> {
     stream: flume::Receiver<Socket<In, Out>>,
-    local_addr: Vec<LocalAddr>,
 }
 
 impl<In: RpcMessage, Out: RpcMessage> Clone for ServerChannel<In, Out> {
     fn clone(&self) -> Self {
         Self {
             stream: self.stream.clone(),
-            local_addr: self.local_addr.clone(),
         }
     }
 }
@@ -304,7 +302,7 @@ impl<In: RpcMessage, Out: RpcMessage> crate::ServerChannel<In, Out, ChannelTypes
     }
 
     fn local_addr(&self) -> &[crate::LocalAddr] {
-        &self.local_addr
+        &[LocalAddr::Mem]
     }
 }
 
@@ -315,11 +313,5 @@ pub fn connection<Req: RpcMessage, Res: RpcMessage>(
     buffer: usize,
 ) -> (ServerChannel<Req, Res>, ClientChannel<Res, Req>) {
     let (sink, stream) = flume::bounded::<Socket<Req, Res>>(buffer);
-    (
-        ServerChannel {
-            stream,
-            local_addr: vec![LocalAddr::Mem],
-        },
-        ClientChannel { sink },
-    )
+    (ServerChannel { stream }, ClientChannel { sink })
 }
