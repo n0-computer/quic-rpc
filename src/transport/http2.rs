@@ -49,9 +49,14 @@ impl<C: Connect + Clone + Send + Sync + 'static> Requester for Client<C, Body> {
 impl<In: RpcMessage, Out: RpcMessage> ClientChannel<In, Out> {
     /// create a client given an uri and the default configuration
     pub fn new(uri: Uri) -> Self {
+        Self::new_with_config(uri, ChannelConfig::default())
+    }
+
+    /// create a client given an uri and a custom configuration
+    pub fn new_with_config(uri: Uri, config: ChannelConfig) -> Self {
         let mut connector = HttpConnector::new();
         connector.set_nodelay(true);
-        Self::new_with_connector(connector, uri, Arc::new(ChannelConfig::default()))
+        Self::new_with_connector(connector, uri, Arc::new(config))
     }
 
     /// create a client given an uri and a custom configuration
@@ -99,6 +104,7 @@ impl<In: RpcMessage, Out: RpcMessage> Clone for ClientChannel<In, Out> {
 type Socket<In, Out> = (self::SendSink<Out>, self::RecvStream<In>);
 
 type InternalChannel = (Receiver<hyper::Result<Bytes>>, Sender<io::Result<Bytes>>);
+
 /// Error when setting a channel configuration
 #[derive(Debug, Clone)]
 pub enum ChannelConfigError {
