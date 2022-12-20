@@ -13,13 +13,16 @@ use flume::{r#async::RecvFut, Receiver, Sender};
 use futures::{Future, FutureExt, Sink, SinkExt, StreamExt};
 use hyper::{
     client::{connect::dns::GaiResolver, HttpConnector, ResponseFuture},
-    server::conn::{AddrIncoming, AddrStream},
+    server::conn::AddrIncoming,
     service::{make_service_fn, service_fn},
     Body, Client, Request, Response, Server, StatusCode, Uri,
 };
 use pin_project::pin_project;
-use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
+use tokio::{
+    io::{AsyncRead, AsyncWrite},
+    sync::mpsc,
+};
 use tracing::{error, event, Level};
 
 // add a bit of fudge factor to the max frame size
@@ -92,13 +95,35 @@ pub struct ServerChannel<In: RpcMessage, Out: RpcMessage> {
 impl<In: RpcMessage, Out: RpcMessage> ServerChannel<In, Out> {
     /// Creates a server listening on the [`SocketAddr`].
     pub fn serve(addr: &SocketAddr) -> hyper::Result<Self> {
+        let mut addr_incoming = AddrIncoming::bind(addr)?;
+        addr_incoming.set_nodelay(true);
+        Self::serve0(addr_incoming)
+    }
+
+    /// Creates a server listener given an arbitrary incoming
+    pub fn serve_with_incoming<I>(incoming: I) -> hyper::Result<Self>
+    where
+        I: hyper::server::accept::Accept + Send + 'static,
+        I::Conn: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+        I::Error: Into<Box<dyn error::Error + Send + Sync>>,
+    {
+        Self::serve0(incoming)
+    }
+
+    fn serve0<I>(incoming: I) -> hyper::Result<Self>
+    where
+        I: hyper::server::accept::Accept + Send + 'static,
+        I::Conn: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+        I::Error: Into<Box<dyn error::Error + Send + Sync>>,
+    {
         let (accept_tx, accept_rx) = flume::bounded(32);
 
         // The hyper "MakeService" which is called for each connection that is made to the
         // server.  It creates another Service which handles a single request.
-        let service = make_service_fn(move |socket: &AddrStream| {
-            let remote_addr = socket.remote_addr();
-            event!(Level::TRACE, "Connection from {:?}", remote_addr);
+        let service = make_service_fn(move |_socket: &I::Conn| {
+            // TODO: log remote address
+            // let remote_addr = socket.remote_addr();
+            // event!(Level::TRACE, "Connection from {:?}", remote_addr);
 
             // Need a new accept_tx to move to the future on every call of this FnMut.
             let accept_tx = accept_tx.clone();
@@ -111,9 +136,7 @@ impl<In: RpcMessage, Out: RpcMessage> ServerChannel<In, Out> {
             }
         });
 
-        let mut addr_incomping = AddrIncoming::bind(addr)?;
-        addr_incomping.set_nodelay(true);
-        let server = Server::builder(addr_incomping)
+        let server = Server::builder(incoming)
             .http2_only(true)
             .http2_initial_connection_window_size(Some(MAX_FRAME_SIZE))
             .http2_initial_stream_window_size(Some(MAX_FRAME_SIZE))
