@@ -61,8 +61,9 @@ fn run_server(addr: &SocketAddr) -> JoinHandle<anyhow::Result<()>> {
 
 #[derive(Clone)]
 struct MemConnection {
+    name: &'static str,
     send: Option<flume::r#async::SendSink<'static, Vec<u8>>>,
-    recv: flume::r#async::RecvStream<'static, Vec<u8>>,
+    recv: Option<flume::r#async::RecvStream<'static, Vec<u8>>>,
     recv_buf: Vec<u8>,
 }
 
@@ -72,16 +73,41 @@ impl MemConnection {
         let (send2, recv2) = flume::unbounded();
         (
             MemConnection {
+                name: "1",
                 send: Some(send1.into_sink()),
-                recv: recv2.into_stream(),
+                recv: Some(recv2.into_stream()),
                 recv_buf: Vec::new(),
             },
             MemConnection {
+                name: "2",
                 send: Some(send2.into_sink()),
-                recv: recv1.into_stream(),
+                recv: Some(recv1.into_stream()),
                 recv_buf: Vec::new(),
             },
         )
+    }
+
+    fn drain_sink(&mut self, cx: &mut Context<'_>) -> bool {
+        if self.recv.is_some() {
+            while let Poll::Ready(item) = self.recv.as_mut().unwrap().poll_next_unpin(cx) {
+                if let Some(buf) = item {
+                    if buf.is_empty() {
+                        self.recv.take();
+                        println!("done");
+                        return true;
+                    }
+                    self.recv_buf.extend_from_slice(&buf)
+                } else {
+                    self.recv.take();
+                    println!("done");
+                    return true;
+                }
+            }
+            println!("{} got pending", self.name);
+            false
+        } else {
+            true
+        }
     }
 }
 
@@ -91,13 +117,13 @@ impl AsyncRead for MemConnection {
         cx: &mut Context<'_>,
         buf: &mut tokio::io::ReadBuf<'_>,
     ) -> Poll<std::io::Result<()>> {
-        while let Poll::Ready(Some(buffer)) = self.recv.poll_next_unpin(cx) {
-            self.recv_buf.extend_from_slice(&buffer);
-        }
-        if self.recv_buf.is_empty() {
+        let done = self.drain_sink(cx);
+        if !done && self.recv_buf.is_empty() {
+            println!("{} pending", self.name);
             return Poll::Pending;
         }
         let n = std::cmp::min(buf.remaining(), self.recv_buf.len());
+        println!("{} read {} bytes", self.name, n);
         buf.put_slice(&self.recv_buf[..n]);
         self.recv_buf.drain(..n);
         Poll::Ready(Ok(()))
@@ -110,15 +136,19 @@ impl AsyncWrite for MemConnection {
         cx: &mut Context<'_>,
         buf: &[u8],
     ) -> Poll<Result<usize, std::io::Error>> {
+        let name = self.name;
         match &mut self.send {
-            Some(send) => match send.poll_ready_unpin(cx) {
-                Poll::Ready(_) => Poll::Ready(
-                    send.start_send_unpin(buf.to_vec())
-                        .map(|_| buf.len())
-                        .map_err(|e| io::Error::new(io::ErrorKind::Other, e)),
-                ),
-                Poll::Pending => Poll::Pending,
-            },
+            Some(send) => {
+                println!("{} write {} bytes", name, buf.len());
+                match send.poll_ready_unpin(cx) {
+                    Poll::Ready(_) => Poll::Ready(
+                        send.start_send_unpin(buf.to_vec())
+                            .map(|_| buf.len())
+                            .map_err(|e| io::Error::new(io::ErrorKind::Other, e)),
+                    ),
+                    Poll::Pending => Poll::Pending,
+                }
+            }
             None => Poll::Ready(Err(io::Error::new(
                 io::ErrorKind::ConnectionReset,
                 "closed",
@@ -127,6 +157,7 @@ impl AsyncWrite for MemConnection {
     }
 
     fn poll_flush(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Result<(), std::io::Error>> {
+        println!("{} flush", self.name);
         Poll::Ready(Ok(()))
     }
 
@@ -134,6 +165,7 @@ impl AsyncWrite for MemConnection {
         mut self: Pin<&mut Self>,
         _cx: &mut Context<'_>,
     ) -> Poll<Result<(), std::io::Error>> {
+        println!("{} shutdown", self.name);
         self.send.take();
         Poll::Ready(Ok(()))
     }
