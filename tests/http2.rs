@@ -69,7 +69,7 @@ async fn http2_channel_errors() -> anyhow::Result<()> {
     #[derive(Debug, Serialize, Deserialize)]
     pub struct NoSerRequest(NoSer);
 
-    /// request that looks serializable but isn't
+    /// request that looks deserializable but isn't
     #[derive(Debug, Serialize, Deserialize)]
     pub struct NoDeserRequest(NoDeser);
 
@@ -81,13 +81,13 @@ async fn http2_channel_errors() -> anyhow::Result<()> {
     #[derive(Debug, Serialize, Deserialize)]
     pub struct NoDeserResponseRequest;
 
-    /// helper struct that implements serde::Serialize but errors on serialization
-    #[derive(Debug, Deserialize)]
-    pub struct NoSer;
-
     /// request that can produce a response that is too big
     #[derive(Debug, Serialize, Deserialize)]
     pub struct BigResponseRequest(usize);
+
+    /// helper struct that implements serde::Serialize but errors on serialization
+    #[derive(Debug, Deserialize)]
+    pub struct NoSer;
 
     impl serde::Serialize for NoSer {
         fn serialize<S>(&self, _serializer: S) -> Result<S::Ok, S::Error>
@@ -276,57 +276,56 @@ async fn http2_channel_errors() -> anyhow::Result<()> {
     }
 
     // small enough - should succeed
-    assert_matches!(client.rpc(BigRequest(vec![0; 10_000_000])).await, Ok(()));
+    let res = client.rpc(BigRequest(vec![0; 10_000_000])).await;
+    assert_matches!(res, Ok(()));
     assert_server_result!(Ok(()));
 
     // too big - should fail immediately after opening a connection
+    let res = client.rpc(BigRequest(vec![0; 20_000_000])).await;
     assert_matches!(
-        client.rpc(BigRequest(vec![0; 20_000_000])).await,
+        res,
         Err(RpcClientError::Send(http2::SendError::SizeError(_)))
     );
     assert_server_result!(Err(RpcServerError::EarlyClose));
 
     // not serializable - should fail immediately after opening a connection
+    let res = client.rpc(NoSerRequest(NoSer)).await;
     assert_matches!(
-        client.rpc(NoSerRequest(NoSer)).await,
+        res,
         Err(RpcClientError::Send(http2::SendError::SerializeError(_)))
     );
     assert_server_result!(Err(RpcServerError::EarlyClose));
 
     // not deserializable - should fail on the server side
-    assert_matches!(
-        client.rpc(NoDeserRequest(NoDeser)).await,
-        Err(RpcClientError::EarlyClose)
-    );
+    let res = client.rpc(NoDeserRequest(NoDeser)).await;
+    assert_matches!(res, Err(RpcClientError::EarlyClose));
     assert_server_result!(Err(RpcServerError::RecvError(
         http2::RecvError::DeserializeError(_)
     )));
 
     // response not serializable - should fail on the server side
-    assert_matches!(
-        client.rpc(NoSerResponseRequest).await,
-        Err(RpcClientError::EarlyClose)
-    );
+    let res = client.rpc(NoSerResponseRequest).await;
+    assert_matches!(res, Err(RpcClientError::EarlyClose));
     assert_server_result!(Err(RpcServerError::SendError(
         http2::SendError::SerializeError(_)
     )));
 
     // response not deserializable - should succeed on the server side fail on the client side
+    let res = client.rpc(NoDeserResponseRequest).await;
     assert_matches!(
-        client.rpc(NoDeserResponseRequest).await,
+        res,
         Err(RpcClientError::RecvError(RecvError::DeserializeError(_)))
     );
     assert_server_result!(Ok(()));
 
     // response small - should succeed
-    assert_matches!(client.rpc(BigResponseRequest(10_000_000)).await, Ok(_));
+    let res = client.rpc(BigResponseRequest(10_000_000)).await;
+    assert_matches!(res, Ok(_));
     assert_server_result!(Ok(()));
 
     // response big - should fail
-    assert_matches!(
-        client.rpc(BigResponseRequest(20_000_000)).await,
-        Err(RpcClientError::EarlyClose)
-    );
+    let res = client.rpc(BigResponseRequest(20_000_000)).await;
+    assert_matches!(res, Err(RpcClientError::EarlyClose));
     assert_server_result!(Err(RpcServerError::SendError(http2::SendError::SizeError(
         _
     ))));

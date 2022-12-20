@@ -25,13 +25,15 @@ use tokio::{
 };
 use tracing::{error, event, Level};
 
-/// Client channel
-///
-/// TODO: this calls for ClientChannelInner...
-pub struct ClientChannel<In: RpcMessage, Out: RpcMessage> {
-    client: Arc<dyn Requester>,
+struct ClientChannelInner {
+    client: Box<dyn Requester>,
     config: Arc<ChannelConfig>,
     uri: Uri,
+}
+
+/// Client channel
+pub struct ClientChannel<In: RpcMessage, Out: RpcMessage> {
+    inner: Arc<ClientChannelInner>,
     _p: PhantomData<(In, Out)>,
 }
 
@@ -73,9 +75,11 @@ impl<In: RpcMessage, Out: RpcMessage> ClientChannel<In, Out> {
             .http2_max_send_buf_size(config.max_frame_size.try_into().unwrap())
             .build(connector);
         Self {
-            client: Arc::new(client),
-            uri,
-            config,
+            inner: Arc::new(ClientChannelInner {
+                client: Box::new(client),
+                uri,
+                config,
+            }),
             _p: PhantomData,
         }
     }
@@ -84,8 +88,8 @@ impl<In: RpcMessage, Out: RpcMessage> ClientChannel<In, Out> {
 impl<In: RpcMessage, Out: RpcMessage> fmt::Debug for ClientChannel<In, Out> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ClientChannel")
-            .field("uri", &self.uri)
-            .field("config", &self.config)
+            .field("uri", &self.inner.uri)
+            .field("config", &self.inner.config)
             .finish()
     }
 }
@@ -93,9 +97,7 @@ impl<In: RpcMessage, Out: RpcMessage> fmt::Debug for ClientChannel<In, Out> {
 impl<In: RpcMessage, Out: RpcMessage> Clone for ClientChannel<In, Out> {
     fn clone(&self) -> Self {
         Self {
-            client: self.client.clone(),
-            uri: self.uri.clone(),
-            config: self.config.clone(),
+            inner: self.inner.clone(),
             _p: PhantomData,
         }
     }
@@ -670,12 +672,18 @@ where
     Out: RpcMessage,
 {
     fn open_bi(&self) -> OpenBiFuture<'_, In, Out> {
-        event!(Level::TRACE, "open_bi {}", self.uri);
+        event!(Level::TRACE, "open_bi {}", self.inner.uri);
         let (out_tx, out_rx) = flume::bounded::<io::Result<Bytes>>(32);
-        let req: Result<Request<Body>, OpenBiError> = Request::post(&self.uri)
+        let req: Result<Request<Body>, OpenBiError> = Request::post(&self.inner.uri)
             .body(Body::wrap_stream(out_rx.into_stream()))
             .map_err(OpenBiError::HyperHttp);
-        let res = req.map(|req| (self.client.request(req), out_tx, self.config.clone()));
+        let res = req.map(|req| {
+            (
+                self.inner.client.request(req),
+                out_tx,
+                self.inner.config.clone(),
+            )
+        });
         OpenBiFuture::new(res)
     }
 }
