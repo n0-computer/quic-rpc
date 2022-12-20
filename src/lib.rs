@@ -173,6 +173,7 @@ pub trait ServerChannel<In: RpcMessage, Out: RpcMessage, T: ChannelTypes>:
 ///
 /// Returned by [`ServerChannel::local_addr`].
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub enum LocalAddr {
     /// A local socket.
     Socket(SocketAddr),
