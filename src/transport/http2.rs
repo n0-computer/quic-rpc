@@ -26,7 +26,7 @@ use tokio::{
 use tracing::{error, event, Level};
 
 /// Client channel
-/// 
+///
 /// TODO: this calls for ClientChannelInner...
 pub struct ClientChannel<In: RpcMessage, Out: RpcMessage> {
     client: Arc<dyn Requester>,
