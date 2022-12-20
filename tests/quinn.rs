@@ -94,9 +94,9 @@ pub fn make_endpoints() -> anyhow::Result<Endpoints> {
 
 fn run_server(server: quinn::Endpoint) -> JoinHandle<anyhow::Result<()>> {
     tokio::task::spawn(async move {
-        let connection = quic_rpc::transport::quinn::ServerChannel::new(
-            server.accept().await.context("accept failed")?.await?,
-        );
+        let local_addr = server.local_addr()?;
+        let conn = server.accept().await.context("accept failed")?.await?;
+        let connection = quic_rpc::transport::quinn::ServerChannel::new(conn, local_addr);
         let server = RpcServer::<ComputeService, QuinnChannelTypes>::new(connection);
         ComputeService::server(server).await?;
         anyhow::Ok(())

@@ -61,12 +61,13 @@ impl Compute {
 async fn main() -> anyhow::Result<()> {
     let server_addr: SocketAddr = "127.0.0.1:12345".parse()?;
     let (server, _server_certs) = make_server_endpoint(server_addr)?;
+    let local_addr = server.local_addr()?;
     loop {
         let accept = server.accept().await.context("accept failed")?.await?;
         tokio::task::spawn(async move {
             let remote = accept.remote_address();
             eprintln!("new connection from {remote}");
-            let connection = quic_rpc::transport::quinn::ServerChannel::new(accept);
+            let connection = quic_rpc::transport::quinn::ServerChannel::new(accept, local_addr);
             let target = Compute;
             match run_server_loop(
                 ComputeService,

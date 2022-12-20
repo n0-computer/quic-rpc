@@ -60,6 +60,7 @@ use futures::{Future, Sink, Stream};
 use serde::{de::DeserializeOwned, Serialize};
 use std::{
     fmt::{Debug, Display},
+    net::SocketAddr,
     result,
 };
 pub mod client;
@@ -139,10 +140,10 @@ pub trait ChannelTypes: Debug + Sized + Send + Sync + Unpin + Clone + 'static {
         Self: 'a;
 
     /// Channel type
-    type ClientChannel<In: RpcMessage, Out: RpcMessage>: crate::ClientChannel<In, Out, Self>;
+    type ClientChannel<In: RpcMessage, Out: RpcMessage>: ClientChannel<In, Out, Self>;
 
     /// Channel type
-    type ServerChannel<In: RpcMessage, Out: RpcMessage>: crate::ServerChannel<In, Out, Self>;
+    type ServerChannel<In: RpcMessage, Out: RpcMessage>: ServerChannel<In, Out, Self>;
 }
 
 /// An abstract client channel with typed input and output
@@ -159,4 +160,22 @@ pub trait ServerChannel<In: RpcMessage, Out: RpcMessage, T: ChannelTypes>:
 {
     /// Accept a bidirectional stream
     fn accept_bi(&self) -> T::AcceptBiFuture<'_, In, Out>;
+
+    /// The local addresses this server is bound to.
+    ///
+    /// This is useful for publicly facing addresses when you start the server with a random
+    /// port, `:0` and let the kernel choose the real bind address.  This will return the
+    /// address with the actual port used.
+    fn local_addr(&self) -> &[LocalAddr];
+}
+
+/// The kinds of local addresses a [`ServerChannel`] can be bound to.
+///
+/// Returned by [`ServerChannel::local_addr`].
+#[derive(Debug, Clone)]
+pub enum LocalAddr {
+    /// A local socket.
+    Socket(SocketAddr),
+    /// An in-memory address.
+    Mem,
 }

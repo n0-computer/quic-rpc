@@ -3,18 +3,22 @@
 //! This defines the RPC server DSL
 use crate::{
     message::{BidiStreaming, ClientStreaming, Msg, Rpc, ServerStreaming},
-    ChannelTypes, ServerChannel, Service,
+    ChannelTypes, LocalAddr, ServerChannel, Service,
 };
 use futures::{channel::oneshot, task, task::Poll, Future, FutureExt, SinkExt, Stream, StreamExt};
 use pin_project::pin_project;
 use std::{error, fmt, fmt::Debug, marker::PhantomData, pin::Pin, result};
 
-/// A server channel for a specific service
+/// A server channel for a specific service.
 ///
 /// This is a wrapper around a [crate::ServerChannel] that serves as the entry point for the server DSL.
 /// `S` is the service type, `C` is the channel type.
 #[derive(Debug)]
 pub struct RpcServer<S: Service, C: ChannelTypes> {
+    /// The channel on which new requests arrive.
+    ///
+    /// Each new request is a receiver and channel pair on which messages for this request
+    /// are received and responses sent.
     channel: C::ServerChannel<S::Req, S::Res>,
 }
 
@@ -27,15 +31,30 @@ impl<S: Service, C: ChannelTypes> Clone for RpcServer<S, C> {
 }
 
 impl<S: Service, C: ChannelTypes> RpcServer<S, C> {
-    /// Create a new server channel from a channel and a service type
+    /// Create a new server channel from a channel and a service type.
     pub fn new(channel: C::ServerChannel<S::Req, S::Res>) -> Self {
         Self { channel }
+    }
+
+    /// The local addresses this server is bound to.
+    ///
+    /// This is useful for publicly facing addresses when you start the server with a random
+    /// port, `:0` and let the kernel choose the real bind address.  This will return the
+    /// address with the actual port used.
+    pub fn local_addr(&self) -> &[LocalAddr] {
+        self.channel.local_addr()
     }
 }
 
 impl<S: Service, C: ChannelTypes> RpcServer<S, C> {
-    /// Accept one channel from the client, pull out the first request, and return both the first
-    /// message and the channel for further processing.
+    /// Accepts a connection, handling the first request.
+    ///
+    /// This accepts a new client connection, which is represented as a tuple of a sender
+    /// and receiver channel.
+    ///
+    /// The return value is a tuple of `(request, (channel_sender, channel_receiver))`.
+    /// Here `request` is the first request which is already read from the channel.  The
+    /// channels are used to send responses and/or receive more requests.
     pub async fn accept_one(
         &self,
     ) -> result::Result<(S::Req, (C::SendSink<S::Res>, C::RecvStream<S::Req>)), RpcServerError<C>>

@@ -1,8 +1,9 @@
 //! QUIC channel implementation based on quinn
-use crate::RpcMessage;
+use crate::{LocalAddr, RpcMessage};
 use futures::{Future, FutureExt, Sink, SinkExt, Stream, StreamExt};
 use pin_project::pin_project;
 use serde::{de::DeserializeOwned, Serialize};
+use std::net::SocketAddr;
 use std::{fmt, io, marker::PhantomData, pin::Pin, result};
 use tokio_serde::{formats::SymmetricalBincode, SymmetricallyFramed};
 use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
@@ -10,30 +11,40 @@ use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
 type Socket<In, Out> = (SendSink<Out>, RecvStream<In>);
 
 /// A server channel using a quinn connection
-pub struct ServerChannel<In: RpcMessage, Out: RpcMessage>(
-    quinn::Connection,
-    PhantomData<(In, Out)>,
-);
+#[derive(Debug)]
+pub struct ServerChannel<In: RpcMessage, Out: RpcMessage> {
+    connection: quinn::Connection,
+    local_addr: Vec<LocalAddr>,
+    _phantom: PhantomData<(In, Out)>,
+}
 
 impl<In: RpcMessage, Out: RpcMessage> ServerChannel<In, Out> {
     /// Create a new channel
-    pub fn new(conn: quinn::Connection) -> Self {
-        Self(conn, PhantomData)
+    pub fn new(conn: quinn::Connection, local_addr: SocketAddr) -> Self {
+        Self {
+            connection: conn,
+            local_addr: vec![LocalAddr::Socket(local_addr)],
+            _phantom: PhantomData,
+        }
     }
 }
 
-impl<In: RpcMessage, Out: RpcMessage> fmt::Debug for ServerChannel<In, Out> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_tuple("ServerChannel")
-            .field(&self.0)
-            .field(&self.1)
-            .finish()
-    }
-}
+// impl<In: RpcMessage, Out: RpcMessage> fmt::Debug for ServerChannel<In, Out> {
+//     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+//         f.debug_tuple("ServerChannel")
+//             .field(&self.0)
+//             .field(&self.1)
+//             .finish()
+//     }
+// }
 
 impl<In: RpcMessage, Out: RpcMessage> Clone for ServerChannel<In, Out> {
     fn clone(&self) -> Self {
-        Self(self.0.clone(), PhantomData)
+        Self {
+            connection: self.connection.clone(),
+            local_addr: self.local_addr.clone(),
+            _phantom: PhantomData,
+        }
     }
 }
 
@@ -230,7 +241,11 @@ impl<In: RpcMessage + Sync, Out: RpcMessage + Sync> crate::ServerChannel<In, Out
     for self::ServerChannel<In, Out>
 {
     fn accept_bi(&self) -> AcceptBiFuture<'_, In, Out> {
-        AcceptBiFuture(self.0.accept_bi(), PhantomData)
+        AcceptBiFuture(self.connection.accept_bi(), PhantomData)
+    }
+
+    fn local_addr(&self) -> &[crate::LocalAddr] {
+        todo!()
     }
 }
 

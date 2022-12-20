@@ -5,7 +5,7 @@
 //!
 //! [flume]: https://docs.rs/flume/
 //! [crossbeam]: https://docs.rs/crossbeam/
-use crate::RpcMessage;
+use crate::{LocalAddr, RpcMessage};
 use core::fmt;
 use futures::{Future, FutureExt, Sink, SinkExt, StreamExt};
 use pin_project::pin_project;
@@ -54,12 +54,14 @@ pub(crate) type Socket<In, Out> = (self::SendSink<Out>, self::RecvStream<In>);
 /// A mem channel
 pub struct ServerChannel<In: RpcMessage, Out: RpcMessage> {
     stream: flume::Receiver<Socket<In, Out>>,
+    local_addr: Vec<LocalAddr>,
 }
 
 impl<In: RpcMessage, Out: RpcMessage> Clone for ServerChannel<In, Out> {
     fn clone(&self) -> Self {
         Self {
             stream: self.stream.clone(),
+            local_addr: self.local_addr.clone(),
         }
     }
 }
@@ -300,6 +302,10 @@ impl<In: RpcMessage, Out: RpcMessage> crate::ServerChannel<In, Out, ChannelTypes
     fn accept_bi(&self) -> AcceptBiFuture<'_, In, Out> {
         AcceptBiFuture(self.stream.recv_async())
     }
+
+    fn local_addr(&self) -> &[crate::LocalAddr] {
+        &self.local_addr
+    }
 }
 
 /// Create a channel pair (server, client) for mem channels
@@ -309,5 +315,11 @@ pub fn connection<Req: RpcMessage, Res: RpcMessage>(
     buffer: usize,
 ) -> (ServerChannel<Req, Res>, ClientChannel<Res, Req>) {
     let (sink, stream) = flume::bounded::<Socket<Req, Res>>(buffer);
-    (ServerChannel { stream }, ClientChannel { sink })
+    (
+        ServerChannel {
+            stream,
+            local_addr: vec![LocalAddr::Mem],
+        },
+        ClientChannel { sink },
+    )
 }

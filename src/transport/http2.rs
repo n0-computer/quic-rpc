@@ -6,7 +6,7 @@ use std::{
     convert::Infallible, error, fmt, marker::PhantomData, net::SocketAddr, result, task::Poll,
 };
 
-use crate::RpcMessage;
+use crate::{LocalAddr, RpcMessage};
 use bytes::Bytes;
 use flume::{r#async::RecvFut, Receiver, Sender};
 use futures::{Future, FutureExt, StreamExt};
@@ -172,6 +172,11 @@ pub struct ServerChannel<In: RpcMessage, Out: RpcMessage> {
     /// We never send anything over this really, simply dropping it makes the receiver
     /// complete and will shut down the hyper server.
     stop_tx: mpsc::Sender<()>,
+    /// The local address this server is bound to.
+    ///
+    /// This is useful when the listen address uses a random port, `:0`, to find out which
+    /// port was bound by the kernel.
+    local_addr: Vec<LocalAddr>,
 }
 
 impl<In: RpcMessage, Out: RpcMessage> ServerChannel<In, Out> {
@@ -210,6 +215,7 @@ impl<In: RpcMessage, Out: RpcMessage> ServerChannel<In, Out> {
             .http2_max_frame_size(Some(config.max_frame_size))
             .http2_max_send_buf_size(config.max_frame_size.try_into().unwrap())
             .serve(service);
+        let local_addr = server.local_addr();
 
         let (stop_tx, mut stop_rx) = mpsc::channel::<()>(1);
         let server = server.with_graceful_shutdown(async move {
@@ -221,6 +227,7 @@ impl<In: RpcMessage, Out: RpcMessage> ServerChannel<In, Out> {
         Ok(Self {
             channel: accept_rx,
             stop_tx,
+            local_addr: vec![LocalAddr::Socket(local_addr)],
         })
     }
 
@@ -307,6 +314,7 @@ impl<In: RpcMessage, Out: RpcMessage> Clone for ServerChannel<In, Out> {
         Self {
             channel: self.channel.clone(),
             stop_tx: self.stop_tx.clone(),
+            local_addr: self.local_addr.clone(),
         }
     }
 }
@@ -569,5 +577,9 @@ impl<In: RpcMessage, Out: RpcMessage> crate::ServerChannel<In, Out, ChannelTypes
 {
     fn accept_bi(&self) -> AcceptBiFuture<'_, In, Out> {
         AcceptBiFuture::new(Ok(self.channel.recv_async()))
+    }
+
+    fn local_addr(&self) -> &[crate::LocalAddr] {
+        &self.local_addr
     }
 }
