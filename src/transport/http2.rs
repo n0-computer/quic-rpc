@@ -65,7 +65,7 @@ impl<In: RpcMessage, Out: RpcMessage> ClientChannel<In, Out> {
             .http2_initial_connection_window_size(Some(config.max_frame_size))
             .http2_initial_stream_window_size(Some(config.max_frame_size))
             .http2_max_frame_size(Some(config.max_frame_size))
-            .http2_max_send_buf_size(config.max_frame_size as usize)
+            .http2_max_send_buf_size(config.max_frame_size.try_into().unwrap())
             .build(connector);
         Self {
             client: Arc::new(client),
@@ -100,10 +100,19 @@ type Socket<In, Out> = (self::SendSink<Out>, self::RecvStream<In>);
 
 type InternalChannel = (Receiver<hyper::Result<Bytes>>, Sender<io::Result<Bytes>>);
 /// Error when setting a channel configuration
+#[derive(Debug, Clone)]
 pub enum ChannelConfigError {
     /// The maximum frame size is invalid
     InvalidMaxFrameSize(u32),
 }
+
+impl fmt::Display for ChannelConfigError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Debug::fmt(&self, f)
+    }
+}
+
+impl error::Error for ChannelConfigError {}
 
 /// Channel configuration
 ///
@@ -205,7 +214,7 @@ impl<In: RpcMessage, Out: RpcMessage> ServerChannel<In, Out> {
             .http2_initial_connection_window_size(Some(config.max_frame_size))
             .http2_initial_stream_window_size(Some(config.max_frame_size))
             .http2_max_frame_size(Some(config.max_frame_size))
-            .http2_max_send_buf_size(config.max_frame_size as usize)
+            .http2_max_send_buf_size(config.max_frame_size.try_into().unwrap())
             .serve(service);
 
         let (stop_tx, mut stop_rx) = mpsc::channel::<()>(1);
