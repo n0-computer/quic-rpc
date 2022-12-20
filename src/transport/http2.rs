@@ -344,10 +344,7 @@ impl<Res: RpcMessage> futures::Stream for RecvStream<Res> {
         match self.0.poll_next_unpin(cx) {
             Poll::Ready(Some(Ok(item))) => match bincode::deserialize::<Res>(item.as_ref()) {
                 Ok(msg) => Poll::Ready(Some(Ok(msg))),
-                Err(cause) => {
-                    println!("{} {}", item.len(), cause);
-                    Poll::Ready(Some(Err(RecvError::DeserializeError(cause))))
-                }
+                Err(cause) => Poll::Ready(Some(Err(RecvError::DeserializeError(cause)))),
             },
             Poll::Ready(Some(Err(cause))) => Poll::Ready(Some(Err(RecvError::NetworkError(cause)))),
             Poll::Ready(None) => Poll::Ready(None),
