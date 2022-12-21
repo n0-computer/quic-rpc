@@ -1,9 +1,13 @@
 #![cfg(feature = "http2")]
-use std::{net::SocketAddr, result};
+use std::{net::SocketAddr, result, error, task::{self, Context, Poll}, pin::Pin, io};
 
 use derive_more::{From, TryInto};
 use flume::Receiver;
-use hyper::Uri;
+use futures::{Stream, Future, FutureExt, StreamExt};
+use hyper::{
+    Uri,
+    client::connect::{Connected, Connection},
+};
 use quic_rpc::{
     client::RpcClientError,
     message::{Msg, Rpc},
@@ -12,7 +16,7 @@ use quic_rpc::{
     RpcClient, RpcServer, Service,
 };
 use serde::{Deserialize, Serialize};
-use tokio::task::JoinHandle;
+use tokio::{task::JoinHandle, io::{AsyncRead, AsyncWrite, DuplexStream}};
 
 mod math;
 use math::*;
@@ -29,6 +33,135 @@ fn run_server(addr: &SocketAddr) -> JoinHandle<anyhow::Result<()>> {
         #[allow(unreachable_code)]
         anyhow::Ok(())
     })
+}
+
+fn run_server_local(
+    stream: impl Stream<
+            Item = result::Result<
+                impl AsyncRead + AsyncWrite + Unpin + Send + 'static,
+                impl Into<Box<dyn error::Error + Send + Sync>> + 'static,
+            >,
+        > + Send
+        + 'static,
+) -> JoinHandle<anyhow::Result<()>> {
+    let accept = hyper::server::accept::from_stream(stream);
+    let channel = http2::ServerChannel::<ComputeRequest, ComputeResponse>::serve_with_incoming(
+        accept,
+        Default::default(),
+    )
+    .unwrap();
+    let server = RpcServer::<ComputeService, http2::ChannelTypes>::new(channel);
+    tokio::spawn(async move {
+        loop {
+            let server = server.clone();
+            ComputeService::server(server).await?;
+        }
+        #[allow(unreachable_code)]
+        anyhow::Ok(())
+    })
+}
+
+/// An in memory connection for testing.
+///
+/// This is basically just a newtype wrapper around a `DuplexStream` that implements `Connection`.
+#[pin_project::pin_project]
+struct TestConnection(#[pin] DuplexStream);
+
+/// Forward AsyncRead to the inner `DuplexStream`.
+impl AsyncRead for TestConnection {
+    fn poll_read(
+        self: Pin<&mut Self>,
+        cx: &mut task::Context<'_>,
+        buf: &mut tokio::io::ReadBuf<'_>,
+    ) -> Poll<io::Result<()>> {
+        self.project().0.poll_read(cx, buf)
+    }
+}
+
+/// Forward AsyncWrite to the inner `DuplexStream`.
+impl AsyncWrite for TestConnection {
+    fn poll_write(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<Result<usize, io::Error>> {
+        self.project().0.poll_write(cx, buf)
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), io::Error>> {
+        self.project().0.poll_flush(cx)
+    }
+
+    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), io::Error>> {
+        self.project().0.poll_shutdown(cx)
+    }
+}
+
+/// trivial implementation of `Connection` for `TestConnection`
+impl Connection for TestConnection {
+    fn connected(&self) -> Connected {
+        Connected::new()
+    }
+}
+
+impl TestConnection {
+    fn duplex(size: usize) -> (Self, Self) {
+        let (local, remote) = tokio::io::duplex(size);
+        (Self(local), Self(remote))
+    }
+}
+
+/// A test tower service that produces `TestConnection`s from uris.
+///
+/// The uris are being ignored.
+#[derive(Debug, Clone)]
+struct TestService(flume::Sender<TestConnection>);
+
+impl TestService {
+    fn new() -> (Self, flume::Receiver<TestConnection>) {
+        let (sender, receiver) = flume::bounded(32);
+        (Self(sender), receiver)
+    }
+}
+
+impl tower::Service<hyper::Uri> for TestService {
+    type Response = TestConnection;
+    type Error = flume::SendError<TestConnection>;
+    type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
+
+    fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Poll::Ready(Ok(()))
+    }
+
+    fn call(&mut self, _req: hyper::Uri) -> Self::Future {
+        let (local, remote) = TestConnection::duplex(4096 * 1024);
+        let sender = self.0.clone();
+        async move {
+            sender.send_async(remote).await?;
+            Ok(local)
+        }
+        .boxed()
+    }
+}
+
+/// Test the http2 transport with a custom memory based underlying connection.
+///
+/// This can also serve as an example how to wire up non tcp based real transports
+/// such as UDS.
+#[tokio::test]
+async fn http2_channel_bench_mem() -> anyhow::Result<()> {
+    // dummy addr
+    let uri = "http://[..]:50051".parse()?;
+    let (service, server) = TestService::new();
+    let server = server.into_stream().map(anyhow::Ok);
+    let server_handle = run_server_local(server);
+    let client = http2::ClientChannel::new_with_connector(service, uri, Default::default());
+    let client = RpcClient::<ComputeService, http2::ChannelTypes>::new(client);
+    bench(client, 50000).await?;
+    println!("terminating server");
+    server_handle.abort();
+    let _ = server_handle.await;
+    Ok(())
 }
 
 #[tokio::test]

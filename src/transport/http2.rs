@@ -62,11 +62,10 @@ impl<In: RpcMessage, Out: RpcMessage> ClientChannel<In, Out> {
     }
 
     /// create a client given an uri and a custom configuration
-    pub fn new_with_connector<C: Connect + Clone + Send + Sync + 'static>(
-        connector: C,
-        uri: Uri,
-        config: Arc<ChannelConfig>,
-    ) -> Self {
+    pub fn new_with_connector<C>(connector: C, uri: Uri, config: Arc<ChannelConfig>) -> Self
+    where
+        C: Connect + Clone + Send + Sync + 'static,
+    {
         let client = Client::builder()
             .http2_only(true)
             .http2_initial_connection_window_size(Some(config.max_frame_size))

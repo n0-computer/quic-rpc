@@ -17,7 +17,7 @@
 /// // Define your message types
 ///
 /// #[derive(Debug, Serialize, Deserialize)]
-/// struct Add(pub i32, pub i32);
+/// pub struct Add(pub i32, pub i32);
 /// #[derive(Debug, Serialize, Deserialize)]
 /// pub struct Sum(pub i32);
 /// #[derive(Debug, Serialize, Deserialize)]
