@@ -23,7 +23,7 @@ use tokio::{
     io::{AsyncRead, AsyncWrite},
     sync::mpsc,
 };
-use tracing::{error, event, Level};
+use tracing::{debug, event, trace, Level};
 
 struct ClientChannelInner {
     client: Box<dyn Requester>,
@@ -299,15 +299,25 @@ fn spawn_recv_forwarder(req: Body, req_tx: Sender<hyper::Result<Bytes>>) -> Join
                     false
                 }
                 Err(cause) => {
-                    error!("Network error: {}", cause);
+                    // Indicates that the connection has been closed on the client side.
+                    // This is a normal occurrence, e.g. when the client has raced the RPC
+                    // call with something else and has droppped the future.
+                    debug!("Network error: {}", cause);
                     true
                 }
             };
             if let Err(_cause) = req_tx.send_async(chunk).await {
+                // The receiver is gone, so we can't send any more data.
+                //
+                // This is a normal way for an interaction to end, when the server side is done processing
+                // the request and drops the receiver.
+                //
                 // don't log the cause. It does not contain any useful information.
-                error!("Flume receiver dropped");
+                trace!("Flume receiver dropped");
                 break;
             }
+            // exiting the task will drop the sender, which will cause the receiver to produce an error.
+            // this is a normal way for an interaction to end.
             if exit {
                 break;
             }
