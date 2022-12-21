@@ -51,18 +51,18 @@ impl<C: Connect + Clone + Send + Sync + 'static> Requester for Client<C, Body> {
 impl<In: RpcMessage, Out: RpcMessage> ClientChannel<In, Out> {
     /// create a client given an uri and the default configuration
     pub fn new(uri: Uri) -> Self {
-        Self::new_with_config(uri, ChannelConfig::default())
+        Self::with_config(uri, ChannelConfig::default())
     }
 
     /// create a client given an uri and a custom configuration
-    pub fn new_with_config(uri: Uri, config: ChannelConfig) -> Self {
+    pub fn with_config(uri: Uri, config: ChannelConfig) -> Self {
         let mut connector = HttpConnector::new();
         connector.set_nodelay(true);
-        Self::new_with_connector(connector, uri, Arc::new(config))
+        Self::with_connector(connector, uri, Arc::new(config))
     }
 
     /// create a client given an uri and a custom configuration
-    pub fn new_with_connector<C: Connect + Clone + Send + Sync + 'static>(
+    pub fn with_connector<C: Connect + Clone + Send + Sync + 'static>(
         connector: C,
         uri: Uri,
         config: Arc<ChannelConfig>,
@@ -178,20 +178,11 @@ impl<In: RpcMessage, Out: RpcMessage> ServerChannel<In, Out> {
     pub fn serve(addr: &SocketAddr) -> hyper::Result<Self> {
         let mut addr_incoming = AddrIncoming::bind(addr)?;
         addr_incoming.set_nodelay(true);
-        Self::serve0(addr_incoming, Default::default())
+        Self::serve_with_incoming(addr_incoming, Default::default())
     }
 
-    /// Creates a server listener given an arbitrary incoming and a custom configuration.
+    /// Serve with a custom incoming and custom config
     pub fn serve_with_incoming<I>(incoming: I, config: Arc<ChannelConfig>) -> hyper::Result<Self>
-    where
-        I: hyper::server::accept::Accept + Send + 'static,
-        I::Conn: AsyncRead + AsyncWrite + Unpin + Send + 'static,
-        I::Error: Into<Box<dyn error::Error + Send + Sync>>,
-    {
-        Self::serve0(incoming, config)
-    }
-
-    fn serve0<I>(incoming: I, config: Arc<ChannelConfig>) -> hyper::Result<Self>
     where
         I: hyper::server::accept::Accept + Send + 'static,
         I::Conn: AsyncRead + AsyncWrite + Unpin + Send + 'static,
@@ -202,7 +193,6 @@ impl<In: RpcMessage, Out: RpcMessage> ServerChannel<In, Out> {
         // The hyper "MakeService" which is called for each connection that is made to the
         // server.  It creates another Service which handles a single request.
         let service = make_service_fn(move |_socket: &I::Conn| {
-            // TODO: log remote address
             // let remote_addr = socket.remote_addr();
             // event!(Level::TRACE, "Connection from {:?}", remote_addr);
 
@@ -378,6 +368,9 @@ impl<Out: RpcMessage> SendSink<Out> {
     }
     fn serialize(&self, item: Out) -> Result<Bytes, SendError> {
         let data = bincode::serialize(&item).map_err(SendError::SerializeError)?;
+        // Compute the max payload size by removing a fudge factor from the max frame size.
+        // This is probably on the high side. We would have to read
+        // https://datatracker.ietf.org/doc/rfc7540/ to figure out the exact overhead.
         let max_payload_size = self.config.max_frame_size as usize - 1024;
         if data.is_empty() || data.len() > max_payload_size {
             return Err(SendError::SizeError(data.len()));
@@ -468,6 +461,8 @@ impl fmt::Display for RecvError {
         fmt::Debug::fmt(&self, f)
     }
 }
+
+impl error::Error for RecvError {}
 
 /// Http2 channel types
 #[derive(Debug, Clone)]
