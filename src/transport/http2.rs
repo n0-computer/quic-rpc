@@ -150,6 +150,17 @@ impl Default for ChannelConfig {
     }
 }
 
+/// Trait to get the remote address of a connection
+trait HasRemoteAddr {
+    fn remote_addr(&self) -> Box<dyn fmt::Debug>;
+}
+
+impl HasRemoteAddr for hyper::server::conn::AddrStream {
+    fn remote_addr(&self) -> Box<dyn fmt::Debug> {
+        Box::new(self.remote_addr())
+    }
+}
+
 /// A server-side channel using a hyper connection
 ///
 /// Each request made by the any client connection this channel will yield a `(recv, send)`
@@ -176,25 +187,30 @@ pub struct ServerChannel<In: RpcMessage, Out: RpcMessage> {
 impl<In: RpcMessage, Out: RpcMessage> ServerChannel<In, Out> {
     /// Creates a server listening on the [`SocketAddr`], with the default configuration.
     pub fn serve(addr: &SocketAddr) -> hyper::Result<Self> {
+        Self::serve_with_config(addr, Default::default())
+    }
+
+    /// Creates a server listening on the [`SocketAddr`] with a custom configuration.
+    pub fn serve_with_config(addr: &SocketAddr, config: ChannelConfig) -> hyper::Result<Self> {
         let mut addr_incoming = AddrIncoming::bind(addr)?;
         addr_incoming.set_nodelay(true);
-        Self::serve_with_incoming(addr_incoming, Default::default())
+        Self::serve_with_incoming(addr_incoming, Arc::new(config))
     }
 
     /// Serve with a custom incoming and custom config
-    pub fn serve_with_incoming<I>(incoming: I, config: Arc<ChannelConfig>) -> hyper::Result<Self>
+    fn serve_with_incoming<I>(incoming: I, config: Arc<ChannelConfig>) -> hyper::Result<Self>
     where
         I: hyper::server::accept::Accept + Send + 'static,
-        I::Conn: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+        I::Conn: AsyncRead + AsyncWrite + Unpin + Send + HasRemoteAddr + 'static,
         I::Error: Into<Box<dyn error::Error + Send + Sync>>,
     {
         let (accept_tx, accept_rx) = flume::bounded(32);
 
         // The hyper "MakeService" which is called for each connection that is made to the
         // server.  It creates another Service which handles a single request.
-        let service = make_service_fn(move |_socket: &I::Conn| {
-            // let remote_addr = socket.remote_addr();
-            // event!(Level::TRACE, "Connection from {:?}", remote_addr);
+        let service = make_service_fn(move |socket: &I::Conn| {
+            let remote_addr = socket.remote_addr();
+            event!(Level::TRACE, "Connection from {:?}", remote_addr);
 
             // Need a new accept_tx to move to the future on every call of this FnMut.
             let accept_tx = accept_tx.clone();
