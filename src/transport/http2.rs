@@ -273,22 +273,28 @@ impl<In: RpcMessage, Out: RpcMessage> ServerChannel<In, Out> {
             // This assumes each chunk received corresponds to a single HTTP2 frame.
             while let Some(chunk) = stream.next().await {
                 match chunk {
-                    Ok(chunk) => match bincode::deserialize::<In>(chunk.as_ref()) {
-                        Ok(msg) => {
-                            event!(Level::TRACE, "Server got msg: {} bytes", chunk.len());
-                            match req_tx.send_async(msg).await {
-                                Ok(()) => {}
-                                Err(cause) => {
-                                    error!("Flume request channel closed: {}", cause);
-                                    break;
+                    Ok(chunk) if !chunk.is_empty() => {
+                        match bincode::deserialize::<In>(chunk.as_ref()) {
+                            Ok(msg) => {
+                                event!(Level::TRACE, "Server got msg: {} bytes", chunk.len());
+                                match req_tx.send_async(msg).await {
+                                    Ok(()) => {}
+                                    Err(cause) => {
+                                        error!("Flume request channel closed: {}", cause);
+                                        break;
+                                    }
                                 }
                             }
+                            Err(cause) => {
+                                error!("Failed to deserialise request as bincode: {}", cause);
+                                break;
+                            }
                         }
-                        Err(cause) => {
-                            error!("Failed to deserialise request as bincode: {}", cause);
-                            break;
-                        }
-                    },
+                    }
+                    Ok(_) => {
+                        // does an empty chunk always signal end of stream?
+                        continue;
+                    }
                     Err(cause) => {
                         error!("Failed to read request from networks: {}", cause);
                         break;
