@@ -14,7 +14,7 @@ type Socket<In, Out> = (SendSink<Out>, RecvStream<In>);
 #[derive(Debug)]
 pub struct ServerChannel<In: RpcMessage, Out: RpcMessage> {
     connection: quinn::Connection,
-    local_addr: Vec<LocalAddr>,
+    local_addr: [LocalAddr; 1],
     _phantom: PhantomData<(In, Out)>,
 }
 
@@ -23,7 +23,7 @@ impl<In: RpcMessage, Out: RpcMessage> ServerChannel<In, Out> {
     pub fn new(conn: quinn::Connection, local_addr: SocketAddr) -> Self {
         Self {
             connection: conn,
-            local_addr: vec![LocalAddr::Socket(local_addr)],
+            local_addr: [LocalAddr::Socket(local_addr)],
             _phantom: PhantomData,
         }
     }

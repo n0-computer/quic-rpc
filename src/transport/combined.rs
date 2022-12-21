@@ -79,14 +79,6 @@ impl<A: CT, B: CT, In: RpcMessage, Out: RpcMessage> ServerChannel<A, B, In, Out>
         }
         Self { a, b, local_addr }
     }
-
-    /// Returns the local addresses this server is bound to.
-    ///
-    /// This is useful when the listen address uses a random port, `:0`, to find out which
-    /// port was bound by the kernel.
-    pub fn local_addrs(&self) -> &[LocalAddr] {
-        todo!()
-    }
 }
 
 impl<A: CT, B: CT, In: RpcMessage, Out: RpcMessage> Clone for ServerChannel<A, B, In, Out> {
