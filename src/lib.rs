@@ -59,7 +59,7 @@
 use futures::{Future, Sink, Stream};
 use serde::{de::DeserializeOwned, Serialize};
 use std::{
-    fmt::{Debug, Display},
+    fmt::{self, Debug, Display},
     net::SocketAddr,
     result,
 };
@@ -172,6 +172,8 @@ pub trait ServerChannel<In: RpcMessage, Out: RpcMessage, T: ChannelTypes>:
 /// The kinds of local addresses a [`ServerChannel`] can be bound to.
 ///
 /// Returned by [`ServerChannel::local_addr`].
+///
+/// [`Display`]: fmt::Display
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub enum LocalAddr {
@@ -179,4 +181,13 @@ pub enum LocalAddr {
     Socket(SocketAddr),
     /// An in-memory address.
     Mem,
+}
+
+impl Display for LocalAddr {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            LocalAddr::Socket(sockaddr) => write!(f, "{sockaddr}"),
+            LocalAddr::Mem => write!(f, "mem"),
+        }
+    }
 }
