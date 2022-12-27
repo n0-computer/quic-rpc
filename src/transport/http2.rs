@@ -340,21 +340,21 @@ impl<In: RpcMessage, Out: RpcMessage> Clone for ServerChannel<In, Out> {
 }
 
 /// Receive stream for http2 channels.
-pub struct RecvStream<Res: RpcMessage>(
-    flume::r#async::RecvStream<'static, hyper::Result<Bytes>>,
-    PhantomData<Res>,
-);
+#[derive(Clone)]
+pub struct RecvStream<Res: RpcMessage> {
+    recv: flume::r#async::RecvStream<'static, hyper::Result<Bytes>>,
+    pd: PhantomData<Res>,
+    collected: Option<Vec<u8>>,
+}
 
 impl<Res: RpcMessage> RecvStream<Res> {
     /// Creates a new [`RecvStream`] from a [`flume::Receiver`].
-    pub fn new(recv: flume::Receiver<hyper::Result<Bytes>>) -> Self {
-        Self(recv.into_stream(), PhantomData)
-    }
-}
-
-impl<In: RpcMessage> Clone for RecvStream<In> {
-    fn clone(&self) -> Self {
-        Self(self.0.clone(), PhantomData)
+    pub fn new(recv: Receiver<hyper::Result<Bytes>>) -> Self {
+        Self {
+            recv: recv.into_stream(),
+            pd: PhantomData,
+            collected: None,
+        }
     }
 }
 
@@ -365,11 +365,20 @@ impl<Res: RpcMessage> futures::Stream for RecvStream<Res> {
         mut self: Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> Poll<Option<Self::Item>> {
-        match self.0.poll_next_unpin(cx) {
-            Poll::Ready(Some(Ok(item))) => match bincode::deserialize::<Res>(item.as_ref()) {
-                Ok(msg) => Poll::Ready(Some(Ok(msg))),
-                Err(cause) => Poll::Ready(Some(Err(RecvError::DeserializeError(cause)))),
-            },
+        match self.recv.poll_next_unpin(cx) {
+            Poll::Ready(Some(Ok(mut item))) => {
+                if let Some(mut collected) = self.collected.take() {
+                    collected.extend(item.into_iter());
+                    item = Bytes::from(collected)
+                }
+                match bincode::deserialize::<Res>(item.as_ref()) {
+                    Ok(msg) => Poll::Ready(Some(Ok(msg))),
+                    Err(_) => {
+                        self.collected = Some(item.to_vec());
+                        Poll::Pending
+                    }
+                }
+            }
             Poll::Ready(Some(Err(cause))) => Poll::Ready(Some(Err(RecvError::NetworkError(cause)))),
             Poll::Ready(None) => Poll::Ready(None),
             Poll::Pending => Poll::Pending,
