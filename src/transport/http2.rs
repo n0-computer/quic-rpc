@@ -109,6 +109,8 @@ type InternalChannel = (Receiver<hyper::Result<Bytes>>, Sender<io::Result<Bytes>
 pub enum ChannelConfigError {
     /// The maximum frame size is invalid
     InvalidMaxFrameSize(u32),
+    /// The maximum payload size is invalid
+    InvalidMaxPayloadSize(usize),
 }
 
 impl fmt::Display for ChannelConfigError {
@@ -126,6 +128,7 @@ impl error::Error for ChannelConfigError {}
 pub struct ChannelConfig {
     /// The maximum frame size to use.
     max_frame_size: u32,
+    max_payload_size: usize,
 }
 
 impl ChannelConfig {
@@ -137,12 +140,22 @@ impl ChannelConfig {
         self.max_frame_size = value;
         Ok(self)
     }
+
+    /// Set the maximum payload size.
+    pub fn max_payload_size(mut self, value: usize) -> result::Result<Self, ChannelConfigError> {
+        if !(4096..1024 * 1024 * 16).contains(&value) {
+            return Err(ChannelConfigError::InvalidMaxPayloadSize(value));
+        }
+        self.max_payload_size = value;
+        Ok(self)
+    }
 }
 
 impl Default for ChannelConfig {
     fn default() -> Self {
         Self {
             max_frame_size: 0xFFFFFF,
+            max_payload_size: 0xFFFFFF,
         }
     }
 }
@@ -324,21 +337,38 @@ impl<In: RpcMessage, Out: RpcMessage> Clone for ServerChannel<In, Out> {
 }
 
 /// Receive stream for http2 channels.
-pub struct RecvStream<Res: RpcMessage>(
-    flume::r#async::RecvStream<'static, hyper::Result<Bytes>>,
-    PhantomData<Res>,
-);
+pub struct RecvStream<Res: RpcMessage> {
+    recv: flume::r#async::RecvStream<'static, hyper::Result<Bytes>>,
+    buffer: Vec<u8>,
+    p: PhantomData<Res>,
+}
 
 impl<Res: RpcMessage> RecvStream<Res> {
     /// Creates a new [`RecvStream`] from a [`flume::Receiver`].
     pub fn new(recv: flume::Receiver<hyper::Result<Bytes>>) -> Self {
-        Self(recv.into_stream(), PhantomData)
+        Self {
+            recv: recv.into_stream(),
+            buffer: vec![],
+            p: PhantomData,
+        }
+    }
+
+    fn len(&self) -> Option<usize> {
+        if self.buffer.len() > 4 {
+            Some(u32::from_be_bytes(self.buffer[0..4].try_into().unwrap()) as usize)
+        } else {
+            None
+        }
     }
 }
 
 impl<In: RpcMessage> Clone for RecvStream<In> {
     fn clone(&self) -> Self {
-        Self(self.0.clone(), PhantomData)
+        Self {
+            recv: self.recv.clone(),
+            buffer: self.buffer.clone(),
+            p: PhantomData,
+        }
     }
 }
 
@@ -349,14 +379,31 @@ impl<Res: RpcMessage> futures::Stream for RecvStream<Res> {
         mut self: Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> Poll<Option<Self::Item>> {
-        match self.0.poll_next_unpin(cx) {
-            Poll::Ready(Some(Ok(item))) => match bincode::deserialize::<Res>(item.as_ref()) {
-                Ok(msg) => Poll::Ready(Some(Ok(msg))),
-                Err(cause) => Poll::Ready(Some(Err(RecvError::DeserializeError(cause)))),
-            },
-            Poll::Ready(Some(Err(cause))) => Poll::Ready(Some(Err(RecvError::NetworkError(cause)))),
-            Poll::Ready(None) => Poll::Ready(None),
-            Poll::Pending => Poll::Pending,
+        loop {
+            if let Some(len) = self.len() {
+                if self.buffer.len() >= len + 4 {
+                    // we have an entire message in the buffer, deserialize it and consume it
+                    let res = bincode::deserialize::<Res>(&self.buffer[4..len + 4])
+                        .map_err(RecvError::DeserializeError);
+                    self.buffer.drain(..len + 4);
+                    return Poll::Ready(Some(res));
+                }
+            }
+            // buffer is empty or incomplete, try to fill it
+            match self.recv.poll_next_unpin(cx) {
+                Poll::Ready(Some(Ok(item))) => {
+                    self.buffer.extend_from_slice(item.as_ref());
+                }
+                Poll::Ready(Some(Err(cause))) => {
+                    return Poll::Ready(Some(Err(RecvError::NetworkError(cause))));
+                }
+                Poll::Ready(None) => {
+                    return Poll::Ready(None);
+                }
+                Poll::Pending => {
+                    return Poll::Pending;
+                }
+            }
         }
     }
 }
@@ -377,14 +424,15 @@ impl<Out: RpcMessage> SendSink<Out> {
         }
     }
     fn serialize(&self, item: Out) -> Result<Bytes, SendError> {
-        let data = bincode::serialize(&item).map_err(SendError::SerializeError)?;
-        // Compute the max payload size by removing a fudge factor from the max frame size.
-        // This is probably on the high side. We would have to read
-        // https://datatracker.ietf.org/doc/rfc7540/ to figure out the exact overhead.
-        let max_payload_size = self.config.max_frame_size as usize - 1024;
-        if data.is_empty() || data.len() > max_payload_size {
-            return Err(SendError::SizeError(data.len()));
+        let mut data = Vec::new();
+        data.extend_from_slice(&[0u8; 4]);
+        bincode::serialize_into(&mut data, &item).map_err(SendError::SerializeError)?;
+        let len = data.len() - 4;
+        if len > self.config.max_payload_size {
+            return Err(SendError::SizeError(len));
         }
+        let len: u32 = len.try_into().expect("max_payload_size fits into u32");
+        data[0..4].copy_from_slice(&len.to_be_bytes());
         Ok(data.into())
     }
 }
