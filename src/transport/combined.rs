@@ -1,5 +1,5 @@
 //! Channel that combines two other channels
-use crate::{ChannelTypes as CT, RpcMessage};
+use crate::{ChannelTypes as CT, LocalAddr, RpcMessage, ServerChannel as ServerChannelTrait};
 use futures::{
     future::{self, BoxFuture},
     FutureExt, Sink, Stream, TryFutureExt,
@@ -34,7 +34,6 @@ impl<A: CT, B: CT, In: RpcMessage, Out: RpcMessage> ClientChannel<A, B, In, Out>
         Self { a, b }
     }
 }
-
 impl<A: CT, B: CT, In: RpcMessage, Out: RpcMessage> Clone for ClientChannel<A, B, In, Out> {
     fn clone(&self) -> Self {
         Self {
@@ -57,6 +56,7 @@ impl<A: CT, B: CT, In: RpcMessage, Out: RpcMessage> Debug for ClientChannel<A, B
 pub struct ServerChannel<A: CT, B: CT, In: RpcMessage, Out: RpcMessage> {
     a: Option<A::ServerChannel<In, Out>>,
     b: Option<B::ServerChannel<In, Out>>,
+    local_addr: Vec<LocalAddr>,
 }
 
 impl<A: CT, B: CT, In: RpcMessage, Out: RpcMessage> ServerChannel<A, B, In, Out> {
@@ -70,7 +70,14 @@ impl<A: CT, B: CT, In: RpcMessage, Out: RpcMessage> ServerChannel<A, B, In, Out>
     /// be listened on, and the first to receive a connection will be used. If no channels are
     /// configured, accept_bi will wait forever.
     pub fn new(a: Option<A::ServerChannel<In, Out>>, b: Option<B::ServerChannel<In, Out>>) -> Self {
-        Self { a, b }
+        let mut local_addr = Vec::new();
+        if let Some(ref a) = a {
+            local_addr.extend_from_slice(a.local_addr());
+        }
+        if let Some(ref b) = b {
+            local_addr.extend_from_slice(b.local_addr());
+        }
+        Self { a, b, local_addr }
     }
 }
 
@@ -79,6 +86,7 @@ impl<A: CT, B: CT, In: RpcMessage, Out: RpcMessage> Clone for ServerChannel<A, B
         Self {
             a: self.a.clone(),
             b: self.b.clone(),
+            local_addr: self.local_addr.clone(),
         }
     }
 }
@@ -286,6 +294,10 @@ impl<A: CT, B: CT, In: RpcMessage, Out: RpcMessage>
 impl<A: CT, B: CT, In: RpcMessage, Out: RpcMessage>
     crate::ServerChannel<In, Out, ChannelTypes<A, B>> for ServerChannel<A, B, In, Out>
 {
+    fn local_addr(&self) -> &[crate::LocalAddr] {
+        &self.local_addr
+    }
+
     fn accept_bi(&self) -> AcceptBiFuture<'_, A, B, In, Out> {
         let a_fut = if let Some(a) = &self.a {
             a.accept_bi()

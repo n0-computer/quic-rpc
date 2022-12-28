@@ -7,22 +7,19 @@ use std::{
     sync::Arc, task::Poll,
 };
 
-use crate::RpcMessage;
+use crate::{LocalAddr, RpcMessage};
 use bytes::Bytes;
 use flume::{r#async::RecvFut, Receiver, Sender};
 use futures::{Future, FutureExt, Sink, SinkExt, StreamExt};
 use hyper::{
     client::{connect::Connect, HttpConnector, ResponseFuture},
-    server::conn::AddrIncoming,
+    server::conn::{AddrIncoming, AddrStream},
     service::{make_service_fn, service_fn},
     Body, Client, Request, Response, Server, StatusCode, Uri,
 };
 use pin_project::pin_project;
+use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
-use tokio::{
-    io::{AsyncRead, AsyncWrite},
-    sync::mpsc,
-};
 use tracing::{debug, event, trace, Level};
 
 struct ClientChannelInner {
@@ -150,17 +147,6 @@ impl Default for ChannelConfig {
     }
 }
 
-/// Trait to get the remote address of a connection
-trait HasRemoteAddr {
-    fn remote_addr(&self) -> Box<dyn fmt::Debug>;
-}
-
-impl HasRemoteAddr for hyper::server::conn::AddrStream {
-    fn remote_addr(&self) -> Box<dyn fmt::Debug> {
-        Box::new(self.remote_addr())
-    }
-}
-
 /// A server-side channel using a hyper connection
 ///
 /// Each request made by the any client connection this channel will yield a `(recv, send)`
@@ -180,6 +166,11 @@ pub struct ServerChannel<In: RpcMessage, Out: RpcMessage> {
     /// We never send anything over this really, simply dropping it makes the receiver
     /// complete and will shut down the hyper server.
     stop_tx: mpsc::Sender<()>,
+    /// The local address this server is bound to.
+    ///
+    /// This is useful when the listen address uses a random port, `:0`, to find out which
+    /// port was bound by the kernel.
+    local_addr: [LocalAddr; 1],
     /// Phantom data for in and out
     _p: PhantomData<(In, Out)>,
 }
@@ -192,23 +183,11 @@ impl<In: RpcMessage, Out: RpcMessage> ServerChannel<In, Out> {
 
     /// Creates a server listening on the [`SocketAddr`] with a custom configuration.
     pub fn serve_with_config(addr: &SocketAddr, config: ChannelConfig) -> hyper::Result<Self> {
-        let mut addr_incoming = AddrIncoming::bind(addr)?;
-        addr_incoming.set_nodelay(true);
-        Self::serve_with_incoming(addr_incoming, Arc::new(config))
-    }
-
-    /// Serve with a custom incoming and custom config
-    fn serve_with_incoming<I>(incoming: I, config: Arc<ChannelConfig>) -> hyper::Result<Self>
-    where
-        I: hyper::server::accept::Accept + Send + 'static,
-        I::Conn: AsyncRead + AsyncWrite + Unpin + Send + HasRemoteAddr + 'static,
-        I::Error: Into<Box<dyn error::Error + Send + Sync>>,
-    {
         let (accept_tx, accept_rx) = flume::bounded(32);
 
         // The hyper "MakeService" which is called for each connection that is made to the
         // server.  It creates another Service which handles a single request.
-        let service = make_service_fn(move |socket: &I::Conn| {
+        let service = make_service_fn(move |socket: &AddrStream| {
             let remote_addr = socket.remote_addr();
             event!(Level::TRACE, "Connection from {:?}", remote_addr);
 
@@ -223,6 +202,8 @@ impl<In: RpcMessage, Out: RpcMessage> ServerChannel<In, Out> {
             }
         });
 
+        let mut incoming = AddrIncoming::bind(addr)?;
+        incoming.set_nodelay(true);
         let server = Server::builder(incoming)
             .http2_only(true)
             .http2_initial_connection_window_size(Some(config.max_frame_size))
@@ -230,6 +211,7 @@ impl<In: RpcMessage, Out: RpcMessage> ServerChannel<In, Out> {
             .http2_max_frame_size(Some(config.max_frame_size))
             .http2_max_send_buf_size(config.max_frame_size.try_into().unwrap())
             .serve(service);
+        let local_addr = server.local_addr();
 
         let (stop_tx, mut stop_rx) = mpsc::channel::<()>(1);
         let server = server.with_graceful_shutdown(async move {
@@ -240,8 +222,9 @@ impl<In: RpcMessage, Out: RpcMessage> ServerChannel<In, Out> {
 
         Ok(Self {
             channel: accept_rx,
-            config,
+            config: Arc::new(config),
             stop_tx,
+            local_addr: [LocalAddr::Socket(local_addr)],
             _p: PhantomData,
         })
     }
@@ -333,6 +316,7 @@ impl<In: RpcMessage, Out: RpcMessage> Clone for ServerChannel<In, Out> {
         Self {
             channel: self.channel.clone(),
             stop_tx: self.stop_tx.clone(),
+            local_addr: self.local_addr.clone(),
             config: self.config.clone(),
             _p: PhantomData,
         }
@@ -714,5 +698,9 @@ impl<In: RpcMessage, Out: RpcMessage> crate::ServerChannel<In, Out, ChannelTypes
 {
     fn accept_bi(&self) -> AcceptBiFuture<'_, In, Out> {
         AcceptBiFuture::new(self.channel.recv_async(), self.config.clone())
+    }
+
+    fn local_addr(&self) -> &[crate::LocalAddr] {
+        &self.local_addr
     }
 }

@@ -5,7 +5,7 @@
 //!
 //! [flume]: https://docs.rs/flume/
 //! [crossbeam]: https://docs.rs/crossbeam/
-use crate::RpcMessage;
+use crate::{LocalAddr, RpcMessage};
 use core::fmt;
 use futures::{Future, FutureExt, Sink, SinkExt, StreamExt};
 use pin_project::pin_project;
@@ -299,6 +299,10 @@ impl<In: RpcMessage, Out: RpcMessage> crate::ServerChannel<In, Out, ChannelTypes
 {
     fn accept_bi(&self) -> AcceptBiFuture<'_, In, Out> {
         AcceptBiFuture(self.stream.recv_async())
+    }
+
+    fn local_addr(&self) -> &[crate::LocalAddr] {
+        &[LocalAddr::Mem]
     }
 }
 
