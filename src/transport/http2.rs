@@ -102,7 +102,10 @@ impl<In: RpcMessage, Out: RpcMessage> Clone for ClientChannel<In, Out> {
 
 type Socket<In, Out> = (self::SendSink<Out>, self::RecvStream<In>);
 
-type InternalChannel = (Receiver<hyper::Result<Bytes>>, Sender<io::Result<Bytes>>);
+type InternalChannel<In> = (
+    Receiver<result::Result<In, RecvError>>,
+    Sender<io::Result<Bytes>>,
+);
 
 /// Error when setting a channel configuration
 #[derive(Debug, Clone)]
@@ -171,7 +174,7 @@ impl Default for ChannelConfig {
 #[derive(Debug)]
 pub struct ServerChannel<In: RpcMessage, Out: RpcMessage> {
     /// The channel.
-    channel: Receiver<InternalChannel>,
+    channel: Receiver<InternalChannel<In>>,
     /// The configuration.
     config: Arc<ChannelConfig>,
     /// The sender to stop the server.
@@ -248,9 +251,9 @@ impl<In: RpcMessage, Out: RpcMessage> ServerChannel<In, Out> {
     /// response and sends them to the [`ServerChannel`].
     async fn handle_one_http2_request(
         req: Request<Body>,
-        accept_tx: Sender<InternalChannel>,
+        accept_tx: Sender<InternalChannel<In>>,
     ) -> Result<Response<Body>, String> {
-        let (req_tx, req_rx) = flume::bounded::<hyper::Result<Bytes>>(32);
+        let (req_tx, req_rx) = flume::bounded::<result::Result<In, RecvError>>(32);
         let (res_tx, res_rx) = flume::bounded::<io::Result<Bytes>>(32);
         accept_tx
             .send_async((req_rx, res_tx))
@@ -267,6 +270,17 @@ impl<In: RpcMessage, Out: RpcMessage> ServerChannel<In, Out> {
     }
 }
 
+fn try_get_length_prefixed(buf: &[u8]) -> Option<&[u8]> {
+    if buf.len() < 4 {
+        return None;
+    }
+    let len = u32::from_be_bytes([buf[0], buf[1], buf[2], buf[3]]) as usize;
+    if buf.len() < 4 + len {
+        return None;
+    }
+    Some(&buf[4..4 + len])
+}
+
 /// Spawns a task which forwards requests from the network to a flume channel.
 ///
 /// This task will read frames from the network, filter out empty frames, and
@@ -279,19 +293,19 @@ impl<In: RpcMessage, Out: RpcMessage> ServerChannel<In, Out> {
 /// So it is fine to ignore the returned [`JoinHandle`].
 ///
 /// The HTTP2 request comes from *req* and the data is sent to `req_tx`.
-fn spawn_recv_forwarder(req: Body, req_tx: Sender<hyper::Result<Bytes>>) -> JoinHandle<()> {
+fn spawn_recv_forwarder<In: RpcMessage>(
+    req: Body,
+    req_tx: Sender<result::Result<In, RecvError>>,
+) -> JoinHandle<()> {
     tokio::spawn(async move {
         let mut stream = req;
+        let mut buf = Vec::new();
 
-        // This assumes each chunk received corresponds to a single HTTP2 frame.
         while let Some(chunk) = stream.next().await {
             let exit = match chunk.as_ref() {
                 Ok(chunk) => {
-                    if chunk.is_empty() {
-                        // Ignore empty chunks. we won't send empty chunks.
-                        continue;
-                    }
-                    event!(Level::TRACE, "Server got msg: {} bytes", chunk.len());
+                    event!(Level::TRACE, "Server got {} bytes", chunk.len());
+                    buf.extend_from_slice(chunk);
                     false
                 }
                 Err(cause) => {
@@ -302,15 +316,20 @@ fn spawn_recv_forwarder(req: Body, req_tx: Sender<hyper::Result<Bytes>>) -> Join
                     true
                 }
             };
-            if let Err(_cause) = req_tx.send_async(chunk).await {
-                // The receiver is gone, so we can't send any more data.
-                //
-                // This is a normal way for an interaction to end, when the server side is done processing
-                // the request and drops the receiver.
-                //
-                // don't log the cause. It does not contain any useful information.
-                trace!("Flume receiver dropped");
-                break;
+            // Drain all complete messages from the buffer, even in case of an error.
+            while let Some(msg) = try_get_length_prefixed(&buf) {
+                let item = bincode::deserialize(msg).map_err(RecvError::DeserializeError);
+                buf.drain(..4 + msg.len());
+                if let Err(_cause) = req_tx.send_async(item).await {
+                    // The receiver is gone, so we can't send any more data.
+                    //
+                    // This is a normal way for an interaction to end, when the server side is done processing
+                    // the request and drops the receiver.
+                    //
+                    // don't log the cause. It does not contain any useful information.
+                    trace!("Flume receiver dropped");
+                    break;
+                }
             }
             // exiting the task will drop the sender, which will cause the receiver to produce an error.
             // this is a normal way for an interaction to end.
@@ -337,27 +356,18 @@ impl<In: RpcMessage, Out: RpcMessage> Clone for ServerChannel<In, Out> {
 }
 
 /// Receive stream for http2 channels.
+///
+/// This is a newtype wrapper around a [`flume::r#async::RecvStream`] of deserialized
+/// messages.
 pub struct RecvStream<Res: RpcMessage> {
-    recv: flume::r#async::RecvStream<'static, hyper::Result<Bytes>>,
-    buffer: Vec<u8>,
-    p: PhantomData<Res>,
+    recv: flume::r#async::RecvStream<'static, result::Result<Res, RecvError>>,
 }
 
 impl<Res: RpcMessage> RecvStream<Res> {
     /// Creates a new [`RecvStream`] from a [`flume::Receiver`].
-    pub fn new(recv: flume::Receiver<hyper::Result<Bytes>>) -> Self {
+    pub fn new(recv: flume::Receiver<result::Result<Res, RecvError>>) -> Self {
         Self {
             recv: recv.into_stream(),
-            buffer: vec![],
-            p: PhantomData,
-        }
-    }
-
-    fn len(&self) -> Option<usize> {
-        if self.buffer.len() > 4 {
-            Some(u32::from_be_bytes(self.buffer[0..4].try_into().unwrap()) as usize)
-        } else {
-            None
         }
     }
 }
@@ -366,8 +376,6 @@ impl<In: RpcMessage> Clone for RecvStream<In> {
     fn clone(&self) -> Self {
         Self {
             recv: self.recv.clone(),
-            buffer: self.buffer.clone(),
-            p: PhantomData,
         }
     }
 }
@@ -379,32 +387,7 @@ impl<Res: RpcMessage> futures::Stream for RecvStream<Res> {
         mut self: Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> Poll<Option<Self::Item>> {
-        loop {
-            if let Some(len) = self.len() {
-                if self.buffer.len() >= len + 4 {
-                    // we have an entire message in the buffer, deserialize it and consume it
-                    let res = bincode::deserialize::<Res>(&self.buffer[4..len + 4])
-                        .map_err(RecvError::DeserializeError);
-                    self.buffer.drain(..len + 4);
-                    return Poll::Ready(Some(res));
-                }
-            }
-            // buffer is empty or incomplete, try to fill it
-            match self.recv.poll_next_unpin(cx) {
-                Poll::Ready(Some(Ok(item))) => {
-                    self.buffer.extend_from_slice(item.as_ref());
-                }
-                Poll::Ready(Some(Err(cause))) => {
-                    return Poll::Ready(Some(Err(RecvError::NetworkError(cause))));
-                }
-                Poll::Ready(None) => {
-                    return Poll::Ready(None);
-                }
-                Poll::Pending => {
-                    return Poll::Pending;
-                }
-            }
-        }
+        self.recv.poll_next_unpin(cx)
     }
 }
 
@@ -485,13 +468,11 @@ impl<Out: RpcMessage> Sink<Out> for SendSink<Out> {
 }
 
 /// Send error for http2 channels.
-///
-/// The only thing that can go wrong is that the task that writes to the hyper stream has died.
 #[derive(Debug)]
 pub enum SendError {
     /// Error when bincode serializing the message.
     SerializeError(bincode::Error),
-    /// The message is too large to be sent, or zero size.
+    /// The message is too large to be sent.
     SizeError(usize),
     /// The connection has been closed.
     ReceiverDropped,
@@ -616,7 +597,7 @@ impl<'a, In: RpcMessage, Out: RpcMessage> Future for OpenBiFuture<'a, In, Out> {
                 Poll::Ready(Ok(res)) => {
                     event!(Level::TRACE, "OpenBiFuture got response");
                     let (_, out_tx, config) = this.chan.take().unwrap().unwrap();
-                    let (in_tx, in_rx) = flume::bounded::<hyper::Result<Bytes>>(32);
+                    let (in_tx, in_rx) = flume::bounded::<result::Result<In, RecvError>>(32);
                     spawn_recv_forwarder(res.into_body(), in_tx);
 
                     let out_tx = self::SendSink::new(out_tx, config);
@@ -668,7 +649,13 @@ impl error::Error for AcceptBiError {}
 #[pin_project]
 pub struct AcceptBiFuture<'a, In, Out> {
     chan: Option<(
-        RecvFut<'a, (Receiver<hyper::Result<Bytes>>, Sender<io::Result<Bytes>>)>,
+        RecvFut<
+            'a,
+            (
+                Receiver<result::Result<In, RecvError>>,
+                Sender<io::Result<Bytes>>,
+            ),
+        >,
         Arc<ChannelConfig>,
     )>,
     _p: PhantomData<(In, Out)>,
@@ -677,7 +664,13 @@ pub struct AcceptBiFuture<'a, In, Out> {
 impl<'a, In: RpcMessage, Out: RpcMessage> AcceptBiFuture<'a, In, Out> {
     #[allow(clippy::type_complexity)]
     fn new(
-        fut: RecvFut<'a, (Receiver<hyper::Result<Bytes>>, Sender<io::Result<Bytes>>)>,
+        fut: RecvFut<
+            'a,
+            (
+                Receiver<result::Result<In, RecvError>>,
+                Sender<io::Result<Bytes>>,
+            ),
+        >,
         config: Arc<ChannelConfig>,
     ) -> Self {
         Self {
