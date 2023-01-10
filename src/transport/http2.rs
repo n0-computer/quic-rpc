@@ -10,7 +10,7 @@ use std::{
 use crate::{LocalAddr, RpcMessage};
 use bytes::Bytes;
 use flume::{r#async::RecvFut, Receiver, Sender};
-use futures::{Future, FutureExt, Sink, SinkExt, Stream, StreamExt};
+use futures::{Future, FutureExt, Sink, SinkExt, StreamExt};
 use hyper::{
     client::{connect::Connect, HttpConnector, ResponseFuture},
     server::conn::{AddrIncoming, AddrStream},
@@ -323,7 +323,7 @@ async fn try_forward_all<In: RpcMessage>(
 ///
 /// The HTTP2 request comes from *req* and the data is sent to `req_tx`.
 fn spawn_recv_forwarder<In: RpcMessage>(
-    req: impl Stream<Item = result::Result<Bytes, hyper::Error>> + Send + Unpin + 'static,
+    req: Body,
     req_tx: Sender<result::Result<In, RecvError>>,
 ) -> JoinHandle<result::Result<(), ()>> {
     tokio::spawn(async move {
@@ -428,7 +428,7 @@ impl<Out: RpcMessage> SendSink<Out> {
         }
     }
     fn serialize(&self, item: Out) -> Result<Bytes, SendError> {
-        let mut data = Vec::new();
+        let mut data = Vec::with_capacity(1024);
         data.extend_from_slice(&[0u8; 4]);
         bincode::serialize_into(&mut data, &item).map_err(SendError::SerializeError)?;
         let len = data.len() - 4;
