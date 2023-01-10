@@ -300,10 +300,14 @@ where
         let (send, recv) = client.bidi(Multiply(2)).await?;
         let handle = tokio::task::spawn(async move {
             let requests = futures::stream::iter((0..n).map(MultiplyUpdate));
-            requests.map(|r| {
-                // println!("u {:?}", r);
-                r
-            }).map(Ok).forward(send).await?;
+            requests
+                .map(|r| {
+                    // println!("u {:?}", r);
+                    r
+                })
+                .map(Ok)
+                .forward(send)
+                .await?;
             anyhow::Result::<()>::Ok(())
         });
         let mut sum = 0;
