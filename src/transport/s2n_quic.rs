@@ -215,18 +215,16 @@ impl<'a, In, Out> Future for OpenBiFuture<'a, In, Out> {
                     };
                     continue;
                 }
-                ClientConnectionState::Connecting(attempt) => {
-                    match attempt.poll_unpin(cx) {
-                        Poll::Ready(Ok(conn)) => {
-                            let handle = conn.handle();
-                            let mut channel = this.channel.lock().unwrap();
-                            channel.connection = Some(conn);
-                            *this.state = ClientConnectionState::Connected(handle);
-                            continue;
-                        }
-                        Poll::Ready(Err(e)) => Poll::Ready(Err(e)),
-                        Poll::Pending => Poll::Pending,
+                ClientConnectionState::Connecting(attempt) => match attempt.poll_unpin(cx) {
+                    Poll::Ready(Ok(conn)) => {
+                        let handle = conn.handle();
+                        let mut channel = this.channel.lock().unwrap();
+                        channel.connection = Some(conn);
+                        *this.state = ClientConnectionState::Connected(handle);
+                        continue;
                     }
+                    Poll::Ready(Err(e)) => Poll::Ready(Err(e)),
+                    Poll::Pending => Poll::Pending,
                 },
                 ClientConnectionState::Connected(conn) => {
                     match conn.poll_open_bidirectional_stream(cx) {
@@ -300,9 +298,7 @@ impl<'a, In, Out> Future for AcceptBiFuture<'a, In, Out> {
                                     Location::Local,
                                 )));
                             }
-                            Poll::Pending => {
-                                return Poll::Pending
-                            },
+                            Poll::Pending => return Poll::Pending,
                         },
                     };
                     continue;
