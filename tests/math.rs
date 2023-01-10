@@ -301,7 +301,7 @@ where
         let handle = tokio::task::spawn(async move {
             let requests = futures::stream::iter((0..n).map(MultiplyUpdate));
             requests.map(|r| {
-                println!("u {:?}", r);
+                // println!("u {:?}", r);
                 r
             }).map(Ok).forward(send).await?;
             anyhow::Result::<()>::Ok(())
@@ -310,7 +310,7 @@ where
         tokio::pin!(recv);
         let mut i = 0;
         while let Some(res) = recv.next().await {
-            println!("r {:?}", res);
+            // println!("r {:?}", res);
             sum += res?.0;
             if i % 10000 == 0 {
                 print!(".");
