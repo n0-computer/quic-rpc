@@ -10,7 +10,7 @@ use std::{
 use crate::{LocalAddr, RpcMessage};
 use bytes::Bytes;
 use flume::{r#async::RecvFut, Receiver, Sender};
-use futures::{Future, FutureExt, Sink, SinkExt, StreamExt};
+use futures::{Future, FutureExt, Sink, SinkExt, Stream, StreamExt};
 use hyper::{
     client::{connect::Connect, HttpConnector, ResponseFuture},
     server::conn::{AddrIncoming, AddrStream},
@@ -313,9 +313,8 @@ async fn try_forward_all<In: RpcMessage>(
 
 /// Spawns a task which forwards requests from the network to a flume channel.
 ///
-/// This task will read frames from the network, filter out empty frames, and
-/// forward non-empty frames to the flume channel. It will send the first error,
-/// but will then terminate.
+/// This task will read chunks from the network, split them into length prefixed
+/// frames, deserialize those frames, and send the result to the flume channel.
 ///
 /// If there is a network error or the flume channel closes or the request
 /// stream is simply ended this task will terminate.
@@ -324,7 +323,7 @@ async fn try_forward_all<In: RpcMessage>(
 ///
 /// The HTTP2 request comes from *req* and the data is sent to `req_tx`.
 fn spawn_recv_forwarder<In: RpcMessage>(
-    req: Body,
+    req: impl Stream<Item = result::Result<Bytes, hyper::Error>> + Send + Unpin + 'static,
     req_tx: Sender<result::Result<In, RecvError>>,
 ) -> JoinHandle<result::Result<(), ()>> {
     tokio::spawn(async move {
