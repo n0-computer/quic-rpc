@@ -286,11 +286,40 @@ fn try_get_length_prefixed(buf: &[u8]) -> Option<&[u8]> {
     Some(&buf[4..4 + len])
 }
 
+/// Try forward all frames as deserialized messages from the buffer to the sender.
+///
+/// On success, returns the number of forwarded bytes.
+/// On forward error, returns the unit error.
+///
+/// Deserialization errors don't cause an error, they will be sent.
+/// On error the number of consumed bytes is not returned. There is nothing to do but
+/// to stop the forwarder since there is nowhere to forward to anymore.
+async fn try_forward_all<In: RpcMessage>(
+    buffer: &[u8],
+    req_tx: &Sender<Result<In, RecvError>>,
+) -> result::Result<usize, ()> {
+    let mut sent = 0;
+    while let Some(msg) = try_get_length_prefixed(&buffer[sent..]) {
+        sent += msg.len() + 4;
+        let item = bincode::deserialize::<In>(msg).map_err(RecvError::DeserializeError);
+        if let Err(_cause) = req_tx.send_async(item).await {
+            // The receiver is gone, so we can't send any more data.
+            //
+            // This is a normal way for an interaction to end, when the server side is done processing
+            // the request and drops the receiver.
+            //
+            // don't log the cause. It does not contain any useful information.
+            trace!("Flume receiver dropped");
+            return Err(());
+        }
+    }
+    Ok(sent)
+}
+
 /// Spawns a task which forwards requests from the network to a flume channel.
 ///
-/// This task will read frames from the network, filter out empty frames, and
-/// forward non-empty frames to the flume channel. It will send the first error,
-/// but will then terminate.
+/// This task will read chunks from the network, split them into length prefixed
+/// frames, deserialize those frames, and send the result to the flume channel.
 ///
 /// If there is a network error or the flume channel closes or the request
 /// stream is simply ended this task will terminate.
@@ -301,47 +330,39 @@ fn try_get_length_prefixed(buf: &[u8]) -> Option<&[u8]> {
 fn spawn_recv_forwarder<In: RpcMessage>(
     req: Body,
     req_tx: Sender<result::Result<In, RecvError>>,
-) -> JoinHandle<()> {
+) -> JoinHandle<result::Result<(), ()>> {
     tokio::spawn(async move {
         let mut stream = req;
         let mut buf = Vec::new();
 
         while let Some(chunk) = stream.next().await {
-            let exit = match chunk.as_ref() {
+            match chunk.as_ref() {
                 Ok(chunk) => {
                     event!(Level::TRACE, "Server got {} bytes", chunk.len());
-                    buf.extend_from_slice(chunk);
-                    false
+                    if buf.is_empty() {
+                        // try to forward directly from buffer
+                        let sent = try_forward_all(chunk, &req_tx).await?;
+                        // add just the rest, if any
+                        buf.extend_from_slice(&chunk[sent..]);
+                    } else {
+                        // no choice but to add it all
+                        buf.extend_from_slice(chunk);
+                    }
                 }
                 Err(cause) => {
                     // Indicates that the connection has been closed on the client side.
                     // This is a normal occurrence, e.g. when the client has raced the RPC
                     // call with something else and has droppped the future.
                     debug!("Network error: {}", cause);
-                    true
-                }
-            };
-            // Drain all complete messages from the buffer, even in case of an error.
-            while let Some(msg) = try_get_length_prefixed(&buf) {
-                let item = bincode::deserialize(msg).map_err(RecvError::DeserializeError);
-                buf.drain(..4 + msg.len());
-                if let Err(_cause) = req_tx.send_async(item).await {
-                    // The receiver is gone, so we can't send any more data.
-                    //
-                    // This is a normal way for an interaction to end, when the server side is done processing
-                    // the request and drops the receiver.
-                    //
-                    // don't log the cause. It does not contain any useful information.
-                    trace!("Flume receiver dropped");
                     break;
                 }
-            }
-            // exiting the task will drop the sender, which will cause the receiver to produce an error.
-            // this is a normal way for an interaction to end.
-            if exit {
-                break;
-            }
+            };
+            let sent = try_forward_all(&buf, &req_tx).await?;
+            // remove the forwarded bytes.
+            // Frequently this will be the entire buffer, so no memcpy but just set the size to 0
+            buf.drain(..sent);
         }
+        Ok(())
     })
 }
 
@@ -412,7 +433,7 @@ impl<Out: RpcMessage> SendSink<Out> {
         }
     }
     fn serialize(&self, item: Out) -> Result<Bytes, SendError> {
-        let mut data = Vec::new();
+        let mut data = Vec::with_capacity(1024);
         data.extend_from_slice(&[0u8; 4]);
         bincode::serialize_into(&mut data, &item).map_err(SendError::SerializeError)?;
         let len = data.len() - 4;
