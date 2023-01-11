@@ -12,13 +12,13 @@ type Socket<In, Out> = (SendSink<Out>, RecvStream<In>);
 
 /// A server channel using a quinn connection
 #[derive(Debug)]
-pub struct ServerChannel<In: RpcMessage, Out: RpcMessage> {
+pub struct QuinnServerChannel<In: RpcMessage, Out: RpcMessage> {
     connection: quinn::Connection,
     local_addr: [LocalAddr; 1],
     _phantom: PhantomData<(In, Out)>,
 }
 
-impl<In: RpcMessage, Out: RpcMessage> ServerChannel<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> QuinnServerChannel<In, Out> {
     /// Create a new channel
     pub fn new(conn: quinn::Connection, local_addr: SocketAddr) -> Self {
         Self {
@@ -38,7 +38,7 @@ impl<In: RpcMessage, Out: RpcMessage> ServerChannel<In, Out> {
 //     }
 // }
 
-impl<In: RpcMessage, Out: RpcMessage> Clone for ServerChannel<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> Clone for QuinnServerChannel<In, Out> {
     fn clone(&self) -> Self {
         Self {
             connection: self.connection.clone(),
@@ -49,19 +49,19 @@ impl<In: RpcMessage, Out: RpcMessage> Clone for ServerChannel<In, Out> {
 }
 
 /// A server channel using a quinn connection
-pub struct ClientChannel<In: RpcMessage, Out: RpcMessage>(
+pub struct QuinnClientChannel<In: RpcMessage, Out: RpcMessage>(
     quinn::Connection,
     PhantomData<(In, Out)>,
 );
 
-impl<In: RpcMessage, Out: RpcMessage> ClientChannel<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> QuinnClientChannel<In, Out> {
     /// Create a new channel
     pub fn new(conn: quinn::Connection) -> Self {
         Self(conn, PhantomData)
     }
 }
 
-impl<In: RpcMessage, Out: RpcMessage> fmt::Debug for ClientChannel<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> fmt::Debug for QuinnClientChannel<In, Out> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_tuple("ClientChannel")
             .field(&self.0)
@@ -70,7 +70,7 @@ impl<In: RpcMessage, Out: RpcMessage> fmt::Debug for ClientChannel<In, Out> {
     }
 }
 
-impl<In: RpcMessage, Out: RpcMessage> Clone for ClientChannel<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> Clone for QuinnClientChannel<In, Out> {
     fn clone(&self) -> Self {
         Self(self.0.clone(), PhantomData)
     }
@@ -148,7 +148,7 @@ pub type AcceptBiError = quinn::ConnectionError;
 ///
 /// This exposes the types from quinn directly without attempting to wrap them.
 #[derive(Debug, Clone, Copy)]
-pub struct ChannelTypes;
+pub struct QuinnChannelTypes;
 
 /// Future returned by open_bi
 #[pin_project]
@@ -207,7 +207,7 @@ impl<'a, In, Out> Future for AcceptBiFuture<'a, In, Out> {
 // pub type AcceptBiFuture<'a, In, Out> =
 //     BoxFuture<'a, result::Result<self::Socket<In, Out>, self::AcceptBiError>>;
 
-impl crate::ChannelTypes for ChannelTypes {
+impl crate::ChannelTypes for QuinnChannelTypes {
     type SendSink<M: RpcMessage> = self::SendSink<M>;
 
     type RecvStream<M: RpcMessage> = self::RecvStream<M>;
@@ -224,21 +224,21 @@ impl crate::ChannelTypes for ChannelTypes {
 
     type AcceptBiFuture<'a, In: RpcMessage, Out: RpcMessage> = self::AcceptBiFuture<'a, In, Out>;
 
-    type ClientChannel<In: RpcMessage, Out: RpcMessage> = self::ClientChannel<In, Out>;
+    type ClientChannel<In: RpcMessage, Out: RpcMessage> = self::QuinnClientChannel<In, Out>;
 
-    type ServerChannel<In: RpcMessage, Out: RpcMessage> = self::ServerChannel<In, Out>;
+    type ServerChannel<In: RpcMessage, Out: RpcMessage> = self::QuinnServerChannel<In, Out>;
 }
 
-impl<In: RpcMessage + Sync, Out: RpcMessage + Sync> crate::ClientChannel<In, Out, ChannelTypes>
-    for self::ClientChannel<In, Out>
+impl<In: RpcMessage + Sync, Out: RpcMessage + Sync> crate::ClientChannel<In, Out, QuinnChannelTypes>
+    for self::QuinnClientChannel<In, Out>
 {
     fn open_bi(&self) -> OpenBiFuture<'_, In, Out> {
         OpenBiFuture(self.0.open_bi(), PhantomData)
     }
 }
 
-impl<In: RpcMessage + Sync, Out: RpcMessage + Sync> crate::ServerChannel<In, Out, ChannelTypes>
-    for self::ServerChannel<In, Out>
+impl<In: RpcMessage + Sync, Out: RpcMessage + Sync> crate::ServerChannel<In, Out, QuinnChannelTypes>
+    for self::QuinnServerChannel<In, Out>
 {
     fn accept_bi(&self) -> AcceptBiFuture<'_, In, Out> {
         AcceptBiFuture(self.connection.accept_bi(), PhantomData)

@@ -50,32 +50,36 @@ impl<S: Service, C: ChannelTypes> RpcServer<S, C> {
     /// Accepts a connection, handling the first request.
     ///
     /// This accepts a new client connection, which is represented as a tuple of a sender
-    /// and receiver channel.
+    /// [`Sink`] and receiver [`Stream`] with `Item`s being the [`Service::Req`] and
+    /// [`Service::Res`] respectively.
     ///
-    /// The return value is a tuple of `(request, (channel_sender, channel_receiver))`.
-    /// Here `request` is the first request which is already read from the channel.  The
-    /// channels are used to send responses and/or receive more requests.
+    /// The return value is a tuple of `(request, (sink, stream))`.  Here `request` is the
+    /// first request which is already read from the stream.  The `sink` and `stream` are
+    /// used to send more requests and/or receive more responses.
+    ///
+    /// [`Sink`]: futures::sink::Sink
+    /// [`Stream`]: futures::stream::Stream
     pub async fn accept_one(
         &self,
     ) -> result::Result<(S::Req, (C::SendSink<S::Res>, C::RecvStream<S::Req>)), RpcServerError<C>>
     where
         C::RecvStream<S::Req>: Unpin,
     {
-        let mut channel = self
+        let (sink, mut stream) = self
             .channel
             .accept_bi()
             .await
             .map_err(RpcServerError::AcceptBiError)?;
+
         // get the first message from the client. This will tell us what it wants to do.
-        let request: S::Req = channel
-            .1
+        let request: S::Req = stream
             .next()
             .await
             // no msg => early close
             .ok_or(RpcServerError::EarlyClose)?
             // recv error
             .map_err(RpcServerError::RecvError)?;
-        Ok((request, channel))
+        Ok((request, (sink, stream)))
     }
 
     /// A rpc call that also maps the error from the user type to the wire type

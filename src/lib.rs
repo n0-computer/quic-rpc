@@ -158,7 +158,11 @@ pub trait ClientChannel<In: RpcMessage, Out: RpcMessage, T: ChannelTypes>:
 pub trait ServerChannel<In: RpcMessage, Out: RpcMessage, T: ChannelTypes>:
     Debug + Clone + Send + Sync + 'static
 {
-    /// Accept a bidirectional stream
+    /// Accepts a bidirectional stream.
+    ///
+    /// This returns a future who's `Output` is a tuple of a sender sink and receiver stream
+    /// to send and receive messages to and from the client respectively.  The sink and
+    /// stream `Item`s are the whole `In` and `Out` messages, an [`RpcMessage`].
     fn accept_bi(&self) -> T::AcceptBiFuture<'_, In, Out>;
 
     /// The local addresses this server is bound to.

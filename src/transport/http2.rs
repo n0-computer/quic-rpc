@@ -7,10 +7,10 @@ use std::{
     sync::Arc, task::Poll,
 };
 
-use crate::{LocalAddr, RpcMessage};
+use crate::{ClientChannel, LocalAddr, RpcMessage, ServerChannel};
 use bytes::Bytes;
 use flume::{r#async::RecvFut, Receiver, Sender};
-use futures::{Future, FutureExt, Sink, SinkExt, StreamExt};
+use futures::{future::FusedFuture, Future, FutureExt, Sink, SinkExt, StreamExt};
 use hyper::{
     client::{connect::Connect, HttpConnector, ResponseFuture},
     server::conn::{AddrIncoming, AddrStream},
@@ -29,7 +29,7 @@ struct ClientChannelInner {
 }
 
 /// Client channel
-pub struct ClientChannel<In: RpcMessage, Out: RpcMessage> {
+pub struct Http2ClientChannel<In: RpcMessage, Out: RpcMessage> {
     inner: Arc<ClientChannelInner>,
     _p: PhantomData<(In, Out)>,
 }
@@ -45,7 +45,7 @@ impl<C: Connect + Clone + Send + Sync + 'static> Requester for Client<C, Body> {
     }
 }
 
-impl<In: RpcMessage, Out: RpcMessage> ClientChannel<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> Http2ClientChannel<In, Out> {
     /// create a client given an uri and the default configuration
     pub fn new(uri: Uri) -> Self {
         Self::with_config(uri, ChannelConfig::default())
@@ -82,7 +82,7 @@ impl<In: RpcMessage, Out: RpcMessage> ClientChannel<In, Out> {
     }
 }
 
-impl<In: RpcMessage, Out: RpcMessage> fmt::Debug for ClientChannel<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> fmt::Debug for Http2ClientChannel<In, Out> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ClientChannel")
             .field("uri", &self.inner.uri)
@@ -91,7 +91,7 @@ impl<In: RpcMessage, Out: RpcMessage> fmt::Debug for ClientChannel<In, Out> {
     }
 }
 
-impl<In: RpcMessage, Out: RpcMessage> Clone for ClientChannel<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> Clone for Http2ClientChannel<In, Out> {
     fn clone(&self) -> Self {
         Self {
             inner: self.inner.clone(),
@@ -100,8 +100,13 @@ impl<In: RpcMessage, Out: RpcMessage> Clone for ClientChannel<In, Out> {
     }
 }
 
+/// A pair of channels to send and receive messages on a single stream.
+///
+/// A socket here is an abstraction of a single stream to a single peer which sends and
+/// receives whole messages of the [`In`] and [`Out`] types.
 type Socket<In, Out> = (self::SendSink<Out>, self::RecvStream<In>);
 
+/// A flume sender and receiver tuple.
 type InternalChannel<In> = (
     Receiver<result::Result<In, RecvError>>,
     Sender<io::Result<Bytes>>,
@@ -172,7 +177,7 @@ impl Default for ChannelConfig {
 /// Creating this spawns a tokio task which runs the server, once dropped this task is shut
 /// down: no new connections will be accepted and existing channels will stop.
 #[derive(Debug)]
-pub struct ServerChannel<In: RpcMessage, Out: RpcMessage> {
+pub struct Http2ServerChannel<In: RpcMessage, Out: RpcMessage> {
     /// The channel.
     channel: Receiver<InternalChannel<In>>,
     /// The configuration.
@@ -191,7 +196,7 @@ pub struct ServerChannel<In: RpcMessage, Out: RpcMessage> {
     _p: PhantomData<(In, Out)>,
 }
 
-impl<In: RpcMessage, Out: RpcMessage> ServerChannel<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> Http2ServerChannel<In, Out> {
     /// Creates a server listening on the [`SocketAddr`], with the default configuration.
     pub fn serve(addr: &SocketAddr) -> hyper::Result<Self> {
         Self::serve_with_config(addr, Default::default())
@@ -343,7 +348,7 @@ fn spawn_recv_forwarder<In: RpcMessage>(
 // This does not want or need RpcMessage to be clone but still want to clone the
 // ServerChannel and it's containing channels itself.  The derive macro can't cope with this
 // so this needs to be written by hand.
-impl<In: RpcMessage, Out: RpcMessage> Clone for ServerChannel<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> Clone for Http2ServerChannel<In, Out> {
     fn clone(&self) -> Self {
         Self {
             channel: self.channel.clone(),
@@ -505,9 +510,9 @@ impl error::Error for RecvError {}
 
 /// Http2 channel types
 #[derive(Debug, Clone)]
-pub struct ChannelTypes;
+pub struct Http2ChannelTypes;
 
-impl crate::ChannelTypes for ChannelTypes {
+impl crate::ChannelTypes for Http2ChannelTypes {
     type SendSink<M: RpcMessage> = self::SendSink<M>;
 
     type RecvStream<M: RpcMessage> = self::RecvStream<M>;
@@ -524,9 +529,9 @@ impl crate::ChannelTypes for ChannelTypes {
 
     type AcceptBiFuture<'a, In: RpcMessage, Out: RpcMessage> = self::AcceptBiFuture<'a, In, Out>;
 
-    type ClientChannel<In: RpcMessage, Out: RpcMessage> = self::ClientChannel<In, Out>;
+    type ClientChannel<In: RpcMessage, Out: RpcMessage> = self::Http2ClientChannel<In, Out>;
 
-    type ServerChannel<In: RpcMessage, Out: RpcMessage> = self::ServerChannel<In, Out>;
+    type ServerChannel<In: RpcMessage, Out: RpcMessage> = self::Http2ServerChannel<In, Out>;
 }
 
 /// OpenBiError for mem channels.
@@ -712,7 +717,20 @@ impl<'a, In: RpcMessage, Out: RpcMessage> Future for AcceptBiFuture<'a, In, Out>
     }
 }
 
-impl<In, Out> crate::ClientChannel<In, Out, ChannelTypes> for ClientChannel<In, Out>
+impl<'a, In, Out> FusedFuture for AcceptBiFuture<'a, In, Out>
+where
+    In: RpcMessage,
+    Out: RpcMessage,
+{
+    fn is_terminated(&self) -> bool {
+        // TODO: why can't I project??
+        // let this = self.project();
+        // this.chan.is_none()
+        self.chan.is_none()
+    }
+}
+
+impl<In, Out> ClientChannel<In, Out, Http2ChannelTypes> for Http2ClientChannel<In, Out>
 where
     In: RpcMessage,
     Out: RpcMessage,
@@ -734,9 +752,13 @@ where
     }
 }
 
-impl<In: RpcMessage, Out: RpcMessage> crate::ServerChannel<In, Out, ChannelTypes>
-    for ServerChannel<In, Out>
+impl<In: RpcMessage, Out: RpcMessage> ServerChannel<In, Out, Http2ChannelTypes>
+    for Http2ServerChannel<In, Out>
 {
+    /// Accept a bi-directional stream from a client.
+    ///
+    /// The [`AcceptBiFuture`] returns a `(sender, receiver)` pair which can be used as
+    /// channels.
     fn accept_bi(&self) -> AcceptBiFuture<'_, In, Out> {
         AcceptBiFuture::new(self.channel.recv_async(), self.config.clone())
     }

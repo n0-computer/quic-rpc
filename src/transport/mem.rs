@@ -52,11 +52,11 @@ impl<Res: RpcMessage> futures::Stream for RecvStream<Res> {
 type Socket<In, Out> = (self::SendSink<Out>, self::RecvStream<In>);
 
 /// A mem channel
-pub struct ServerChannel<In: RpcMessage, Out: RpcMessage> {
+pub struct MemServerChannel<In: RpcMessage, Out: RpcMessage> {
     stream: flume::Receiver<Socket<In, Out>>,
 }
 
-impl<In: RpcMessage, Out: RpcMessage> Clone for ServerChannel<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> Clone for MemServerChannel<In, Out> {
     fn clone(&self) -> Self {
         Self {
             stream: self.stream.clone(),
@@ -64,7 +64,7 @@ impl<In: RpcMessage, Out: RpcMessage> Clone for ServerChannel<In, Out> {
     }
 }
 
-impl<In: RpcMessage, Out: RpcMessage> fmt::Debug for ServerChannel<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> fmt::Debug for MemServerChannel<In, Out> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ServerChannel")
             .field("stream", &self.stream)
@@ -72,11 +72,11 @@ impl<In: RpcMessage, Out: RpcMessage> fmt::Debug for ServerChannel<In, Out> {
     }
 }
 /// A mem channel
-pub struct ClientChannel<In: RpcMessage, Out: RpcMessage> {
+pub struct MemClientChannel<In: RpcMessage, Out: RpcMessage> {
     sink: flume::Sender<Socket<Out, In>>,
 }
 
-impl<In: RpcMessage, Out: RpcMessage> Clone for ClientChannel<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> Clone for MemClientChannel<In, Out> {
     fn clone(&self) -> Self {
         Self {
             sink: self.sink.clone(),
@@ -84,7 +84,7 @@ impl<In: RpcMessage, Out: RpcMessage> Clone for ClientChannel<In, Out> {
     }
 }
 
-impl<In: RpcMessage, Out: RpcMessage> fmt::Debug for ClientChannel<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> fmt::Debug for MemClientChannel<In, Out> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ClientChannel")
             .field("sink", &self.sink)
@@ -255,9 +255,9 @@ impl std::error::Error for CreateChannelError {}
 
 /// Types for mem channels.
 #[derive(Debug, Clone, Copy)]
-pub struct ChannelTypes;
+pub struct MemChannelTypes;
 
-impl crate::ChannelTypes for ChannelTypes {
+impl crate::ChannelTypes for MemChannelTypes {
     type SendSink<M: RpcMessage> = self::SendSink<M>;
 
     type RecvStream<M: RpcMessage> = self::RecvStream<M>;
@@ -274,13 +274,13 @@ impl crate::ChannelTypes for ChannelTypes {
 
     type AcceptBiFuture<'a, In: RpcMessage, Out: RpcMessage> = self::AcceptBiFuture<'a, In, Out>;
 
-    type ClientChannel<In: RpcMessage, Out: RpcMessage> = self::ClientChannel<In, Out>;
+    type ClientChannel<In: RpcMessage, Out: RpcMessage> = self::MemClientChannel<In, Out>;
 
-    type ServerChannel<In: RpcMessage, Out: RpcMessage> = self::ServerChannel<In, Out>;
+    type ServerChannel<In: RpcMessage, Out: RpcMessage> = self::MemServerChannel<In, Out>;
 }
 
-impl<In: RpcMessage, Out: RpcMessage> crate::ClientChannel<In, Out, ChannelTypes>
-    for ClientChannel<In, Out>
+impl<In: RpcMessage, Out: RpcMessage> crate::ClientChannel<In, Out, MemChannelTypes>
+    for MemClientChannel<In, Out>
 {
     fn open_bi(&self) -> OpenBiFuture<'_, In, Out> {
         let (local_send, remote_recv) = flume::bounded::<Out>(128);
@@ -294,8 +294,8 @@ impl<In: RpcMessage, Out: RpcMessage> crate::ClientChannel<In, Out, ChannelTypes
     }
 }
 
-impl<In: RpcMessage, Out: RpcMessage> crate::ServerChannel<In, Out, ChannelTypes>
-    for ServerChannel<In, Out>
+impl<In: RpcMessage, Out: RpcMessage> crate::ServerChannel<In, Out, MemChannelTypes>
+    for MemServerChannel<In, Out>
 {
     fn accept_bi(&self) -> AcceptBiFuture<'_, In, Out> {
         AcceptBiFuture(self.stream.recv_async())
@@ -311,7 +311,7 @@ impl<In: RpcMessage, Out: RpcMessage> crate::ServerChannel<In, Out, ChannelTypes
 /// `buffer` the size of the buffer for each channel. Keep this at a low value to get backpressure
 pub fn connection<Req: RpcMessage, Res: RpcMessage>(
     buffer: usize,
-) -> (ServerChannel<Req, Res>, ClientChannel<Res, Req>) {
+) -> (MemServerChannel<Req, Res>, MemClientChannel<Res, Req>) {
     let (sink, stream) = flume::bounded::<Socket<Req, Res>>(buffer);
-    (ServerChannel { stream }, ClientChannel { sink })
+    (MemServerChannel { stream }, MemClientChannel { sink })
 }

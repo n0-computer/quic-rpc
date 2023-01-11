@@ -6,7 +6,7 @@ use message::RpcMsg;
 use quic_rpc::{
     message::{BidiStreaming, ClientStreaming, Msg, ServerStreaming},
     server::RpcServerError,
-    transport::mem::{self, ChannelTypes},
+    transport::mem::{self, MemChannelTypes},
     ClientChannel, *,
 };
 use serde::{Deserialize, Serialize};
@@ -179,8 +179,8 @@ impl Store {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     async fn server_future(
-        server: RpcServer<StoreService, ChannelTypes>,
-    ) -> result::Result<(), RpcServerError<ChannelTypes>> {
+        server: RpcServer<StoreService, MemChannelTypes>,
+    ) -> result::Result<(), RpcServerError<MemChannelTypes>> {
         let s = server;
         let store = Store;
         loop {
@@ -201,8 +201,8 @@ async fn main() -> anyhow::Result<()> {
     }
 
     let (server, client) = mem::connection::<StoreRequest, StoreResponse>(1);
-    let client = RpcClient::<StoreService, ChannelTypes>::new(client);
-    let server = RpcServer::<StoreService, ChannelTypes>::new(server);
+    let client = RpcClient::<StoreService, MemChannelTypes>::new(client);
+    let server = RpcServer::<StoreService, MemChannelTypes>::new(server);
     let server_handle = tokio::task::spawn(server_future(server));
 
     // a rpc call
