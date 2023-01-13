@@ -10,11 +10,11 @@ pub mod quinn;
 
 #[cfg(feature = "quic")]
 /// Alias for quinn channel types
-pub use self::quinn::ChannelTypes as QuinnChannelTypes;
+pub use self::quinn::QuinnChannelTypes;
 /// Alias for combined channel types
-pub use combined::ChannelTypes as CombinedChannelTypes;
+pub use combined::CombinedChannelTypes;
 #[cfg(feature = "http2")]
 /// Alias for http2 channel types
-pub use http2::ChannelTypes as Http2ChannelTypes;
+pub use http2::Http2ChannelTypes;
 /// Alias for mem channel types
-pub use mem::ChannelTypes as MemChannelTypes;
+pub use mem::MemChannelTypes;

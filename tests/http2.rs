@@ -8,7 +8,9 @@ use quic_rpc::{
     client::RpcClientError,
     message::{Msg, Rpc},
     server::RpcServerError,
-    transport::http2::{self, RecvError},
+    transport::http2::{
+        self, Http2ChannelTypes, Http2ClientChannel, Http2ServerChannel, RecvError,
+    },
     RpcClient, RpcServer, Service,
 };
 use serde::{Deserialize, Serialize};
@@ -19,8 +21,8 @@ use math::*;
 mod util;
 
 fn run_server(addr: &SocketAddr) -> JoinHandle<anyhow::Result<()>> {
-    let channel = http2::ServerChannel::<ComputeRequest, ComputeResponse>::serve(addr).unwrap();
-    let server = RpcServer::<ComputeService, http2::ChannelTypes>::new(channel);
+    let channel = Http2ServerChannel::<ComputeRequest, ComputeResponse>::serve(addr).unwrap();
+    let server = RpcServer::<ComputeService, Http2ChannelTypes>::new(channel);
     tokio::spawn(async move {
         loop {
             let server = server.clone();
@@ -33,11 +35,11 @@ fn run_server(addr: &SocketAddr) -> JoinHandle<anyhow::Result<()>> {
 
 #[tokio::test]
 async fn http2_channel_bench() -> anyhow::Result<()> {
-    type C = http2::ChannelTypes;
+    type C = Http2ChannelTypes;
     let addr: SocketAddr = "127.0.0.1:3000".parse()?;
     let uri: Uri = "http://127.0.0.1:3000".parse()?;
     let server_handle = run_server(&addr);
-    let client = http2::ClientChannel::new(uri);
+    let client = Http2ClientChannel::new(uri);
     let client = RpcClient::<ComputeService, C>::new(client);
     bench(client, 50000).await?;
     println!("terminating server");
@@ -48,11 +50,11 @@ async fn http2_channel_bench() -> anyhow::Result<()> {
 
 #[tokio::test]
 async fn http2_channel_smoke() -> anyhow::Result<()> {
-    type C = http2::ChannelTypes;
+    type C = Http2ChannelTypes;
     let addr: SocketAddr = "127.0.0.1:3001".parse()?;
     let uri: Uri = "http://127.0.0.1:3001".parse()?;
     let server_handle = run_server(&addr);
-    let client = http2::ClientChannel::new(uri);
+    let client = Http2ClientChannel::new(uri);
     smoke_test::<C>(client).await?;
     server_handle.abort();
     let _ = server_handle.await;
@@ -201,8 +203,8 @@ async fn http2_channel_errors() -> anyhow::Result<()> {
         JoinHandle<anyhow::Result<()>>,
         Receiver<result::Result<(), RpcServerError<C>>>,
     ) {
-        let channel = http2::ServerChannel::serve(addr).unwrap();
-        let server = RpcServer::<TestService, http2::ChannelTypes>::new(channel);
+        let channel = Http2ServerChannel::serve(addr).unwrap();
+        let server = RpcServer::<TestService, Http2ChannelTypes>::new(channel);
         let (res_tx, res_rx) = flume::unbounded();
         let handle = tokio::spawn(async move {
             loop {
@@ -246,11 +248,11 @@ async fn http2_channel_errors() -> anyhow::Result<()> {
         (handle, res_rx)
     }
 
-    type C = http2::ChannelTypes;
+    type C = Http2ChannelTypes;
     let addr: SocketAddr = "127.0.0.1:3002".parse()?;
     let uri: Uri = "http://127.0.0.1:3002".parse()?;
     let (server_handle, server_results) = run_test_server(&addr);
-    let client = http2::ClientChannel::new(uri);
+    let client = Http2ClientChannel::new(uri);
     let client = RpcClient::<TestService, C>::new(client);
 
     macro_rules! assert_matches {

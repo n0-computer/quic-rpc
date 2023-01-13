@@ -4,10 +4,10 @@ use quic_rpc::{server::RpcServerError, transport::mem, RpcClient, RpcServer};
 
 #[tokio::test]
 async fn mem_channel_bench() -> anyhow::Result<()> {
-    type C = mem::ChannelTypes;
+    type C = mem::MemChannelTypes;
     let (server, client) = mem::connection::<ComputeRequest, ComputeResponse>(1);
 
-    let server = RpcServer::<ComputeService, mem::ChannelTypes>::new(server);
+    let server = RpcServer::<ComputeService, mem::MemChannelTypes>::new(server);
     let server_handle = tokio::task::spawn(ComputeService::server(server));
     let client = RpcClient::<ComputeService, C>::new(client);
     bench(client, 1000000).await?;
@@ -24,9 +24,9 @@ async fn mem_channel_bench() -> anyhow::Result<()> {
 async fn mem_channel_smoke() -> anyhow::Result<()> {
     let (server, client) = mem::connection::<ComputeRequest, ComputeResponse>(1);
 
-    let server = RpcServer::<ComputeService, mem::ChannelTypes>::new(server);
+    let server = RpcServer::<ComputeService, mem::MemChannelTypes>::new(server);
     let server_handle = tokio::task::spawn(ComputeService::server(server));
-    smoke_test::<mem::ChannelTypes>(client).await?;
+    smoke_test::<mem::MemChannelTypes>(client).await?;
 
     // dropping the client will cause the server to terminate
     match server_handle.await? {
