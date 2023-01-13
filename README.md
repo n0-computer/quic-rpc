@@ -47,6 +47,50 @@ It is still a RPC system in the sense that interactions get initiated by the cli
 
 [computation service](https://github.com/n0-computer/quic-rpc/blob/main/tests/math.rs)
 
+## Why?
+
+The purpose of quic-rpc is to serve as an *optional* rpc framework. One of the
+main goals is to be able to use it as an *in process* way to have well specified
+protocols and boundaries between subsystems, including an async boundary.
+
+It should not have noticeable overhead compared to what you would do anyway to
+isolate subsystems in a complex single process app, but should have the *option*
+to also send messages over a process boundary via one of the non mem transports.
+
+What do you usually do in rust to have isolation between subsystems, e.g.
+between a database and a networking layer? You have some kind of
+channel between the systems and define messages flowing back and forth over that
+channel. For almost all interactions these messages itself will again contain
+(oneshot or mpsc) channels for independent async communication between the
+subsystems.
+
+Quic-rpc with the mem channel does exactly the same thing, except that it hides
+the details and allows you to specify a clean high level interaction protocol
+in the rust type system.
+
+Instead of having a message that explicitly contains some data and the send side
+of an oneshot or mpsc channel for the response, it creates a pair of flume
+channels internally and sends one end of them to the server. This has some slight
+overhead (2 flume channels vs. 1 oneshot channel) for a RPC interaction. But
+for streaming interactions the overhead is negligible.
+
+For the case where you have a process boundary, the overhead is very low for
+transports that already have a concept of cheap substreams (http2, quic, ...).
+Quic is the poster child of a network transport that has built in cheap
+substreams including per substream backpressure. However, I found that for raw
+data transfer http2/tcp has still superior performance. This is why the http2
+transport exists.
+
+Currently you would use the quic transport for cases where you want to have
+connections to many different peers and can't accept a large per connection
+overhead, or where you want low latency for small messages.
+
+You would use the http2 transport for cases where you have a small number of
+connections, so per connection overhead does not matter that much, and where
+you want maximum throughput at the expense of some latency.
+
+This may change in the future as quic implementations get more optimized.
+
 [quinn]: https://docs.rs/quinn/
 [flume]: https://docs.rs/flume/
 [grpc]: https://grpc.io/
