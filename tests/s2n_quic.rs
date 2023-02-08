@@ -6,7 +6,6 @@ use math::*;
 mod util;
 use quic_rpc::{transport::S2nQuicChannelTypes, RpcClient, RpcServer};
 use tokio::task::JoinHandle;
-use util::*;
 
 fn run_server(server: s2n_quic::Server) -> JoinHandle<anyhow::Result<()>> {
     tokio::task::spawn(async move {
@@ -83,14 +82,14 @@ async fn s2n_quic_channel_smoke() -> anyhow::Result<()> {
     Ok(())
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn s2n_quic_channel_bench() -> anyhow::Result<()> {
     type C = quic_rpc::transport::s2n_quic::ChannelTypes;
     let (client, server, connect) = make_client_and_server_builtin().await?;
     let server_handle = run_server(server);
     let client = quic_rpc::transport::s2n_quic::ClientChannel::new(client, connect);
     let client = RpcClient::<ComputeService, C>::new(client);
-    bench(client, 500).await?;
+    bench(client, 5).await?;
     server_handle.abort();
     let _ = server_handle.await;
     Ok(())

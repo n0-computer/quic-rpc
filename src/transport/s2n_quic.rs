@@ -1,13 +1,13 @@
 //! QUIC channel implementation based on quinn
 use crate::{LocalAddr, RpcMessage};
+use futures::channel::oneshot;
 use futures::{Future, FutureExt, Sink, SinkExt, Stream, StreamExt};
 use pin_project::pin_project;
-use s2n_quic::provider::event::Location;
 use s2n_quic::stream::BidirectionalStream;
 use serde::{de::DeserializeOwned, Serialize};
 use std::net::SocketAddr;
-use std::sync::{Arc, Mutex};
-use std::task::Poll;
+use std::sync::Arc;
+use std::task::{Poll, ready};
 use std::{fmt, io, marker::PhantomData, pin::Pin, result};
 use tokio_serde::{formats::SymmetricalBincode, SymmetricallyFramed};
 use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
@@ -16,46 +16,46 @@ type Socket<In, Out> = (SendSink<Out>, RecvStream<In>);
 
 #[derive(Debug)]
 struct ServerChannelInner {
-    server: s2n_quic::Server,
-    connection: Option<s2n_quic::Connection>,
+    task: tokio::task::JoinHandle<()>,
+    recv: flume::Receiver<Result<s2n_quic::stream::BidirectionalStream, s2n_quic::connection::Error>>,
+    local_addr: [LocalAddr; 1],
 }
 
 /// A server channel using a quinn connection
 #[derive(Debug)]
 pub struct ServerChannel<In: RpcMessage, Out: RpcMessage> {
-    inner: Arc<Mutex<ServerChannelInner>>,
-    local_addr: [LocalAddr; 1],
+    inner: Arc<ServerChannelInner>,
     _phantom: PhantomData<(In, Out)>,
 }
 
 impl<In: RpcMessage, Out: RpcMessage> ServerChannel<In, Out> {
     /// Create a new channel
-    pub fn new(server: s2n_quic::Server, local_addr: SocketAddr) -> Self {
+    pub fn new(mut server: s2n_quic::Server, local_addr: SocketAddr) -> Self {
+        let (send, recv) = flume::bounded(1);
+        let task = tokio::spawn(async move {
+            'outer: while let Some(mut connection) = server.accept().await {
+                while let Some(res) = connection.accept_bidirectional_stream().await.transpose() {
+                    if send.send_async(res).await.is_err() {
+                        break 'outer;
+                    }
+                }
+            }
+        });
         Self {
-            inner: Arc::new(Mutex::new(ServerChannelInner {
-                server,
-                connection: None,
-            })),
-            local_addr: [LocalAddr::Socket(local_addr)],
+            inner: Arc::new(ServerChannelInner {
+                task,
+                recv,
+                local_addr: [LocalAddr::Socket(local_addr)],
+            }),
             _phantom: PhantomData,
         }
     }
 }
 
-// impl<In: RpcMessage, Out: RpcMessage> fmt::Debug for ServerChannel<In, Out> {
-//     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-//         f.debug_tuple("ServerChannel")
-//             .field(&self.0)
-//             .field(&self.1)
-//             .finish()
-//     }
-// }
-
 impl<In: RpcMessage, Out: RpcMessage> Clone for ServerChannel<In, Out> {
     fn clone(&self) -> Self {
         Self {
             inner: self.inner.clone(),
-            local_addr: self.local_addr.clone(),
             _phantom: PhantomData,
         }
     }
@@ -63,26 +63,45 @@ impl<In: RpcMessage, Out: RpcMessage> Clone for ServerChannel<In, Out> {
 
 #[derive(Debug)]
 struct ClientChannelInner {
-    client: s2n_quic::Client,
-    connect: s2n_quic::client::Connect,
-    connection: Option<s2n_quic::Connection>,
+    task: tokio::task::JoinHandle<()>,
+    send: flume::Sender<futures::channel::oneshot::Sender<BidirectionalStream>>,
 }
 
 /// A server channel using a quinn connection
 pub struct ClientChannel<In: RpcMessage, Out: RpcMessage>(
-    Arc<Mutex<ClientChannelInner>>,
+    Arc<ClientChannelInner>,
     PhantomData<(In, Out)>,
 );
 
 impl<In: RpcMessage, Out: RpcMessage> ClientChannel<In, Out> {
     /// Create a new channel
     pub fn new(client: s2n_quic::Client, connect: s2n_quic::client::Connect) -> Self {
+        let (send, recv) = flume::bounded::<futures::channel::oneshot::Sender<BidirectionalStream>>(1);
+        let task = tokio::spawn(async move {
+            loop {
+                let connect = connect.clone();
+                let mut connection = match client.connect(connect).await {
+                    Ok(conn) => conn,
+                    Err(_) => continue,
+                };
+                loop {
+                    let sender = match recv.recv_async().await {
+                        Ok(sender) => sender,
+                        Err(_) => break,
+                    };
+                    let stream = match connection.open_bidirectional_stream().await {
+                        Ok(stream) => stream,
+                        Err(_) => continue,
+                    };
+                    let _ = sender.send(stream);
+                }
+            }
+        });
         Self(
-            Arc::new(Mutex::new(ClientChannelInner {
-                client,
-                connect,
-                connection: None,
-            })),
+            Arc::new(ClientChannelInner {
+                send,
+                task,
+            }),
             PhantomData,
         )
     }
@@ -177,73 +196,22 @@ pub type AcceptBiError = s2n_quic::connection::Error;
 #[derive(Debug, Clone, Copy)]
 pub struct ChannelTypes;
 
-#[pin_project]
-enum ClientConnectionState {
-    Initial,
-    Connecting(s2n_quic::client::ConnectionAttempt),
-    Connected(s2n_quic::connection::Handle),
-    Final,
-}
-
 /// Future returned by open_bi
 #[pin_project]
 pub struct OpenBiFuture<'a, In, Out> {
-    channel: &'a Arc<Mutex<ClientChannelInner>>,
-    state: ClientConnectionState,
-    p: PhantomData<(In, Out)>,
+    inner: futures::channel::oneshot::Receiver<BidirectionalStream>,
+    p: PhantomData<&'a (In, Out)>,
 }
 
 impl<'a, In, Out> Future for OpenBiFuture<'a, In, Out> {
     type Output = result::Result<self::Socket<In, Out>, self::OpenBiError>;
 
     fn poll(
-        self: Pin<&mut Self>,
+        mut self: Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Self::Output> {
-        let this = self.project();
-        loop {
-            break match this.state {
-                ClientConnectionState::Initial => {
-                    let channel = this.channel.lock().unwrap();
-                    *this.state = match &channel.connection {
-                        Some(conn) => ClientConnectionState::Connected(conn.handle()),
-                        None => {
-                            let connect = channel.connect.clone();
-                            let attempt = channel.client.connect(connect);
-                            ClientConnectionState::Connecting(attempt)
-                        }
-                    };
-                    continue;
-                }
-                ClientConnectionState::Connecting(attempt) => match attempt.poll_unpin(cx) {
-                    Poll::Ready(Ok(conn)) => {
-                        let handle = conn.handle();
-                        let mut channel = this.channel.lock().unwrap();
-                        channel.connection = Some(conn);
-                        *this.state = ClientConnectionState::Connected(handle);
-                        continue;
-                    }
-                    Poll::Ready(Err(e)) => Poll::Ready(Err(e)),
-                    Poll::Pending => Poll::Pending,
-                },
-                ClientConnectionState::Connected(conn) => {
-                    match conn.poll_open_bidirectional_stream(cx) {
-                        Poll::Ready(res) => {
-                            *this.state = ClientConnectionState::Final;
-                            Poll::Ready(match res {
-                                Ok(stream) => Ok(wrap_bidi_stream(stream)),
-                                Err(e) => {
-                                    this.channel.lock().unwrap().connection = None;
-                                    Err(e)
-                                }
-                            })
-                        }
-                        Poll::Pending => Poll::Pending,
-                    }
-                }
-                ClientConnectionState::Final => Poll::Pending,
-            };
-        }
+        let stream = ready!(self.inner.poll_unpin(cx)).unwrap();
+        Poll::Ready(Ok(wrap_bidi_stream(stream)))
     }
 }
 
@@ -269,8 +237,7 @@ enum ServerConnectionState {
 /// Future returned by accept_bi
 #[pin_project]
 pub struct AcceptBiFuture<'a, In, Out> {
-    channel: &'a Arc<Mutex<ServerChannelInner>>,
-    state: ServerConnectionState,
+    inner: flume::r#async::RecvFut<'a, Result<BidirectionalStream, s2n_quic::connection::Error>>,
     p: PhantomData<(In, Out)>,
 }
 
@@ -281,49 +248,8 @@ impl<'a, In, Out> Future for AcceptBiFuture<'a, In, Out> {
         self: Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Self::Output> {
-        let this = self.project();
-        loop {
-            break match this.state {
-                ServerConnectionState::Initial => {
-                    let mut channel = this.channel.lock().unwrap();
-                    *this.state = match &channel.connection {
-                        Some(_) => ServerConnectionState::Connected,
-                        None => match channel.server.poll_accept(cx) {
-                            Poll::Ready(Some(conn)) => {
-                                channel.connection = Some(conn);
-                                ServerConnectionState::Connected
-                            }
-                            Poll::Ready(None) => {
-                                return Poll::Ready(Err(s2n_quic::connection::Error::closed(
-                                    Location::Local,
-                                )));
-                            }
-                            Poll::Pending => return Poll::Pending,
-                        },
-                    };
-                    continue;
-                }
-                ServerConnectionState::Connected => {
-                    let mut lock = this.channel.lock().unwrap();
-                    let conn = lock.connection.as_mut().unwrap();
-                    match conn.poll_accept_bidirectional_stream(cx) {
-                        Poll::Ready(res) => {
-                            *this.state = ServerConnectionState::Final;
-                            Poll::Ready(match res {
-                                Ok(Some(stream)) => Ok(wrap_bidi_stream(stream)),
-                                Ok(None) => panic!(),
-                                Err(e) => {
-                                    this.channel.lock().unwrap().connection = None;
-                                    Err(e)
-                                }
-                            })
-                        }
-                        Poll::Pending => Poll::Pending,
-                    }
-                }
-                ServerConnectionState::Final => Poll::Pending,
-            };
-        }
+        let res = ready!(self.project().inner.poll_unpin(cx)).unwrap()?;
+        Poll::Ready(Ok(wrap_bidi_stream(res)))
     }
 }
 
@@ -356,10 +282,11 @@ impl<In: RpcMessage + Sync, Out: RpcMessage + Sync> crate::ClientChannel<In, Out
     for self::ClientChannel<In, Out>
 {
     fn open_bi(&self) -> OpenBiFuture<'_, In, Out> {
+        let (tx, rx) = oneshot::channel();
+        self.0.send.send(tx).unwrap();
         OpenBiFuture {
-            channel: &self.0,
-            state: ClientConnectionState::Initial,
             p: PhantomData,
+            inner: rx,
         }
     }
 }
@@ -369,8 +296,7 @@ impl<In: RpcMessage + Sync, Out: RpcMessage + Sync> crate::ServerChannel<In, Out
 {
     fn accept_bi(&self) -> AcceptBiFuture<'_, In, Out> {
         AcceptBiFuture {
-            channel: &self.inner,
-            state: ServerConnectionState::Initial,
+            inner: self.inner.recv.recv_async(),
             p: PhantomData,
         }
     }
