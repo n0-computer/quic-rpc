@@ -1,78 +1,207 @@
 //! QUIC channel implementation based on quinn
 use crate::{LocalAddr, RpcMessage};
+use futures::channel::oneshot;
 use futures::{Future, FutureExt, Sink, SinkExt, Stream, StreamExt};
 use pin_project::pin_project;
 use serde::{de::DeserializeOwned, Serialize};
 use std::net::SocketAddr;
+use std::sync::Arc;
+use std::task::{self, ready, Poll};
 use std::{fmt, io, marker::PhantomData, pin::Pin, result};
 use tokio_serde::{formats::SymmetricalBincode, SymmetricallyFramed};
 use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
 
 type Socket<In, Out> = (SendSink<Out>, RecvStream<In>);
 
+#[derive(Debug)]
+struct ServerChannelInner {
+    endpoint: quinn::Endpoint,
+    task: Option<tokio::task::JoinHandle<result::Result<(), flume::SendError<SocketInner>>>>,
+    local_addr: [LocalAddr; 1],
+    receiver: flume::Receiver<SocketInner>,
+}
+
+impl Drop for ServerChannelInner {
+    fn drop(&mut self) {
+        self.endpoint.close(0u32.into(), b"server channel dropped");
+        // this should not be necessary, since the task would terminate when the receiver is dropped.
+        // but just to be on the safe side.
+        if let Some(task) = self.task.take() {
+            task.abort()
+        }
+    }
+}
+
 /// A server channel using a quinn connection
 #[derive(Debug)]
 pub struct QuinnServerChannel<In: RpcMessage, Out: RpcMessage> {
-    connection: quinn::Connection,
-    local_addr: [LocalAddr; 1],
+    inner: Arc<ServerChannelInner>,
     _phantom: PhantomData<(In, Out)>,
 }
 
 impl<In: RpcMessage, Out: RpcMessage> QuinnServerChannel<In, Out> {
-    /// Create a new channel
-    pub fn new(conn: quinn::Connection, local_addr: SocketAddr) -> Self {
-        Self {
-            connection: conn,
-            local_addr: [LocalAddr::Socket(local_addr)],
-            _phantom: PhantomData,
+    async fn connection_handler(
+        endpoint: quinn::Endpoint,
+        sender: flume::Sender<SocketInner>,
+    ) -> result::Result<(), flume::SendError<SocketInner>> {
+        loop {
+            let conn = match endpoint.accept().await {
+                Some(connecting) => connecting,
+                None => break,
+            };
+            let conection = match conn.await {
+                Ok(conection) => conection,
+                Err(e) => {
+                    tracing::warn!("Error accepting connection: {}", e);
+                    continue;
+                }
+            };
+            loop {
+                let bidi_stream = match conection.open_bi().await {
+                    Ok(bidi_stream) => bidi_stream,
+                    Err(quinn::ConnectionError::ApplicationClosed(e)) => {
+                        tracing::info!("Peer closed the connection {:?}", e);
+                        continue;
+                    }
+                    Err(e) => {
+                        tracing::warn!("Error opening stream: {}", e);
+                        continue;
+                    }
+                };
+                sender.send_async(bidi_stream).await?;
+            }
         }
+        Ok(())
+    }
+
+    /// Create a new server channel, given a quinn endpoint.
+    pub fn new(endpoint: quinn::Endpoint) -> io::Result<Self> {
+        let local_addr = endpoint.local_addr()?;
+        let (sender, receiver) = flume::bounded(16);
+        let task = tokio::spawn(Self::connection_handler(endpoint.clone(), sender));
+        Ok(Self {
+            inner: Arc::new(ServerChannelInner {
+                endpoint,
+                task: Some(task),
+                local_addr: [LocalAddr::Socket(local_addr)],
+                receiver,
+            }),
+            _phantom: PhantomData,
+        })
     }
 }
-
-// impl<In: RpcMessage, Out: RpcMessage> fmt::Debug for ServerChannel<In, Out> {
-//     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-//         f.debug_tuple("ServerChannel")
-//             .field(&self.0)
-//             .field(&self.1)
-//             .finish()
-//     }
-// }
 
 impl<In: RpcMessage, Out: RpcMessage> Clone for QuinnServerChannel<In, Out> {
     fn clone(&self) -> Self {
         Self {
-            connection: self.connection.clone(),
-            local_addr: self.local_addr.clone(),
+            inner: self.inner.clone(),
             _phantom: PhantomData,
         }
     }
 }
 
-/// A server channel using a quinn connection
-pub struct QuinnClientChannel<In: RpcMessage, Out: RpcMessage>(
-    quinn::Connection,
-    PhantomData<(In, Out)>,
-);
+type SocketInner = (quinn::SendStream, quinn::RecvStream);
+
+#[derive(Debug)]
+struct ClientChannelInner {
+    /// The quinn endpoint, we just keep a clone of this for information
+    endpoint: quinn::Endpoint,
+    /// The task that handles creating new connections
+    task: tokio::task::JoinHandle<result::Result<(), flume::RecvError>>,
+    /// The channel to receive new connections
+    sender: flume::Sender<oneshot::Sender<SocketInner>>,
+}
+
+/// A client channel using a quinn connection
+pub struct QuinnClientChannel<In: RpcMessage, Out: RpcMessage> {
+    inner: Arc<ClientChannelInner>,
+    _phantom: PhantomData<(In, Out)>,
+}
 
 impl<In: RpcMessage, Out: RpcMessage> QuinnClientChannel<In, Out> {
+    /// Client connection handler.
+    ///
+    /// It will run until the send side of the channel is dropped.
+    /// All other errors are logged and handled internally.
+    /// It will try to keep a connection open at all times.
+    async fn connection_handler(
+        endpoint: quinn::Endpoint,
+        addr: SocketAddr,
+        name: String,
+        requests: flume::Receiver<oneshot::Sender<SocketInner>>,
+    ) -> result::Result<(), flume::RecvError> {
+        'outer: loop {
+            tracing::info!("connecting to {} as {}", addr, name);
+            let connecting = match endpoint.connect(addr, &name) {
+                Ok(connecting) => connecting,
+                Err(e) => {
+                    tracing::warn!("error calling connect: {}", e);
+                    // try again. Maybe delay?
+                    continue;
+                }
+            };
+            let connection = match connecting.await {
+                Ok(connection) => connection,
+                Err(e) => {
+                    tracing::warn!("error awaiting connect: {}", e);
+                    // try again. Maybe delay?
+                    continue;
+                }
+            };
+            loop {
+                let request = requests.recv_async().await?;
+                match connection.open_bi().await {
+                    Ok((send, recv)) => {
+                        tracing::debug!("connection established");
+                        if let Err(_) = request.send((send, recv)) {
+                            tracing::debug!("requester dropped");
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!("error opening bi stream: {}", e);
+                        tracing::warn!("recreating connection");
+                        // try again. Maybe delay?
+                        continue 'outer;
+                    }
+                }
+            }
+        }
+    }
+
     /// Create a new channel
-    pub fn new(conn: quinn::Connection) -> Self {
-        Self(conn, PhantomData)
+    pub fn new(endpoint: quinn::Endpoint, addr: SocketAddr, name: String) -> Self {
+        let (sender, receiver) = flume::bounded(4);
+        let task = tokio::spawn(Self::connection_handler(
+            endpoint.clone(),
+            addr,
+            name,
+            receiver,
+        ));
+        Self {
+            inner: Arc::new(ClientChannelInner {
+                endpoint,
+                task,
+                sender,
+            }),
+            _phantom: PhantomData,
+        }
     }
 }
 
 impl<In: RpcMessage, Out: RpcMessage> fmt::Debug for QuinnClientChannel<In, Out> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_tuple("ClientChannel")
-            .field(&self.0)
-            .field(&self.1)
+        f.debug_struct("ClientChannel")
+            .field("inner", &self.inner)
             .finish()
     }
 }
 
 impl<In: RpcMessage, Out: RpcMessage> Clone for QuinnClientChannel<In, Out> {
     fn clone(&self) -> Self {
-        Self(self.0.clone(), PhantomData)
+        Self {
+            inner: self.inner.clone(),
+            _phantom: PhantomData,
+        }
     }
 }
 
@@ -152,34 +281,36 @@ pub struct QuinnChannelTypes;
 
 /// Future returned by open_bi
 #[pin_project]
-pub struct OpenBiFuture<'a, In, Out>(#[pin] quinn::OpenBi<'a>, PhantomData<(In, Out)>);
+pub struct OpenBiFuture<'a, In, Out>(
+    #[pin] oneshot::Receiver<SocketInner>,
+    PhantomData<&'a (In, Out)>,
+);
 
 impl<'a, In, Out> Future for OpenBiFuture<'a, In, Out> {
     type Output = result::Result<self::Socket<In, Out>, self::OpenBiError>;
 
-    fn poll(
-        self: Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Self::Output> {
-        self.project().0.poll_unpin(cx).map(|conn| {
-            let (send, recv) = conn?;
-            // turn chunks of bytes into a stream of messages using length delimited codec
-            let send = FramedWrite::new(send, LengthDelimitedCodec::new());
-            let recv = FramedRead::new(recv, LengthDelimitedCodec::new());
-            // now switch to streams of WantRequestUpdate and WantResponse
-            let recv = SymmetricallyFramed::new(recv, SymmetricalBincode::<In>::default());
-            let send = SymmetricallyFramed::new(send, SymmetricalBincode::<Out>::default());
-            // box so we don't have to write down the insanely long type
-            let send = SendSink(send);
-            let recv = RecvStream(recv);
-            Ok((send, recv))
-        })
+    fn poll(self: Pin<&mut Self>, cx: &mut task::Context<'_>) -> Poll<Self::Output> {
+        match ready!(self.project().0.poll_unpin(cx)) {
+            Ok((send, recv)) => {
+                // turn chunks of bytes into a stream of messages using length delimited codec
+                let send = FramedWrite::new(send, LengthDelimitedCodec::new());
+                let recv = FramedRead::new(recv, LengthDelimitedCodec::new());
+                // turn stream of messages into a stream of bincode encoded messages
+                let send = SymmetricallyFramed::new(send, SymmetricalBincode::default());
+                let recv = SymmetricallyFramed::new(recv, SymmetricalBincode::default());
+                Poll::Ready(Ok((SendSink(send), RecvStream(recv))))
+            }
+            Err(_) => Poll::Ready(Err(quinn::ConnectionError::LocallyClosed)),
+        }
     }
 }
 
 /// Future returned by accept_bi
 #[pin_project]
-pub struct AcceptBiFuture<'a, In, Out>(#[pin] quinn::AcceptBi<'a>, PhantomData<(In, Out)>);
+pub struct AcceptBiFuture<'a, In, Out>(
+    #[pin] flume::r#async::RecvFut<'a, SocketInner>,
+    PhantomData<(In, Out)>,
+);
 
 impl<'a, In, Out> Future for AcceptBiFuture<'a, In, Out> {
     type Output = result::Result<self::Socket<In, Out>, self::OpenBiError>;
@@ -189,7 +320,10 @@ impl<'a, In, Out> Future for AcceptBiFuture<'a, In, Out> {
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Self::Output> {
         self.project().0.poll_unpin(cx).map(|conn| {
-            let (send, recv) = conn?;
+            let (send, recv) = conn.map_err(|e| {
+                tracing::warn!("accept_bi: error receiving connection: {}", e);
+                quinn::ConnectionError::LocallyClosed
+            })?;
             // turn chunks of bytes into a stream of messages using length delimited codec
             let send = FramedWrite::new(send, LengthDelimitedCodec::new());
             let recv = FramedRead::new(recv, LengthDelimitedCodec::new());
@@ -233,7 +367,10 @@ impl<In: RpcMessage + Sync, Out: RpcMessage + Sync> crate::ClientChannel<In, Out
     for self::QuinnClientChannel<In, Out>
 {
     fn open_bi(&self) -> OpenBiFuture<'_, In, Out> {
-        OpenBiFuture(self.0.open_bi(), PhantomData)
+        let (sender, receiver) = oneshot::channel();
+        // todo: make this async
+        self.inner.sender.send(sender).unwrap();
+        OpenBiFuture(receiver, PhantomData)
     }
 }
 
@@ -241,11 +378,11 @@ impl<In: RpcMessage + Sync, Out: RpcMessage + Sync> crate::ServerChannel<In, Out
     for self::QuinnServerChannel<In, Out>
 {
     fn accept_bi(&self) -> AcceptBiFuture<'_, In, Out> {
-        AcceptBiFuture(self.connection.accept_bi(), PhantomData)
+        AcceptBiFuture(self.inner.receiver.recv_async(), PhantomData)
     }
 
     fn local_addr(&self) -> &[crate::LocalAddr] {
-        todo!()
+        &self.inner.local_addr
     }
 }
 
