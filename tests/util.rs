@@ -11,10 +11,10 @@ pub async fn check_termination_anyhow<C: ChannelTypes>(
             let err: RpcServerError<C> = e.downcast().context("unexpected termination result")?;
             match err {
                 RpcServerError::AcceptBiError(_) => {}
-                e => panic!("unexpected termination error {:?}", e),
+                e => panic!("unexpected termination error {e:?}"),
             }
         }
-        e => panic!("server should have terminated with an error {:?}", e),
+        e => panic!("server should have terminated with an error {e:?}"),
     }
     Ok(())
 }

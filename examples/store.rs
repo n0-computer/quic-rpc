@@ -208,13 +208,13 @@ async fn main() -> anyhow::Result<()> {
     // a rpc call
     println!("a rpc call");
     let res = client.rpc(Get([0u8; 32])).await?;
-    println!("{:?}", res);
+    println!("{res:?}");
 
     // server streaming call
     println!("a server streaming call");
     let mut s = client.server_streaming(GetFile([0u8; 32])).await?;
     while let Some(res) = s.next().await {
-        println!("{:?}", res);
+        println!("{res:?}");
     }
 
     // client streaming call
@@ -226,7 +226,7 @@ async fn main() -> anyhow::Result<()> {
         }
     });
     let res = recv.await?;
-    println!("{:?}", res);
+    println!("{res:?}");
 
     // bidi streaming call
     println!("a bidi streaming call");
@@ -237,7 +237,7 @@ async fn main() -> anyhow::Result<()> {
         }
     });
     while let Some(res) = recv.next().await {
-        println!("{:?}", res);
+        println!("{res:?}");
     }
 
     // dropping the client will cause the server to terminate
@@ -252,7 +252,7 @@ async fn _main_unsugared() -> anyhow::Result<()> {
         let (mut send, mut recv) = server.accept_bi().await?;
         while let Some(item) = recv.next().await {
             let item = item?;
-            println!("server got: {:?}", item);
+            println!("server got: {item:?}");
             send.send(item.to_string()).await?;
         }
         anyhow::Ok(())
@@ -261,7 +261,7 @@ async fn _main_unsugared() -> anyhow::Result<()> {
     let print_result_service = tokio::spawn(async move {
         while let Some(item) = recv.next().await {
             let item = item?;
-            println!("got result: {}", item);
+            println!("got result: {item}");
         }
         anyhow::Ok(())
     });

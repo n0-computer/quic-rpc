@@ -126,7 +126,7 @@ async fn main() -> anyhow::Result<()> {
         let mut client = client.clone();
         tokio::task::spawn(async move {
             let res = client.get(Get([0u8; 32])).await;
-            println!("rpc res [{i}]: {:?}", res);
+            println!("rpc res [{i}]: {res:?}");
         });
     }
 
@@ -134,7 +134,7 @@ async fn main() -> anyhow::Result<()> {
     println!("a server streaming call");
     let mut s = client.get_file(GetFile([0u8; 32])).await?;
     while let Some(res) = s.next().await {
-        println!("streaming res: {:?}", res);
+        println!("streaming res: {res:?}");
     }
 
     // client streaming call
@@ -146,7 +146,7 @@ async fn main() -> anyhow::Result<()> {
         }
     });
     let res = recv.await?;
-    println!("client stremaing res: {:?}", res);
+    println!("client stremaing res: {res:?}");
 
     // bidi streaming call
     println!("a bidi streaming call");
@@ -157,7 +157,7 @@ async fn main() -> anyhow::Result<()> {
         }
     });
     while let Some(res) = recv.next().await {
-        println!("bidi res: {:?}", res);
+        println!("bidi res: {res:?}");
     }
 
     // dropping the client will cause the server to terminate

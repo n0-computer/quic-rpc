@@ -14,7 +14,7 @@ async fn mem_channel_bench() -> anyhow::Result<()> {
     // dropping the client will cause the server to terminate
     match server_handle.await? {
         Err(RpcServerError::AcceptBiError(_)) => {}
-        e => panic!("unexpected termination result {:?}", e),
+        e => panic!("unexpected termination result {e:?}"),
     }
     Ok(())
 }
@@ -31,7 +31,7 @@ async fn mem_channel_smoke() -> anyhow::Result<()> {
     // dropping the client will cause the server to terminate
     match server_handle.await? {
         Err(RpcServerError::AcceptBiError(_)) => {}
-        e => panic!("unexpected termination result {:?}", e),
+        e => panic!("unexpected termination result {e:?}"),
     }
     Ok(())
 }

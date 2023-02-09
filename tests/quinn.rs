@@ -4,7 +4,6 @@ use std::{
     sync::Arc,
 };
 
-use anyhow::Context;
 use quic_rpc::{transport::QuinnChannelTypes, RpcClient, RpcServer};
 use quinn::{ClientConfig, Endpoint, ServerConfig};
 use tokio::task::JoinHandle;
@@ -12,7 +11,6 @@ use tokio::task::JoinHandle;
 mod math;
 use math::*;
 mod util;
-use util::*;
 
 /// Constructs a QUIC endpoint configured for use a client only.
 ///

@@ -21,7 +21,7 @@ impl std::error::Error for WriteError {}
 
 impl From<anyhow::Error> for WriteError {
     fn from(e: anyhow::Error) -> Self {
-        WriteError(format!("{:?}", e))
+        WriteError(format!("{e:?}"))
     }
 }
 

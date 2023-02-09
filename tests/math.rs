@@ -201,7 +201,7 @@ impl ComputeService {
             .buffer_unordered(parallelism)
             .for_each(|x| async move {
                 if let Err(e) = x {
-                    eprintln!("error: {:?}", e);
+                    eprintln!("error: {e:?}");
                 }
             })
             .await;
