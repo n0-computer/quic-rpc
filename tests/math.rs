@@ -214,10 +214,13 @@ pub async fn smoke_test<C: ChannelTypes>(
 ) -> anyhow::Result<()> {
     let client = RpcClient::<ComputeService, C>::new(client);
     // a rpc call
+    tracing::info!("calling rpc S(1234)");
     let res = client.rpc(Sqr(1234)).await?;
+    tracing::info!("got response {:?}", res);
     assert_eq!(res, SqrResponse(1522756));
 
     // client streaming call
+    tracing::info!("calling client_streaming Sum");
     let (mut send, recv) = client.client_streaming(Sum).await?;
     tokio::task::spawn(async move {
         for i in 1..=3 {
@@ -226,14 +229,18 @@ pub async fn smoke_test<C: ChannelTypes>(
         Ok::<_, C::SendError>(())
     });
     let res = recv.await?;
+    tracing::info!("got response {:?}", res);
     assert_eq!(res, SumResponse(6));
 
     // server streaming call
+    tracing::info!("calling server_streaming Fibonacci(10)");
     let s = client.server_streaming(Fibonacci(10)).await?;
     let res = s.map_ok(|x| x.0).try_collect::<Vec<_>>().await?;
+    tracing::info!("got response {:?}", res);
     assert_eq!(res, vec![0, 1, 1, 2, 3, 5, 8, 13, 21, 34]);
 
     // bidi streaming call
+    tracing::info!("calling bidi Multiply(2)");
     let (mut send, recv) = client.bidi(Multiply(2)).await?;
     tokio::task::spawn(async move {
         for i in 1..=3 {
@@ -242,7 +249,10 @@ pub async fn smoke_test<C: ChannelTypes>(
         Ok::<_, C::SendError>(())
     });
     let res = recv.map_ok(|x| x.0).try_collect::<Vec<_>>().await?;
+    tracing::info!("got response {:?}", res);
     assert_eq!(res, vec![2, 4, 6]);
+
+    tracing::info!("dropping client!");
     Ok(())
 }
 

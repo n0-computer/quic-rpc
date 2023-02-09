@@ -94,36 +94,37 @@ pub fn make_endpoints() -> anyhow::Result<Endpoints> {
 
 fn run_server(server: quinn::Endpoint) -> JoinHandle<anyhow::Result<()>> {
     tokio::task::spawn(async move {
-        let local_addr = server.local_addr()?;
-        let conn = server.accept().await.context("accept failed")?.await?;
-        let connection = quic_rpc::transport::quinn::QuinnServerChannel::new(conn, local_addr);
+        let connection = quic_rpc::transport::quinn::QuinnServerChannel::new(server)?;
         let server = RpcServer::<ComputeService, QuinnChannelTypes>::new(connection);
         ComputeService::server(server).await?;
         anyhow::Ok(())
     })
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn quinn_channel_bench() -> anyhow::Result<()> {
+    tracing_subscriber::fmt::try_init().ok();
     type C = QuinnChannelTypes;
     let Endpoints {
         client,
         server,
         server_addr,
     } = make_endpoints()?;
+    tracing::info!("Starting server");
     let server_handle = run_server(server);
-    let client = client.connect(server_addr, "localhost")?.await?;
-    let client = quic_rpc::transport::quinn::QuinnClientChannel::new(client);
+    tracing::info!("Starting client");
+    let client = quic_rpc::transport::quinn::QuinnClientChannel::new(client, server_addr, "localhost".into());
     let client = RpcClient::<ComputeService, C>::new(client);
+    tracing::info!("Starting benchmark");
     bench(client, 50000).await?;
-    println!("waiting for server");
-    check_termination_anyhow::<C>(server_handle).await?;
+    server_handle.abort();
     Ok(())
 }
 
 #[tokio::test]
 #[ignore]
 async fn quinn_channel_smoke() -> anyhow::Result<()> {
+    tracing_subscriber::fmt::try_init().ok();
     type C = QuinnChannelTypes;
     let Endpoints {
         client,
@@ -131,9 +132,8 @@ async fn quinn_channel_smoke() -> anyhow::Result<()> {
         server_addr,
     } = make_endpoints()?;
     let server_handle = run_server(server);
-    let client_connection = client.connect(server_addr, "localhost")?.await?;
-    let client_connection = quic_rpc::transport::quinn::QuinnClientChannel::new(client_connection);
+    let client_connection = quic_rpc::transport::quinn::QuinnClientChannel::new(client, server_addr, "localhost".into());
     smoke_test::<C>(client_connection).await?;
-    check_termination_anyhow::<C>(server_handle).await?;
+    server_handle.abort();
     Ok(())
 }

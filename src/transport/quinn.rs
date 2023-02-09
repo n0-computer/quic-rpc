@@ -44,12 +44,14 @@ impl<In: RpcMessage, Out: RpcMessage> QuinnServerChannel<In, Out> {
         endpoint: quinn::Endpoint,
         sender: flume::Sender<SocketInner>,
     ) -> result::Result<(), flume::SendError<SocketInner>> {
-        loop {
-            let conn = match endpoint.accept().await {
+        'outer: loop {
+            tracing::info!("Waiting for incoming connection...");
+            let connecting = match endpoint.accept().await {
                 Some(connecting) => connecting,
                 None => break,
             };
-            let conection = match conn.await {
+            tracing::info!("Awaiting connection from connect...");
+            let conection = match connecting.await {
                 Ok(conection) => conection,
                 Err(e) => {
                     tracing::warn!("Error accepting connection: {}", e);
@@ -57,17 +59,19 @@ impl<In: RpcMessage, Out: RpcMessage> QuinnServerChannel<In, Out> {
                 }
             };
             loop {
-                let bidi_stream = match conection.open_bi().await {
+                tracing::debug!("Awaiting incoming bidi substream on existing connection...");
+                let bidi_stream = match conection.accept_bi().await {
                     Ok(bidi_stream) => bidi_stream,
                     Err(quinn::ConnectionError::ApplicationClosed(e)) => {
                         tracing::info!("Peer closed the connection {:?}", e);
-                        continue;
+                        continue 'outer;
                     }
                     Err(e) => {
                         tracing::warn!("Error opening stream: {}", e);
-                        continue;
+                        continue 'outer;
                     }
                 };
+                tracing::debug!("Sending substream to be handled... {}", bidi_stream.0.id());
                 sender.send_async(bidi_stream).await?;
             }
         }
@@ -107,9 +111,21 @@ struct ClientChannelInner {
     /// The quinn endpoint, we just keep a clone of this for information
     endpoint: quinn::Endpoint,
     /// The task that handles creating new connections
-    task: tokio::task::JoinHandle<result::Result<(), flume::RecvError>>,
+    task: Option<tokio::task::JoinHandle<()>>,
     /// The channel to receive new connections
     sender: flume::Sender<oneshot::Sender<SocketInner>>,
+}
+
+impl Drop for ClientChannelInner {
+    fn drop(&mut self) {
+        tracing::debug!("Dropping client channel");
+        self.endpoint.close(0u32.into(), b"client channel dropped");
+        // this should not be necessary, since the task would terminate when the receiver is dropped.
+        // but just to be on the safe side.
+        if let Some(task) = self.task.take() {
+            task.abort();
+        }
+    }
 }
 
 /// A client channel using a quinn connection
@@ -124,14 +140,14 @@ impl<In: RpcMessage, Out: RpcMessage> QuinnClientChannel<In, Out> {
     /// It will run until the send side of the channel is dropped.
     /// All other errors are logged and handled internally.
     /// It will try to keep a connection open at all times.
-    async fn connection_handler(
+    async fn connection_handler_inner(
         endpoint: quinn::Endpoint,
         addr: SocketAddr,
         name: String,
         requests: flume::Receiver<oneshot::Sender<SocketInner>>,
     ) -> result::Result<(), flume::RecvError> {
         'outer: loop {
-            tracing::info!("connecting to {} as {}", addr, name);
+            tracing::info!("Connecting to {} as {}", addr, name);
             let connecting = match endpoint.connect(addr, &name) {
                 Ok(connecting) => connecting,
                 Err(e) => {
@@ -149,22 +165,37 @@ impl<In: RpcMessage, Out: RpcMessage> QuinnClientChannel<In, Out> {
                 }
             };
             loop {
+                tracing::debug!("Awaiting request for new bidi substream...");
                 let request = requests.recv_async().await?;
+                tracing::debug!("Got request for new bidi substream");
                 match connection.open_bi().await {
-                    Ok((send, recv)) => {
-                        tracing::debug!("connection established");
-                        if let Err(_) = request.send((send, recv)) {
+                    Ok(pair) => {
+                        tracing::debug!("Bidi substream opened");
+                        if request.send(pair).is_err() {
                             tracing::debug!("requester dropped");
                         }
                     }
                     Err(e) => {
-                        tracing::warn!("error opening bi stream: {}", e);
+                        tracing::warn!("error opening bidi substream: {}", e);
                         tracing::warn!("recreating connection");
                         // try again. Maybe delay?
                         continue 'outer;
                     }
                 }
             }
+        }
+    }
+
+    async fn connection_handler(
+        endpoint: quinn::Endpoint,
+        addr: SocketAddr,
+        name: String,
+        requests: flume::Receiver<oneshot::Sender<SocketInner>>
+    ) {
+        if let Err(res) = Self::connection_handler_inner(endpoint, addr, name, requests).await {
+            tracing::info!("Connection handler finished: {:?}", res);
+        } else {
+            unreachable!()
         }
     }
 
@@ -180,7 +211,7 @@ impl<In: RpcMessage, Out: RpcMessage> QuinnClientChannel<In, Out> {
         Self {
             inner: Arc::new(ClientChannelInner {
                 endpoint,
-                task,
+                task: Some(task),
                 sender,
             }),
             _phantom: PhantomData,
