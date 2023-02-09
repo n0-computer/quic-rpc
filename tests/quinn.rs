@@ -101,7 +101,8 @@ fn run_server(server: quinn::Endpoint) -> JoinHandle<anyhow::Result<()>> {
     })
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+// #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[tokio::test]
 async fn quinn_channel_bench() -> anyhow::Result<()> {
     tracing_subscriber::fmt::try_init().ok();
     type C = QuinnChannelTypes;

@@ -1,6 +1,7 @@
 //! QUIC channel implementation based on quinn
 use crate::{LocalAddr, RpcMessage};
 use futures::channel::oneshot;
+use futures::future::BoxFuture;
 use futures::{Future, FutureExt, Sink, SinkExt, Stream, StreamExt};
 use pin_project::pin_project;
 use serde::{de::DeserializeOwned, Serialize};
@@ -201,7 +202,7 @@ impl<In: RpcMessage, Out: RpcMessage> QuinnClientChannel<In, Out> {
 
     /// Create a new channel
     pub fn new(endpoint: quinn::Endpoint, addr: SocketAddr, name: String) -> Self {
-        let (sender, receiver) = flume::bounded(4);
+        let (sender, receiver) = flume::bounded(16);
         let task = tokio::spawn(Self::connection_handler(
             endpoint.clone(),
             addr,
@@ -313,7 +314,7 @@ pub struct QuinnChannelTypes;
 /// Future returned by open_bi
 #[pin_project]
 pub struct OpenBiFuture<'a, In, Out>(
-    #[pin] oneshot::Receiver<SocketInner>,
+    #[pin] BoxFuture<'a, Result<SocketInner, quinn::ConnectionError>>,
     PhantomData<&'a (In, Out)>,
 );
 
@@ -398,10 +399,11 @@ impl<In: RpcMessage + Sync, Out: RpcMessage + Sync> crate::ClientChannel<In, Out
     for self::QuinnClientChannel<In, Out>
 {
     fn open_bi(&self) -> OpenBiFuture<'_, In, Out> {
-        let (sender, receiver) = oneshot::channel();
-        // todo: make this async
-        self.inner.sender.send(sender).unwrap();
-        OpenBiFuture(receiver, PhantomData)
+        OpenBiFuture(async move {
+            let (sender, receiver) = oneshot::channel();
+            self.inner.sender.send_async(sender).await.map_err(|_| quinn::ConnectionError::LocallyClosed)?;
+            receiver.await.map_err(|_| quinn::ConnectionError::LocallyClosed)
+        }.boxed(), PhantomData)
     }
 }
 
