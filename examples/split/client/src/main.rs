@@ -11,9 +11,14 @@ types::create_compute_client!(ComputeClient);
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    tracing_subscriber::fmt::init();
     let server_addr: SocketAddr = "127.0.0.1:12345".parse()?;
     let endpoint = make_insecure_client_endpoint("0.0.0.0:0".parse()?)?;
-    let client = quic_rpc::transport::quinn::QuinnClientChannel::new(endpoint, server_addr, "localhost".to_string());
+    let client = quic_rpc::transport::quinn::QuinnClientChannel::new(
+        endpoint,
+        server_addr,
+        "localhost".to_string(),
+    );
     let client = RpcClient::<ComputeService, QuinnChannelTypes>::new(client);
     let mut client = ComputeClient(client);
 

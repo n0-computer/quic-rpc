@@ -91,6 +91,7 @@ dependencies = [
  "rustls",
  "serde",
  "tokio",
+ "tracing-subscriber",
  "types",
 ]
 
@@ -884,6 +885,7 @@ dependencies = [
  "rustls",
  "serde",
  "tokio",
+ "tracing-subscriber",
  "types",
 ]
 

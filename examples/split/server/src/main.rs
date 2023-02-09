@@ -1,4 +1,3 @@
-use anyhow::Context;
 use async_stream::stream;
 use futures::stream::{Stream, StreamExt};
 use quic_rpc::{server::run_server_loop, transport::QuinnChannelTypes};
@@ -59,6 +58,7 @@ impl Compute {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    tracing_subscriber::fmt::init();
     let server_addr: SocketAddr = "127.0.0.1:12345".parse()?;
     let (server, _server_certs) = make_server_endpoint(server_addr)?;
     let channel = quic_rpc::transport::quinn::QuinnServerChannel::new(server)?;

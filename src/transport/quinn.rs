@@ -16,17 +16,17 @@ type Socket<In, Out> = (SendSink<Out>, RecvStream<In>);
 
 #[derive(Debug)]
 struct ServerChannelInner {
-    endpoint: quinn::Endpoint,
-    task: Option<tokio::task::JoinHandle<result::Result<(), flume::SendError<SocketInner>>>>,
+    endpoint: Option<quinn::Endpoint>,
+    task: Option<tokio::task::JoinHandle<()>>,
     local_addr: [LocalAddr; 1],
     receiver: flume::Receiver<SocketInner>,
 }
 
 impl Drop for ServerChannelInner {
     fn drop(&mut self) {
-        self.endpoint.close(0u32.into(), b"server channel dropped");
-        // this should not be necessary, since the task would terminate when the receiver is dropped.
-        // but just to be on the safe side.
+        if let Some(endpoint) = self.endpoint.take() {
+            endpoint.close(0u32.into(), b"server channel dropped");
+        }
         if let Some(task) = self.task.take() {
             task.abort()
         }
@@ -41,11 +41,33 @@ pub struct QuinnServerChannel<In: RpcMessage, Out: RpcMessage> {
 }
 
 impl<In: RpcMessage, Out: RpcMessage> QuinnServerChannel<In, Out> {
-    async fn connection_handler(
-        endpoint: quinn::Endpoint,
-        sender: flume::Sender<SocketInner>,
-    ) -> result::Result<(), flume::SendError<SocketInner>> {
-        'outer: loop {
+    /// handles RPC requests from a connection
+    ///
+    /// to cleanly shutdown the handler, drop the receiver side of the sender.
+    async fn connection_handler(connection: quinn::Connection, sender: flume::Sender<SocketInner>) {
+        loop {
+            tracing::debug!("Awaiting incoming bidi substream on existing connection...");
+            let bidi_stream = match connection.accept_bi().await {
+                Ok(bidi_stream) => bidi_stream,
+                Err(quinn::ConnectionError::ApplicationClosed(e)) => {
+                    tracing::debug!("Peer closed the connection {:?}", e);
+                    break;
+                }
+                Err(e) => {
+                    tracing::debug!("Error opening stream: {}", e);
+                    break;
+                }
+            };
+            tracing::debug!("Sending substream to be handled... {}", bidi_stream.0.id());
+            if sender.send_async(bidi_stream).await.is_err() {
+                tracing::debug!("Receiver dropped");
+                break;
+            }
+        }
+    }
+
+    async fn endpoint_handler(endpoint: quinn::Endpoint, sender: flume::Sender<SocketInner>) {
+        loop {
             tracing::info!("Waiting for incoming connection...");
             let connecting = match endpoint.accept().await {
                 Some(connecting) => connecting,
@@ -59,40 +81,79 @@ impl<In: RpcMessage, Out: RpcMessage> QuinnServerChannel<In, Out> {
                     continue;
                 }
             };
-            loop {
-                tracing::debug!("Awaiting incoming bidi substream on existing connection...");
-                let bidi_stream = match conection.accept_bi().await {
-                    Ok(bidi_stream) => bidi_stream,
-                    Err(quinn::ConnectionError::ApplicationClosed(e)) => {
-                        tracing::info!("Peer closed the connection {:?}", e);
-                        continue 'outer;
-                    }
-                    Err(e) => {
-                        tracing::warn!("Error opening stream: {}", e);
-                        continue 'outer;
-                    }
-                };
-                tracing::debug!("Sending substream to be handled... {}", bidi_stream.0.id());
-                sender.send_async(bidi_stream).await?;
-            }
+            tracing::info!(
+                "Connection established from {:?}",
+                conection.remote_address()
+            );
+            tracing::info!("Spawning connection handler...");
+            tokio::spawn(Self::connection_handler(conection, sender.clone()));
         }
-        Ok(())
     }
 
     /// Create a new server channel, given a quinn endpoint.
+    ///
+    /// The endpoint must be a server endpoint.
+    ///
+    /// The server channel will take care of listening on the endpoint and spawning
+    /// handlers for new connections.
     pub fn new(endpoint: quinn::Endpoint) -> io::Result<Self> {
         let local_addr = endpoint.local_addr()?;
         let (sender, receiver) = flume::bounded(16);
-        let task = tokio::spawn(Self::connection_handler(endpoint.clone(), sender));
+        let task = tokio::spawn(Self::endpoint_handler(endpoint.clone(), sender));
         Ok(Self {
             inner: Arc::new(ServerChannelInner {
-                endpoint,
+                endpoint: Some(endpoint),
                 task: Some(task),
                 local_addr: [LocalAddr::Socket(local_addr)],
                 receiver,
             }),
             _phantom: PhantomData,
         })
+    }
+
+    /// Create a new server channel, given just a source of incoming connections
+    ///
+    /// This is useful if you want to manage the quinn endpoint yourself,
+    /// use multiple endpoints, or use an endpoint for multiple protocols.
+    pub fn handle_connections(
+        incoming: flume::Receiver<quinn::Connection>,
+        local_addr: SocketAddr,
+    ) -> Self {
+        let (sender, receiver) = flume::bounded(16);
+        let task = tokio::spawn(async move {
+            // just grab all connections and spawn a handler for each one
+            while let Ok(connection) = incoming.recv_async().await {
+                tokio::spawn(Self::connection_handler(connection, sender.clone()));
+            }
+        });
+        Self {
+            inner: Arc::new(ServerChannelInner {
+                endpoint: None,
+                task: Some(task),
+                local_addr: [LocalAddr::Socket(local_addr)],
+                receiver,
+            }),
+            _phantom: PhantomData,
+        }
+    }
+
+    /// Create a new server channel, given just a source of incoming substreams
+    ///
+    /// This is useful if you want to manage the quinn endpoint yourself,
+    /// use multiple endpoints, or use an endpoint for multiple protocols.
+    pub fn handle_substreams(
+        receiver: flume::Receiver<SocketInner>,
+        local_addr: SocketAddr,
+    ) -> Self {
+        Self {
+            inner: Arc::new(ServerChannelInner {
+                endpoint: None,
+                task: None,
+                local_addr: [LocalAddr::Socket(local_addr)],
+                receiver,
+            }),
+            _phantom: PhantomData,
+        }
     }
 }
 
@@ -110,7 +171,7 @@ type SocketInner = (quinn::SendStream, quinn::RecvStream);
 #[derive(Debug)]
 struct ClientChannelInner {
     /// The quinn endpoint, we just keep a clone of this for information
-    endpoint: quinn::Endpoint,
+    endpoint: Option<quinn::Endpoint>,
     /// The task that handles creating new connections
     task: Option<tokio::task::JoinHandle<()>>,
     /// The channel to receive new connections
@@ -120,7 +181,9 @@ struct ClientChannelInner {
 impl Drop for ClientChannelInner {
     fn drop(&mut self) {
         tracing::debug!("Dropping client channel");
-        self.endpoint.close(0u32.into(), b"client channel dropped");
+        if let Some(endpoint) = self.endpoint.take() {
+            endpoint.close(0u32.into(), b"client channel dropped");
+        }
         // this should not be necessary, since the task would terminate when the receiver is dropped.
         // but just to be on the safe side.
         if let Some(task) = self.task.take() {
@@ -191,7 +254,7 @@ impl<In: RpcMessage, Out: RpcMessage> QuinnClientChannel<In, Out> {
         endpoint: quinn::Endpoint,
         addr: SocketAddr,
         name: String,
-        requests: flume::Receiver<oneshot::Sender<SocketInner>>
+        requests: flume::Receiver<oneshot::Sender<SocketInner>>,
     ) {
         if let Err(res) = Self::connection_handler_inner(endpoint, addr, name, requests).await {
             tracing::info!("Connection handler finished: {:?}", res);
@@ -211,7 +274,7 @@ impl<In: RpcMessage, Out: RpcMessage> QuinnClientChannel<In, Out> {
         ));
         Self {
             inner: Arc::new(ClientChannelInner {
-                endpoint,
+                endpoint: Some(endpoint),
                 task: Some(task),
                 sender,
             }),
@@ -399,11 +462,21 @@ impl<In: RpcMessage + Sync, Out: RpcMessage + Sync> crate::ClientChannel<In, Out
     for self::QuinnClientChannel<In, Out>
 {
     fn open_bi(&self) -> OpenBiFuture<'_, In, Out> {
-        OpenBiFuture(async move {
-            let (sender, receiver) = oneshot::channel();
-            self.inner.sender.send_async(sender).await.map_err(|_| quinn::ConnectionError::LocallyClosed)?;
-            receiver.await.map_err(|_| quinn::ConnectionError::LocallyClosed)
-        }.boxed(), PhantomData)
+        OpenBiFuture(
+            async move {
+                let (sender, receiver) = oneshot::channel();
+                self.inner
+                    .sender
+                    .send_async(sender)
+                    .await
+                    .map_err(|_| quinn::ConnectionError::LocallyClosed)?;
+                receiver
+                    .await
+                    .map_err(|_| quinn::ConnectionError::LocallyClosed)
+            }
+            .boxed(),
+            PhantomData,
+        )
     }
 }
 
