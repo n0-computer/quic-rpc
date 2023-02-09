@@ -24,7 +24,7 @@ pub struct RpcServer<S, C> {
     p: PhantomData<S>,
 }
 
-impl<S: Service, C: SubstreamErrors> Clone for RpcServer<S, C> {
+impl<S, C: Clone> Clone for RpcServer<S, C> {
     fn clone(&self) -> Self {
         Self {
             source: self.source.clone(),

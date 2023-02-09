@@ -10,6 +10,7 @@ use futures::{
     TryFutureExt,
 };
 use pin_project::pin_project;
+use tokio::io::{AsyncRead, AsyncWrite};
 use std::{
     error,
     fmt::{self, Debug},
@@ -19,8 +20,22 @@ use std::{
     task::{Context, Poll},
 };
 
+/// A source of bidirectional channels
+///
+/// Both the server and the client can be thought as a source of channels.
+/// On the client, acquiring channels means opening connections.
+/// On the server, acquiring channels means accepting connections.
+pub trait ChannelSource: Debug {
+    type OpenError: RpcError;
+    type Channel: AsyncRead + AsyncWrite + Unpin + Send + 'static;
+    type ChannelFut<'a>: Future<Output = Result<Self::Channel, Self::OpenError>> + 'a
+    where
+        Self: 'a;
+    fn next(&self) -> Self::ChannelFut<'_>;
+}
+
 /// Errors that can happen when creating and using a substream
-pub trait SubstreamErrors: Debug + Clone {
+pub trait SubstreamErrors: Debug {
     /// Error when sending messages
     type SendError: RpcError;
     /// Error when receiving messages
@@ -29,32 +44,42 @@ pub trait SubstreamErrors: Debug + Clone {
     type OpenError: RpcError;
 }
 
-/// A soucre of substreams
+/// A source of substreams
 ///
 /// Both the server and the client can be thought as a source of substreams.
 /// On the client, acquiring substreams means opening connections.
 /// On the server, acquiring substreams means accepting connections.
 pub trait SubstreamSource<In, Out>: SubstreamErrors {
+    /// The stream of incoming messages
     type RecvStream: Stream<Item = Result<In, Self::RecvError>> + Send + Unpin + 'static;
+    /// The sink for outgoing messages
     type SendSink: Sink<Out, Error = Self::SendError> + Send + Unpin + 'static;
+    /// The future that will resolve to a substream or an error
     type SubstreamFut<'a>: Future<Output = Result<(Self::SendSink, Self::RecvStream), Self::OpenError>>
         + 'a
     where
         Self: 'a;
+    /// Get the next substream
+    /// 
+    /// On the client side, this will open a new substream. This should complete
+    /// immediately if the connection is already open.
+    ///
+    /// On the server side, this will accept a new substream. This can block
+    /// indefinitely if no new client is interested.
     fn next(&self) -> Self::SubstreamFut<'_>;
 }
 
 /// A client for a specific service
 ///
 /// This is a wrapper around a [SubstreamSource] that serves as the entry point for the client DSL.
-/// `S` is the service type, `SS` is the substream source.
+/// `S` is the service type, `C` is the substream source.
 #[derive(Debug)]
-pub struct RpcClient<S, SS> {
-    source: SS,
+pub struct RpcClient<S, C> {
+    source: C,
     p: PhantomData<S>,
 }
 
-impl<S: Service, C: SubstreamSource<S::Res, S::Req>> Clone for RpcClient<S, C> {
+impl<S, C: Clone> Clone for RpcClient<S, C> {
     fn clone(&self) -> Self {
         Self {
             source: self.source.clone(),
