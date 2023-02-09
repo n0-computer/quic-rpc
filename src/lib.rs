@@ -56,6 +56,7 @@
 //! ```
 #![deny(missing_docs)]
 #![deny(rustdoc::broken_intra_doc_links)]
+use client2::{SubstreamErrors, SubstreamSource};
 use futures::{Future, Sink, Stream};
 use serde::{de::DeserializeOwned, Serialize};
 use std::{
@@ -64,8 +65,10 @@ use std::{
     result,
 };
 pub mod client;
+mod client2;
 pub mod message;
 pub mod server;
+mod server2;
 pub mod transport;
 pub use client::RpcClient;
 pub use server::RpcServer;
@@ -154,6 +157,43 @@ pub trait ClientChannel<In: RpcMessage, Out: RpcMessage, T: ChannelTypes>:
     fn open_bi(&self) -> T::OpenBiFuture<'_, In, Out>;
 }
 
+#[derive(Debug)]
+struct ClientSource<In: RpcMessage, Out: RpcMessage, T: ChannelTypes> {
+    channel: T::ClientChannel<In, Out>,
+}
+
+impl<In: RpcMessage, Out: RpcMessage, T: ChannelTypes> Clone for ClientSource<In, Out, T> {
+    fn clone(&self) -> Self {
+        Self {
+            channel: self.channel.clone(),
+        }
+    }
+}
+
+impl<In: RpcMessage, Out: RpcMessage, T: ChannelTypes> SubstreamErrors
+    for ClientSource<In, Out, T>
+{
+    type SendError = T::SendError;
+
+    type RecvError = T::RecvError;
+
+    type OpenError = T::OpenBiError;
+}
+
+impl<In: RpcMessage, Out: RpcMessage, T: ChannelTypes> SubstreamSource<In, Out>
+    for ClientSource<In, Out, T>
+{
+    type RecvStream = T::RecvStream<In>;
+
+    type SendSink = T::SendSink<Out>;
+
+    type SubstreamFut<'a> = T::OpenBiFuture<'a, In, Out>;
+
+    fn next(&self) -> Self::SubstreamFut<'_> {
+        self.channel.open_bi()
+    }
+}
+
 /// An abstract server with typed input and output
 pub trait ServerChannel<In: RpcMessage, Out: RpcMessage, T: ChannelTypes>:
     Debug + Clone + Send + Sync + 'static
@@ -193,5 +233,42 @@ impl Display for LocalAddr {
             LocalAddr::Socket(sockaddr) => write!(f, "{sockaddr}"),
             LocalAddr::Mem => write!(f, "mem"),
         }
+    }
+}
+
+#[derive(Debug)]
+struct ServerSource<In: RpcMessage, Out: RpcMessage, T: ChannelTypes> {
+    channel: T::ServerChannel<In, Out>,
+}
+
+impl<In: RpcMessage, Out: RpcMessage, T: ChannelTypes> Clone for ServerSource<In, Out, T> {
+    fn clone(&self) -> Self {
+        Self {
+            channel: self.channel.clone(),
+        }
+    }
+}
+
+impl<In: RpcMessage, Out: RpcMessage, T: ChannelTypes> SubstreamErrors
+    for ServerSource<In, Out, T>
+{
+    type SendError = T::SendError;
+
+    type RecvError = T::RecvError;
+
+    type OpenError = T::AcceptBiError;
+}
+
+impl<In: RpcMessage, Out: RpcMessage, T: ChannelTypes> SubstreamSource<In, Out>
+    for ServerSource<In, Out, T>
+{
+    type RecvStream = T::RecvStream<In>;
+
+    type SendSink = T::SendSink<Out>;
+
+    type SubstreamFut<'a> = T::AcceptBiFuture<'a, In, Out>;
+
+    fn next(&self) -> Self::SubstreamFut<'_> {
+        self.channel.accept_bi()
     }
 }
