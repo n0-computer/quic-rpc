@@ -17,6 +17,8 @@ use super::util::{FramedBincodeRead, FramedBincodeWrite};
 
 type Socket<In, Out> = (SendSink<Out>, RecvStream<In>);
 
+const MAX_FRAME_LENGTH: usize = 1024 * 1024;
+
 #[derive(Debug)]
 struct ServerChannelInner {
     endpoint: Option<quinn::Endpoint>,
@@ -192,8 +194,8 @@ impl<In: RpcMessage, Out: RpcMessage> TypedConnection<In, Out> for QuinnServerCh
                 .recv_async()
                 .await
                 .map_err(|_| quinn::ConnectionError::LocallyClosed)?;
-            let send = FramedBincodeWrite::new(send, 1024 * 1024);
-            let recv = FramedBincodeRead::new(recv, 1024 * 1024);
+            let send = FramedBincodeWrite::new(send, MAX_FRAME_LENGTH);
+            let recv = FramedBincodeRead::new(recv, MAX_FRAME_LENGTH);
             Ok((send, recv))
         }
         .boxed()
@@ -360,8 +362,8 @@ impl<In: RpcMessage, Out: RpcMessage> TypedConnection<In, Out> for QuinnClientCh
             receiver
                 .await
                 .map(|(send, recv)| {
-                    let send = FramedBincodeWrite::new(send, 1024 * 1024);
-                    let recv = FramedBincodeRead::new(recv, 1024 * 1024);
+                    let send = FramedBincodeWrite::new(send, MAX_FRAME_LENGTH);
+                    let recv = FramedBincodeRead::new(recv, MAX_FRAME_LENGTH);
                     (send, recv)
                 })
                 .map_err(|_| quinn::ConnectionError::LocallyClosed)
@@ -559,45 +561,6 @@ impl<In: RpcMessage + Sync, Out: RpcMessage + Sync> crate::ServerChannel<In, Out
 
     fn local_addr(&self) -> &[crate::LocalAddr] {
         &self.inner.local_addr
-    }
-}
-
-#[derive(Debug)]
-pub struct ServerSource<In: RpcMessage, Out: RpcMessage> {
-    conn: quinn::Connection,
-    _p: PhantomData<(In, Out)>,
-}
-
-impl<In: RpcMessage, Out: RpcMessage> Clone for ServerSource<In, Out> {
-    fn clone(&self) -> Self {
-        Self {
-            conn: self.conn.clone(),
-            _p: self._p.clone(),
-        }
-    }
-}
-
-impl<In: RpcMessage, Out: RpcMessage> ConnectionErrors for ServerSource<In, Out> {
-    type SendError = io::Error;
-    type RecvError = io::Error;
-    type OpenError = quinn::ConnectionError;
-}
-
-impl<In: RpcMessage, Out: RpcMessage> TypedConnection<In, Out> for ServerSource<In, Out> {
-    type SendSink = FramedBincodeWrite<quinn::SendStream, Out>;
-    type RecvStream = FramedBincodeRead<quinn::RecvStream, In>;
-
-    type NextFut<'a> =
-        BoxFuture<'a, result::Result<(Self::SendSink, Self::RecvStream), quinn::ConnectionError>>;
-
-    fn next(&self) -> Self::NextFut<'_> {
-        async move {
-            let (send, recv) = self.conn.accept_bi().await?;
-            let send = FramedBincodeWrite::new(send, 1024 * 1024);
-            let recv = FramedBincodeRead::new(recv, 1024 * 1024);
-            Ok((send, recv))
-        }
-        .boxed()
     }
 }
 

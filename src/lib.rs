@@ -47,7 +47,7 @@
 //! let (server, client) = quic_rpc::transport::mem::connection::<PingRequest, PingResponse>(1);
 //!
 //! // create the rpc client given the channel and the service type
-//! let mut client = RpcClient::<PingService, MemChannelTypes>::new(client);
+//! let mut client = RpcClient::<PingService, _>::new(client);
 //!
 //! // call the service
 //! let res = client.rpc(Ping).await?;

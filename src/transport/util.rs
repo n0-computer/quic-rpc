@@ -1,21 +1,17 @@
 use std::{
     pin::Pin,
-    result,
     task::{self, Poll},
 };
 
 use bincode::Options;
 use futures::{
-    future::BoxFuture,
-    stream::{SplitSink, SplitStream},
-    FutureExt, Sink, SinkExt, Stream, StreamExt,
+    Sink, SinkExt, Stream, StreamExt,
 };
 use pin_project::pin_project;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio_util::codec::LengthDelimitedCodec;
 
 use crate::{
-    client::{ChannelSource, ConnectionErrors, TypedConnection},
     RpcMessage,
 };
 

@@ -79,8 +79,8 @@ pub struct Endpoints {
     server_addr: SocketAddr,
 }
 
-pub fn make_endpoints() -> anyhow::Result<Endpoints> {
-    let server_addr: SocketAddr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 12345));
+pub fn make_endpoints(port: u16) -> anyhow::Result<Endpoints> {
+    let server_addr: SocketAddr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, port));
     let (server, server_certs) = make_server_endpoint(server_addr)?;
     let client = make_client_endpoint("0.0.0.0:0".parse()?, &[&server_certs])?;
     Ok(Endpoints {
@@ -107,7 +107,7 @@ async fn quinn_channel_bench() -> anyhow::Result<()> {
         client,
         server,
         server_addr,
-    } = make_endpoints()?;
+    } = make_endpoints(12345)?;
     tracing::info!("Starting server");
     let server_handle = run_server(server);
     tracing::info!("Starting client");
@@ -130,7 +130,7 @@ async fn quinn_channel_smoke() -> anyhow::Result<()> {
         client,
         server,
         server_addr,
-    } = make_endpoints()?;
+    } = make_endpoints(12346)?;
     let server_handle = run_server(server);
     let client_connection = quic_rpc::transport::quinn::QuinnClientChannel::new(
         client,
