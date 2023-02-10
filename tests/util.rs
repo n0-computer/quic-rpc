@@ -1,11 +1,12 @@
 use anyhow::Context;
-use quic_rpc::{
-    server::RpcServerError,
-    ChannelTypes,
-};
+use quic_rpc::{client::TypedConnection, server::RpcServerError, RpcMessage};
 
 #[allow(unused)]
-pub async fn check_termination_anyhow<C: ChannelTypes>(
+pub async fn check_termination_anyhow<
+    In: RpcMessage,
+    Out: RpcMessage,
+    C: TypedConnection<In, Out>,
+>(
     server_handle: tokio::task::JoinHandle<anyhow::Result<()>>,
 ) -> anyhow::Result<()> {
     // dropping the client will cause the server to terminate
@@ -13,7 +14,7 @@ pub async fn check_termination_anyhow<C: ChannelTypes>(
         Err(e) => {
             let err: RpcServerError<C> = e.downcast().context("unexpected termination result")?;
             match err {
-                RpcServerError::AcceptBiError(_) => {}
+                RpcServerError::Accept(_) => {}
                 e => panic!("unexpected termination error {e:?}"),
             }
         }

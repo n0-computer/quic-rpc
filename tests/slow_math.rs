@@ -5,6 +5,7 @@ use async_stream::stream;
 use futures::{Stream, StreamExt};
 use math::*;
 use quic_rpc::{
+    client::TypedConnection,
     message::{BidiStreaming, ClientStreaming, Msg, RpcMsg, ServerStreaming},
     server::RpcServerError,
     ChannelTypes, RpcServer, Service,
@@ -91,7 +92,7 @@ impl ComputeService {
         }
     }
 
-    pub async fn server<C: ChannelTypes>(
+    pub async fn server<C: TypedConnection<ComputeRequest, ComputeResponse>>(
         server: RpcServer<ComputeService, C>,
     ) -> result::Result<(), RpcServerError<C>> {
         let s = server;

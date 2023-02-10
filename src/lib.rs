@@ -56,7 +56,7 @@
 //! ```
 // #![deny(missing_docs)]
 // #![deny(rustdoc::broken_intra_doc_links)]
-use client2::{ConnectionErrors, TypedConnection};
+use client::ConnectionErrors;
 use futures::{Future, Sink, Stream};
 use serde::{de::DeserializeOwned, Serialize};
 use std::{
@@ -65,10 +65,8 @@ use std::{
     result,
 };
 pub mod client;
-pub mod client2;
 pub mod message;
 pub mod server;
-mod server2;
 pub mod transport;
 pub use client::RpcClient;
 pub use server::RpcServer;
@@ -108,7 +106,6 @@ pub trait Service: Send + Sync + Debug + Clone + 'static {
 /// Every distinct kind of channel has its own ChannelType. See e.g.
 /// [crate::transport::MemChannelTypes].
 pub trait ChannelTypes: Debug + Sized + Send + Sync + Unpin + Clone + 'static {
-
     // type ServerSource<In, Out>: TypedConnection<In, Out>;
 
     /// The sink used for sending either requests or responses on this channel

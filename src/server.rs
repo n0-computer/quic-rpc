@@ -1,9 +1,10 @@
 //! [RpcServer] and support types
 //!
 //! This defines the RPC server DSL
+use crate::client::{ConnectionErrors, TypedConnection};
 use crate::{
     message::{BidiStreaming, ClientStreaming, Msg, Rpc, ServerStreaming},
-    ChannelTypes, LocalAddr, ServerChannel, Service,
+    Service,
 };
 use futures::{channel::oneshot, task, task::Poll, Future, FutureExt, SinkExt, Stream, StreamExt};
 use pin_project::pin_project;
@@ -14,39 +15,35 @@ use std::{error, fmt, fmt::Debug, marker::PhantomData, pin::Pin, result};
 /// This is a wrapper around a [crate::ServerChannel] that serves as the entry point for the server DSL.
 /// `S` is the service type, `C` is the channel type.
 #[derive(Debug)]
-pub struct RpcServer<S: Service, C: ChannelTypes> {
+pub struct RpcServer<S, C> {
     /// The channel on which new requests arrive.
     ///
     /// Each new request is a receiver and channel pair on which messages for this request
     /// are received and responses sent.
-    channel: C::ServerChannel<S::Req, S::Res>,
+    source: C,
+    p: PhantomData<S>,
 }
 
-impl<S: Service, C: ChannelTypes> Clone for RpcServer<S, C> {
+impl<S, C: Clone> Clone for RpcServer<S, C> {
     fn clone(&self) -> Self {
         Self {
-            channel: self.channel.clone(),
+            source: self.source.clone(),
+            p: PhantomData,
         }
     }
 }
 
-impl<S: Service, C: ChannelTypes> RpcServer<S, C> {
+impl<S: Service, C: ConnectionErrors> RpcServer<S, C> {
     /// Create a new server channel from a channel and a service type.
-    pub fn new(channel: C::ServerChannel<S::Req, S::Res>) -> Self {
-        Self { channel }
-    }
-
-    /// The local addresses this server is bound to.
-    ///
-    /// This is useful for publicly facing addresses when you start the server with a random
-    /// port, `:0` and let the kernel choose the real bind address.  This will return the
-    /// address with the actual port used.
-    pub fn local_addr(&self) -> &[LocalAddr] {
-        self.channel.local_addr()
+    pub fn new(source: C) -> Self {
+        Self {
+            source,
+            p: PhantomData,
+        }
     }
 }
 
-impl<S: Service, C: ChannelTypes> RpcServer<S, C> {
+impl<S: Service, C: TypedConnection<S::Req, S::Res>> RpcServer<S, C> {
     /// Accepts a connection, handling the first request.
     ///
     /// This accepts a new client connection, which is represented as a tuple of a sender
@@ -61,25 +58,18 @@ impl<S: Service, C: ChannelTypes> RpcServer<S, C> {
     /// [`Stream`]: futures::stream::Stream
     pub async fn accept_one(
         &self,
-    ) -> result::Result<(S::Req, (C::SendSink<S::Res>, C::RecvStream<S::Req>)), RpcServerError<C>>
-    where
-        C::RecvStream<S::Req>: Unpin,
-    {
-        let (sink, mut stream) = self
-            .channel
-            .accept_bi()
-            .await
-            .map_err(RpcServerError::AcceptBiError)?;
+    ) -> result::Result<(S::Req, (C::SendSink, C::RecvStream)), RpcServerError<C>> {
+        let (send, mut recv) = self.source.next().await.map_err(RpcServerError::Accept)?;
 
         // get the first message from the client. This will tell us what it wants to do.
-        let request: S::Req = stream
+        let request: S::Req = recv
             .next()
             .await
             // no msg => early close
             .ok_or(RpcServerError::EarlyClose)?
             // recv error
             .map_err(RpcServerError::RecvError)?;
-        Ok((request, (sink, stream)))
+        Ok((request, (send, recv)))
     }
 
     /// A rpc call that also maps the error from the user type to the wire type
@@ -89,7 +79,7 @@ impl<S: Service, C: ChannelTypes> RpcServer<S, C> {
     pub async fn rpc_map_err<M, F, Fut, T, R, E1, E2>(
         &self,
         req: M,
-        chan: (C::SendSink<S::Res>, C::RecvStream<S::Req>),
+        chan: (C::SendSink, C::RecvStream),
         target: T,
         f: F,
     ) -> result::Result<(), RpcServerError<C>>
@@ -116,7 +106,7 @@ impl<S: Service, C: ChannelTypes> RpcServer<S, C> {
     pub async fn rpc<M, F, Fut, T>(
         &self,
         req: M,
-        chan: (C::SendSink<S::Res>, C::RecvStream<S::Req>),
+        chan: (C::SendSink, C::RecvStream),
         target: T,
         f: F,
     ) -> result::Result<(), RpcServerError<C>>
@@ -149,7 +139,7 @@ impl<S: Service, C: ChannelTypes> RpcServer<S, C> {
     pub async fn client_streaming<M, F, Fut, T>(
         &self,
         req: M,
-        c: (C::SendSink<S::Res>, C::RecvStream<S::Req>),
+        c: (C::SendSink, C::RecvStream),
         target: T,
         f: F,
     ) -> result::Result<(), RpcServerError<C>>
@@ -178,7 +168,7 @@ impl<S: Service, C: ChannelTypes> RpcServer<S, C> {
     pub async fn bidi_streaming<M, F, Str, T>(
         &self,
         req: M,
-        c: (C::SendSink<S::Res>, C::RecvStream<S::Req>),
+        c: (C::SendSink, C::RecvStream),
         target: T,
         f: F,
     ) -> result::Result<(), RpcServerError<C>>
@@ -214,7 +204,7 @@ impl<S: Service, C: ChannelTypes> RpcServer<S, C> {
     pub async fn server_streaming<M, F, Str, T>(
         &self,
         req: M,
-        c: (C::SendSink<S::Res>, C::RecvStream<S::Req>),
+        c: (C::SendSink, C::RecvStream),
         target: T,
         f: F,
     ) -> result::Result<(), RpcServerError<C>>
@@ -253,21 +243,21 @@ impl<S: Service, C: ChannelTypes> RpcServer<S, C> {
 /// If there is any error with receiving or with decoding the updates, the stream will stall and the error will
 /// cause a termination of the RPC call.
 #[pin_project]
-pub struct UpdateStream<S: Service, C: ChannelTypes, M: Msg<S>>(
-    #[pin] C::RecvStream<S::Req>,
+pub struct UpdateStream<S: Service, C: TypedConnection<S::Req, S::Res>, M: Msg<S>>(
+    #[pin] C::RecvStream,
     Option<oneshot::Sender<RpcServerError<C>>>,
     PhantomData<M>,
 );
 
-impl<S: Service, C: ChannelTypes, M: Msg<S>> UpdateStream<S, C, M> {
-    fn new(recv: C::RecvStream<S::Req>) -> (Self, UnwrapToPending<RpcServerError<C>>) {
+impl<S: Service, C: TypedConnection<S::Req, S::Res>, M: Msg<S>> UpdateStream<S, C, M> {
+    fn new(recv: C::RecvStream) -> (Self, UnwrapToPending<RpcServerError<C>>) {
         let (error_send, error_recv) = oneshot::channel();
         let error_recv = UnwrapToPending(error_recv);
         (Self(recv, Some(error_send), PhantomData), error_recv)
     }
 }
 
-impl<S: Service, C: ChannelTypes, M: Msg<S>> Stream for UpdateStream<S, C, M> {
+impl<S: Service, C: TypedConnection<S::Req, S::Res>, M: Msg<S>> Stream for UpdateStream<S, C, M> {
     type Item = M::Update;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut task::Context<'_>) -> Poll<Option<Self::Item>> {
@@ -299,9 +289,9 @@ impl<S: Service, C: ChannelTypes, M: Msg<S>> Stream for UpdateStream<S, C, M> {
 }
 
 /// Server error. All server DSL methods return a `Result` with this error type.
-pub enum RpcServerError<C: ChannelTypes> {
+pub enum RpcServerError<C: ConnectionErrors> {
     /// Unable to open a new channel
-    AcceptBiError(C::AcceptBiError),
+    Accept(C::OpenError),
     /// Recv side for a channel was closed before getting the first message
     EarlyClose,
     /// Got an unexpected first message, e.g. an update message
@@ -314,10 +304,10 @@ pub enum RpcServerError<C: ChannelTypes> {
     UnexpectedUpdateMessage,
 }
 
-impl<C: ChannelTypes> fmt::Debug for RpcServerError<C> {
+impl<C: ConnectionErrors> fmt::Debug for RpcServerError<C> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::AcceptBiError(arg0) => f.debug_tuple("AcceptBiError").field(arg0).finish(),
+            Self::Accept(arg0) => f.debug_tuple("Open").field(arg0).finish(),
             Self::EarlyClose => write!(f, "EarlyClose"),
             Self::RecvError(arg0) => f.debug_tuple("RecvError").field(arg0).finish(),
             Self::SendError(arg0) => f.debug_tuple("SendError").field(arg0).finish(),
@@ -327,13 +317,13 @@ impl<C: ChannelTypes> fmt::Debug for RpcServerError<C> {
     }
 }
 
-impl<C: ChannelTypes> fmt::Display for RpcServerError<C> {
+impl<C: ConnectionErrors> fmt::Display for RpcServerError<C> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         fmt::Debug::fmt(&self, f)
     }
 }
 
-impl<C: ChannelTypes> error::Error for RpcServerError<C> {}
+impl<C: ConnectionErrors> error::Error for RpcServerError<C> {}
 
 /// Take an oneshot receiver and just return Pending the underlying future returns `Err(oneshot::Canceled)`
 struct UnwrapToPending<T>(oneshot::Receiver<T>);
@@ -363,17 +353,15 @@ async fn race2<T, A: Future<Output = T>, B: Future<Output = T>>(f1: A, f2: B) ->
 pub async fn run_server_loop<S, C, T, F, Fut>(
     _service_type: S,
     _channel_type: C,
-    conn: C::ServerChannel<S::Req, S::Res>,
+    conn: C,
     target: T,
     mut handler: F,
 ) -> Result<(), RpcServerError<C>>
 where
     S: Service,
-    C: ChannelTypes,
+    C: TypedConnection<S::Req, S::Res>,
     T: Clone + Send + 'static,
-    F: FnMut(RpcServer<S, C>, S::Req, (C::SendSink<S::Res>, C::RecvStream<S::Req>), T) -> Fut
-        + Send
-        + 'static,
+    F: FnMut(RpcServer<S, C>, S::Req, (C::SendSink, C::RecvStream), T) -> Fut + Send + 'static,
     Fut: Future<Output = Result<RpcServer<S, C>, RpcServerError<C>>> + Send + 'static,
 {
     let mut server = RpcServer::<S, C>::new(conn);

@@ -54,23 +54,23 @@ impl Fs {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let fs = Fs;
-    let (server, client) = quic_rpc::transport::mem::connection(1);
-    let client = RpcClient::<IoService, MemChannelTypes>::new(client);
-    let server = RpcServer::<IoService, MemChannelTypes>::new(server);
-    let handle = tokio::task::spawn(async move {
-        for _ in 0..1 {
-            let (req, chan) = server.accept_one().await?;
-            let s = server.clone();
-            match req {
-                IoRequest::Write(req) => s.rpc_map_err(req, chan, fs, Fs::write).await,
-            }?
-        }
-        anyhow::Ok(())
-    });
-    client
-        .rpc(WriteRequest("hello".to_string(), vec![0u8; 32]))
-        .await??;
-    handle.await??;
+    // let fs = Fs;
+    // let (server, client) = quic_rpc::transport::mem::connection::<IoResponse, IoRequest>(1);
+    // let client = RpcClient::<IoService, _>::new(client);
+    // let server = RpcServer::<IoService, _>::new(server);
+    // let handle = tokio::task::spawn(async move {
+    //     for _ in 0..1 {
+    //         let (req, chan) = server.accept_one().await?;
+    //         let s = server.clone();
+    //         match req {
+    //             IoRequest::Write(req) => s.rpc_map_err(req, chan, fs, Fs::write).await,
+    //         }?
+    //     }
+    //     anyhow::Ok(())
+    // });
+    // client
+    //     .rpc(WriteRequest("hello".to_string(), vec![0u8; 32]))
+    //     .await??;
+    // handle.await??;
     Ok(())
 }

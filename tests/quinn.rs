@@ -93,7 +93,7 @@ pub fn make_endpoints() -> anyhow::Result<Endpoints> {
 fn run_server(server: quinn::Endpoint) -> JoinHandle<anyhow::Result<()>> {
     tokio::task::spawn(async move {
         let connection = quic_rpc::transport::quinn::QuinnServerChannel::new(server)?;
-        let server = RpcServer::<ComputeService, QuinnChannelTypes>::new(connection);
+        let server = RpcServer::<ComputeService, _>::new(connection);
         ComputeService::server(server).await?;
         anyhow::Ok(())
     })
@@ -103,7 +103,6 @@ fn run_server(server: quinn::Endpoint) -> JoinHandle<anyhow::Result<()>> {
 #[tokio::test]
 async fn quinn_channel_bench() -> anyhow::Result<()> {
     tracing_subscriber::fmt::try_init().ok();
-    type C = QuinnChannelTypes;
     let Endpoints {
         client,
         server,
@@ -117,7 +116,7 @@ async fn quinn_channel_bench() -> anyhow::Result<()> {
         server_addr,
         "localhost".into(),
     );
-    let client = RpcClient::<ComputeService, C>::new(client);
+    let client = RpcClient::<ComputeService, _>::new(client);
     tracing::info!("Starting benchmark");
     bench(client, 50000).await?;
     server_handle.abort();
@@ -125,10 +124,8 @@ async fn quinn_channel_bench() -> anyhow::Result<()> {
 }
 
 #[tokio::test]
-#[ignore]
 async fn quinn_channel_smoke() -> anyhow::Result<()> {
     tracing_subscriber::fmt::try_init().ok();
-    type C = QuinnChannelTypes;
     let Endpoints {
         client,
         server,
@@ -140,7 +137,7 @@ async fn quinn_channel_smoke() -> anyhow::Result<()> {
         server_addr,
         "localhost".into(),
     );
-    smoke_test::<C>(client_connection).await?;
+    smoke_test(client_connection).await?;
     server_handle.abort();
     Ok(())
 }

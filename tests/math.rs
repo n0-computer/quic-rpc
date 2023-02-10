@@ -3,6 +3,7 @@ use async_stream::stream;
 use derive_more::{From, TryInto};
 use futures::{SinkExt, Stream, StreamExt, TryStreamExt};
 use quic_rpc::{
+    client::TypedConnection,
     message::{BidiStreaming, ClientStreaming, Msg, RpcMsg, ServerStreaming},
     server::RpcServerError,
     ChannelTypes, RpcClient, RpcServer, Service,
@@ -142,7 +143,7 @@ impl ComputeService {
         }
     }
 
-    pub async fn server<C: ChannelTypes>(
+    pub async fn server<C: TypedConnection<ComputeRequest, ComputeResponse>>(
         server: RpcServer<ComputeService, C>,
     ) -> result::Result<(), RpcServerError<C>> {
         let s = server;
@@ -167,7 +168,7 @@ impl ComputeService {
         }
     }
 
-    pub async fn server_par<C: ChannelTypes>(
+    pub async fn server_par<C: TypedConnection<ComputeRequest, ComputeResponse>>(
         server: RpcServer<ComputeService, C>,
         parallelism: usize,
     ) -> result::Result<(), RpcServerError<C>> {
@@ -209,8 +210,8 @@ impl ComputeService {
     }
 }
 
-pub async fn smoke_test<C: ChannelTypes>(
-    client: C::ClientChannel<ComputeResponse, ComputeRequest>,
+pub async fn smoke_test<C: TypedConnection<ComputeResponse, ComputeRequest>>(
+    client: C,
 ) -> anyhow::Result<()> {
     let client = RpcClient::<ComputeService, C>::new(client);
     // a rpc call
@@ -260,7 +261,7 @@ fn clear_line() {
     print!("\r{}\r", " ".repeat(80));
 }
 
-pub async fn bench<C: ChannelTypes>(
+pub async fn bench<C: TypedConnection<ComputeResponse, ComputeRequest>>(
     client: RpcClient<ComputeService, C>,
     n: u64,
 ) -> anyhow::Result<()>

@@ -81,21 +81,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "baf1de4339761588bc0619e3cbc0120ee582ebb74b53b4efbf79117bd2da40fd"
 
 [[package]]
-name = "client"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "futures",
- "quic-rpc",
- "quinn",
- "rustls",
- "serde",
- "tokio",
- "tracing-subscriber",
- "types",
-]
-
-[[package]]
 name = "convert_case"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -873,23 +858,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "server"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-stream",
- "futures",
- "quic-rpc",
- "quinn",
- "rcgen",
- "rustls",
- "serde",
- "tokio",
- "tracing-subscriber",
- "types",
-]
-
-[[package]]
 name = "sharded-slab"
 version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1153,16 +1121,6 @@ name = "try-lock"
 version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "59547bce71d9c38b83d9c0e92b6066c4253371f15005def0c30d9657f50c7642"
-
-[[package]]
-name = "types"
-version = "0.1.0"
-dependencies = [
- "derive_more",
- "futures",
- "quic-rpc",
- "serde",
-]
 
 [[package]]
 name = "unicode-ident"

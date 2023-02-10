@@ -44,5 +44,5 @@ quic = ["quinn", "bincode", "tokio-serde", "tokio-util"]
 combined = []
 default = ["quic"]
 
-[workspace]
-members = ["examples/split/types", "examples/split/server", "examples/split/client"]
+# [workspace]
+# members = ["examples/split/types", "examples/split/server", "examples/split/client"]

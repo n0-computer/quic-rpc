@@ -3,11 +3,10 @@
 //! This defines the RPC client DSL
 use crate::{
     message::{BidiStreaming, ClientStreaming, Msg, Rpc, ServerStreaming},
-    RpcError, Service,
+    ChannelTypes, ClientChannel, Service,
 };
 use futures::{
-    future::BoxFuture, stream::BoxStream, Future, FutureExt, Sink, SinkExt, Stream, StreamExt,
-    TryFutureExt,
+    future::BoxFuture, stream::BoxStream, FutureExt, Sink, SinkExt, Stream, StreamExt, TryFutureExt,
 };
 use pin_project::pin_project;
 use std::{
@@ -18,72 +17,20 @@ use std::{
     result,
     task::{Context, Poll},
 };
-use tokio::io::{AsyncRead, AsyncWrite};
-
-/// A source of bidirectional channels
-///
-/// Both the server and the client can be thought as a source of channels.
-/// On the client, acquiring channels means opening connections.
-/// On the server, acquiring channels means accepting connections.
-pub trait ChannelSource: Debug + Send + Sync + 'static {
-    type OpenError: RpcError;
-    type Channel: AsyncRead + AsyncWrite + Unpin + Send + 'static;
-    type ChannelFut<'a>: Future<Output = Result<Self::Channel, Self::OpenError>> + Send + 'a
-    where
-        Self: 'a;
-    fn next(&self) -> Self::ChannelFut<'_>;
-}
-
-/// Errors that can happen when creating and using a channel
-///
-/// This is independent of whether the channel is a byte channel or a message channel.
-pub trait ConnectionErrors: Debug + Send + Sync + 'static {
-    /// Error when sending messages
-    type SendError: RpcError;
-    /// Error when receiving messages
-    type RecvError: RpcError;
-    /// Error when opening a substream
-    type OpenError: RpcError;
-}
-
-/// A connection, aka a source of typed channels
-///
-/// Both the server and the client can be thought as a source of channels.
-/// On the client, acquiring channels means open.
-/// On the server, acquiring channels means accept.
-pub trait TypedConnection<In, Out>: ConnectionErrors {
-    /// A typed bidirectional message channel
-    type Channel: Stream<Item = Result<In, Self::RecvError>> + Sink<Out, Error = Self::SendError> + Send + Unpin + 'static;
-    /// The future that will resolve to a substream or an error
-    type NextFut<'a>: Future<Output = Result<Self::Channel, Self::OpenError>>
-        + 'a
-    where
-        Self: 'a;
-    /// Get the next substream
-    ///
-    /// On the client side, this will open a new substream. This should complete
-    /// immediately if the connection is already open.
-    ///
-    /// On the server side, this will accept a new substream. This can block
-    /// indefinitely if no new client is interested.
-    fn next(&self) -> Self::NextFut<'_>;
-}
 
 /// A client for a specific service
 ///
-/// This is a wrapper around a [SubstreamSource] that serves as the entry point for the client DSL.
-/// `S` is the service type, `C` is the substream source.
+/// This is a wrapper around a [crate::ClientChannel] that serves as the entry point for the client DSL.
+/// `S` is the service type, `C` is the channel type.
 #[derive(Debug)]
-pub struct RpcClient<S, C> {
-    source: C,
-    p: PhantomData<S>,
+pub struct RpcClient<S: Service, C: ChannelTypes> {
+    channel: C::ClientChannel<S::Res, S::Req>,
 }
 
-impl<S, C: Clone> Clone for RpcClient<S, C> {
+impl<S: Service, C: ChannelTypes> Clone for RpcClient<S, C> {
     fn clone(&self) -> Self {
         Self {
-            source: self.source.clone(),
-            p: PhantomData,
+            channel: self.channel.clone(),
         }
     }
 }
@@ -92,14 +39,12 @@ impl<S, C: Clone> Clone for RpcClient<S, C> {
 /// that support it, [ClientStreaming] and [BidiStreaming].
 #[pin_project]
 #[derive(Debug)]
-pub struct UpdateSink<S: Service, C: TypedConnection<S::Res, S::Req>, M: Msg<S>>(
-    #[pin] futures::stream::SplitSink<C::Channel, S::Req>,
+pub struct UpdateSink<S: Service, C: ChannelTypes, M: Msg<S>>(
+    #[pin] C::SendSink<S::Req>,
     PhantomData<M>,
 );
 
-impl<S: Service, C: TypedConnection<S::Res, S::Req>, M: Msg<S>> Sink<M::Update>
-    for UpdateSink<S, C, M>
-{
+impl<S: Service, C: ChannelTypes, M: Msg<S>> Sink<M::Update> for UpdateSink<S, C, M> {
     type Error = C::SendError;
 
     fn poll_ready(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
@@ -120,13 +65,17 @@ impl<S: Service, C: TypedConnection<S::Res, S::Req>, M: Msg<S>> Sink<M::Update>
     }
 }
 
-impl<S: Service, C: TypedConnection<S::Res, S::Req>> RpcClient<S, C> {
+impl<S: Service, C: ChannelTypes> RpcClient<S, C> {
     /// Create a new rpc client from a channel
-    pub fn new(source: C) -> Self {
-        Self {
-            source,
-            p: PhantomData,
-        }
+    pub fn new(channel: C::ClientChannel<S::Res, S::Req>) -> Self {
+        Self { channel }
+    }
+
+    /// Open a bidi connection on an existing channel, or possibly also open a new channel
+    async fn open_bi(
+        &self,
+    ) -> result::Result<(C::SendSink<S::Req>, C::RecvStream<S::Res>), C::OpenBiError> {
+        self.channel.open_bi().await
     }
 
     /// RPC call to the server, single request, single response
@@ -135,13 +84,15 @@ impl<S: Service, C: TypedConnection<S::Res, S::Req>> RpcClient<S, C> {
         M: Msg<S, Pattern = Rpc> + Into<S::Req>,
     {
         let msg = msg.into();
-        let mut chan = self.source.next().await.map_err(RpcClientError::Open)?;
-        chan.send(msg).await.map_err(RpcClientError::<C>::Send)?;
-        let res = chan
+        let (mut send, mut recv) = self.open_bi().await.map_err(RpcClientError::Open)?;
+        send.send(msg).await.map_err(RpcClientError::<C>::Send)?;
+        let res = recv
             .next()
             .await
             .ok_or(RpcClientError::<C>::EarlyClose)?
             .map_err(RpcClientError::<C>::RecvError)?;
+        // keep send alive until we have the answer
+        drop(send);
         M::Response::try_from(res).map_err(|_| RpcClientError::DowncastError)
     }
 
@@ -157,22 +108,18 @@ impl<S: Service, C: TypedConnection<S::Res, S::Req>> RpcClient<S, C> {
         M: Msg<S, Pattern = ServerStreaming> + Into<S::Req>,
     {
         let msg = msg.into();
-        let mut chan = self
-            .source
-            .next()
-            .await
-            .map_err(StreamingResponseError::Open)?;
-        chan.send(msg)
+        let (mut send, recv) = self.open_bi().await.map_err(StreamingResponseError::Open)?;
+        send.send(msg)
             .map_err(StreamingResponseError::<C>::Send)
             .await?;
-        let recv = chan.map(move |x| match x {
+        let recv = recv.map(move |x| match x {
             Ok(x) => {
                 M::Response::try_from(x).map_err(|_| StreamingResponseItemError::DowncastError)
             }
             Err(e) => Err(StreamingResponseItemError::RecvError(e)),
         });
         // keep send alive so the request on the server side does not get cancelled
-        let recv = recv.boxed();
+        let recv = DeferDrop(recv, send).boxed();
         Ok(recv)
     }
 
@@ -191,13 +138,8 @@ impl<S: Service, C: TypedConnection<S::Res, S::Req>> RpcClient<S, C> {
         M: Msg<S, Pattern = ClientStreaming> + Into<S::Req>,
     {
         let msg = msg.into();
-        let mut chan = self
-            .source
-            .next()
-            .await
-            .map_err(ClientStreamingError::Open)?;
-        chan.send(msg).map_err(ClientStreamingError::Send).await?;
-        let (send, mut recv) = chan.split();
+        let (mut send, mut recv) = self.open_bi().await.map_err(ClientStreamingError::Open)?;
+        send.send(msg).map_err(ClientStreamingError::Send).await?;
         let send = UpdateSink::<S, C, M>(send, PhantomData);
         let recv = async move {
             let item = recv
@@ -231,9 +173,8 @@ impl<S: Service, C: TypedConnection<S::Res, S::Req>> RpcClient<S, C> {
         M: Msg<S, Pattern = BidiStreaming> + Into<S::Req>,
     {
         let msg = msg.into();
-        let mut chan = self.source.next().await.map_err(BidiError::Open)?;
-        chan.send(msg).await.map_err(BidiError::<C>::Send)?;
-        let (send, recv) = chan.split();
+        let (mut send, recv) = self.open_bi().await.map_err(BidiError::Open)?;
+        send.send(msg).await.map_err(BidiError::<C>::Send)?;
         let send = UpdateSink(send, PhantomData);
         let recv = recv
             .map(|x| match x {
@@ -247,9 +188,9 @@ impl<S: Service, C: TypedConnection<S::Res, S::Req>> RpcClient<S, C> {
 
 /// Client error. All client DSL methods return a `Result` with this error type.
 #[derive(Debug)]
-pub enum RpcClientError<C: ConnectionErrors> {
-    /// Unable to open a substream at all
-    Open(C::OpenError),
+pub enum RpcClientError<C: ChannelTypes> {
+    /// Unable to open a stream to the server
+    Open(C::OpenBiError),
     /// Unable to send the request to the server
     Send(C::SendError),
     /// Server closed the stream before sending a response
@@ -260,68 +201,68 @@ pub enum RpcClientError<C: ConnectionErrors> {
     DowncastError,
 }
 
-impl<C: ConnectionErrors> fmt::Display for RpcClientError<C> {
+impl<C: ChannelTypes> fmt::Display for RpcClientError<C> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Debug::fmt(self, f)
     }
 }
 
-impl<C: ConnectionErrors> error::Error for RpcClientError<C> {}
+impl<C: ChannelTypes> error::Error for RpcClientError<C> {}
 
 /// Server error when accepting a bidi request
 #[derive(Debug)]
-pub enum BidiError<C: ConnectionErrors> {
-    /// Unable to open a substream at all
-    Open(C::OpenError),
+pub enum BidiError<C: ChannelTypes> {
+    /// Unable to open a stream to the server
+    Open(C::OpenBiError),
     /// Unable to send the request to the server
     Send(C::SendError),
 }
 
-impl<C: ConnectionErrors> fmt::Display for BidiError<C> {
+impl<C: ChannelTypes> fmt::Display for BidiError<C> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Debug::fmt(self, f)
     }
 }
 
-impl<C: ConnectionErrors> error::Error for BidiError<C> {}
+impl<C: ChannelTypes> error::Error for BidiError<C> {}
 
 /// Server error when receiving an item for a bidi request
 #[derive(Debug)]
-pub enum BidiItemError<C: ConnectionErrors> {
+pub enum BidiItemError<C: ChannelTypes> {
     /// Unable to receive the response from the server
     RecvError(C::RecvError),
     /// Unexpected response from the server
     DowncastError,
 }
 
-impl<C: ConnectionErrors> fmt::Display for BidiItemError<C> {
+impl<C: ChannelTypes> fmt::Display for BidiItemError<C> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Debug::fmt(self, f)
     }
 }
 
-impl<C: ConnectionErrors> error::Error for BidiItemError<C> {}
+impl<C: ChannelTypes> error::Error for BidiItemError<C> {}
 
 /// Server error when accepting a client streaming request
 #[derive(Debug)]
-pub enum ClientStreamingError<C: ConnectionErrors> {
-    /// Unable to open a substream at all
-    Open(C::OpenError),
+pub enum ClientStreamingError<C: ChannelTypes> {
+    /// Unable to open a stream to the server
+    Open(C::OpenBiError),
     /// Unable to send the request to the server
     Send(C::SendError),
 }
 
-impl<C: ConnectionErrors> fmt::Display for ClientStreamingError<C> {
+impl<C: ChannelTypes> fmt::Display for ClientStreamingError<C> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Debug::fmt(self, f)
     }
 }
 
-impl<C: ConnectionErrors> error::Error for ClientStreamingError<C> {}
+impl<C: ChannelTypes> error::Error for ClientStreamingError<C> {}
 
 /// Server error when receiving an item for a client streaming request
 #[derive(Debug)]
-pub enum ClientStreamingItemError<C: ConnectionErrors> {
+pub enum ClientStreamingItemError<C: ChannelTypes> {
     /// Connection was closed before receiving the first message
     EarlyClose,
     /// Unable to receive the response from the server
@@ -330,47 +271,47 @@ pub enum ClientStreamingItemError<C: ConnectionErrors> {
     DowncastError,
 }
 
-impl<C: ConnectionErrors> fmt::Display for ClientStreamingItemError<C> {
+impl<C: ChannelTypes> fmt::Display for ClientStreamingItemError<C> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Debug::fmt(self, f)
     }
 }
 
-impl<C: ConnectionErrors> error::Error for ClientStreamingItemError<C> {}
+impl<C: ChannelTypes> error::Error for ClientStreamingItemError<C> {}
 
 /// Server error when accepting a server streaming request
 #[derive(Debug)]
-pub enum StreamingResponseError<C: ConnectionErrors> {
-    /// Unable to open a substream at all
-    Open(C::OpenError),
+pub enum StreamingResponseError<C: ChannelTypes> {
+    /// Unable to open a stream to the server
+    Open(C::OpenBiError),
     /// Unable to send the request to the server
     Send(C::SendError),
 }
 
-impl<S: ConnectionErrors> fmt::Display for StreamingResponseError<S> {
+impl<C: ChannelTypes> fmt::Display for StreamingResponseError<C> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Debug::fmt(self, f)
     }
 }
 
-impl<S: ConnectionErrors> error::Error for StreamingResponseError<S> {}
+impl<C: ChannelTypes> error::Error for StreamingResponseError<C> {}
 
 /// Client error when handling responses from a server streaming request
 #[derive(Debug)]
-pub enum StreamingResponseItemError<S: ConnectionErrors> {
+pub enum StreamingResponseItemError<C: ChannelTypes> {
     /// Unable to receive the response from the server
-    RecvError(S::RecvError),
+    RecvError(C::RecvError),
     /// Unexpected response from the server
     DowncastError,
 }
 
-impl<S: ConnectionErrors> fmt::Display for StreamingResponseItemError<S> {
+impl<C: ChannelTypes> fmt::Display for StreamingResponseItemError<C> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Debug::fmt(self, f)
     }
 }
 
-impl<S: ConnectionErrors> error::Error for StreamingResponseItemError<S> {}
+impl<C: ChannelTypes> error::Error for StreamingResponseItemError<C> {}
 
 /// Wrap a stream with an additional item that is kept alive until the stream is dropped
 #[pin_project]

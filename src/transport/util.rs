@@ -1,29 +1,39 @@
-use std::{task::{self, Poll}, pin::Pin, result};
+use std::{
+    pin::Pin,
+    result,
+    task::{self, Poll},
+};
 
 use bincode::Options;
-use futures::{Stream, Sink, SinkExt, StreamExt, stream::{SplitStream, SplitSink}, future::BoxFuture, FutureExt};
+use futures::{
+    future::BoxFuture,
+    stream::{SplitSink, SplitStream},
+    FutureExt, Sink, SinkExt, Stream, StreamExt,
+};
 use pin_project::pin_project;
-use tokio::io::{AsyncWrite, AsyncRead};
+use tokio::io::{AsyncRead, AsyncWrite};
 use tokio_util::codec::LengthDelimitedCodec;
 
-use crate::{RpcMessage, client2::{ChannelSource, ConnectionErrors, TypedConnection}};
+use crate::{
+    client::{ChannelSource, ConnectionErrors, TypedConnection},
+    RpcMessage,
+};
 
-type BincodeEncoding = bincode::config::WithOtherIntEncoding<bincode::DefaultOptions, bincode::config::FixintEncoding>;
-
+type BincodeEncoding =
+    bincode::config::WithOtherIntEncoding<bincode::DefaultOptions, bincode::config::FixintEncoding>;
 /// Wrapper that wraps a bidirectional binary stream in a length delimited codec and bincode with fast fixint encoding
 /// to get a bidirectional stream of rpc Messages
 #[pin_project]
-pub struct FramedBincode<T, In, Out>(
+pub struct FramedBincodeRead<T, In>(
     #[pin]
-    tokio_serde::Framed<
-        tokio_util::codec::Framed<T, tokio_util::codec::LengthDelimitedCodec>,
+    tokio_serde::SymmetricallyFramed<
+        tokio_util::codec::FramedRead<T, tokio_util::codec::LengthDelimitedCodec>,
         In,
-        Out,
-        tokio_serde::formats::Bincode<In, Out, BincodeEncoding>,
+        tokio_serde::formats::SymmetricalBincode<In, BincodeEncoding>,
     >,
 );
 
-impl<T: AsyncRead + AsyncWrite, In: RpcMessage, Out: RpcMessage> FramedBincode<T, In, Out> {
+impl<T: AsyncRead, In: RpcMessage> FramedBincodeRead<T, In> {
     /// Wrap a socket in a length delimited codec and bincode with fast fixint encoding
     pub fn new(inner: T, max_frame_length: usize) -> Self {
         // configure length delimited codec with max frame length
@@ -31,7 +41,7 @@ impl<T: AsyncRead + AsyncWrite, In: RpcMessage, Out: RpcMessage> FramedBincode<T
             .max_frame_length(max_frame_length)
             .new_codec();
         // create the actual framing. This turns the AsyncRead/AsyncWrite into a Stream/Sink of Bytes/BytesMut
-        let framed = tokio_util::codec::Framed::new(inner, framing);
+        let framed = tokio_util::codec::FramedRead::new(inner, framing);
         // configure bincode with fixint encoding
         let bincode_options: BincodeEncoding =
             bincode::DefaultOptions::new().with_fixint_encoding();
@@ -50,7 +60,7 @@ impl<T: AsyncRead + AsyncWrite, In: RpcMessage, Out: RpcMessage> FramedBincode<T
     }
 }
 
-impl<T: AsyncRead, In: RpcMessage, Out: RpcMessage> Stream for FramedBincode<T, In, Out> {
+impl<T: AsyncRead, In: RpcMessage> Stream for FramedBincodeRead<T, In> {
     type Item = Result<In, std::io::Error>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut task::Context<'_>) -> Poll<Option<Self::Item>> {
@@ -58,9 +68,46 @@ impl<T: AsyncRead, In: RpcMessage, Out: RpcMessage> Stream for FramedBincode<T, 
     }
 }
 
-impl<T: AsyncRead + AsyncWrite, In: RpcMessage, Out: RpcMessage> Sink<Out>
-    for FramedBincode<T, In, Out>
-{
+/// Wrapper that wraps a bidirectional binary stream in a length delimited codec and bincode with fast fixint encoding
+/// to get a bidirectional stream of rpc Messages
+#[pin_project]
+pub struct FramedBincodeWrite<T, Out>(
+    #[pin]
+    tokio_serde::SymmetricallyFramed<
+        tokio_util::codec::FramedWrite<T, tokio_util::codec::LengthDelimitedCodec>,
+        Out,
+        tokio_serde::formats::SymmetricalBincode<Out, BincodeEncoding>,
+    >,
+);
+
+impl<T: AsyncWrite, Out: RpcMessage> FramedBincodeWrite<T, Out> {
+    /// Wrap a socket in a length delimited codec and bincode with fast fixint encoding
+    pub fn new(inner: T, max_frame_length: usize) -> Self {
+        // configure length delimited codec with max frame length
+        let framing = LengthDelimitedCodec::builder()
+            .max_frame_length(max_frame_length)
+            .new_codec();
+        // create the actual framing. This turns the AsyncRead/AsyncWrite into a Stream/Sink of Bytes/BytesMut
+        let framed = tokio_util::codec::FramedWrite::new(inner, framing);
+        // configure bincode with fixint encoding
+        let bincode_options: BincodeEncoding =
+            bincode::DefaultOptions::new().with_fixint_encoding();
+        let bincode = tokio_serde::formats::SymmetricalBincode::from(bincode_options);
+        // create the actual framing. This turns the Stream/Sink of Bytes/BytesMut into a Stream/Sink of In/Out
+        let framed = tokio_serde::SymmetricallyFramed::new(framed, bincode);
+        Self(framed)
+    }
+
+    /// Get the underlying binary stream
+    ///
+    /// This can be useful if you want to drop the framing and use the underlying stream directly
+    /// after exchanging some messages.
+    pub fn into_inner(self) -> T {
+        self.0.into_inner().into_inner()
+    }
+}
+
+impl<T: AsyncWrite, Out: RpcMessage> Sink<Out> for FramedBincodeWrite<T, Out> {
     type Error = std::io::Error;
 
     fn poll_ready(
@@ -86,45 +133,6 @@ impl<T: AsyncRead + AsyncWrite, In: RpcMessage, Out: RpcMessage> Sink<Out>
         cx: &mut task::Context<'_>,
     ) -> Poll<Result<(), Self::Error>> {
         self.project().0.poll_close_unpin(cx)
-    }
-}
-
-/// An adapter that turns a ChannelSource into a TypedConnection
-#[derive(Debug)]
-pub struct TypedChannelAdapter<T> {
-    inner: T,
-    max_frame_length: usize,
-}
-
-impl<T: ChannelSource> TypedChannelAdapter<T> {
-    pub fn new(inner: T, max_frame_length: usize) -> Self {
-        Self { inner, max_frame_length }
-    }
-}
-
-impl<T: ChannelSource> ConnectionErrors for TypedChannelAdapter<T> {
-    type SendError = std::io::Error;
-
-    type RecvError = std::io::Error;
-
-    type OpenError = T::OpenError;
-}
-
-impl<In: RpcMessage, Out: RpcMessage, T: ChannelSource> TypedConnection<In, Out>
-    for TypedChannelAdapter<T>
-{
-    type Channel = FramedBincode<T::Channel, In, Out>;
-
-    type NextFut<'a> = BoxFuture<'a, result::Result<Self::Channel, Self::OpenError>>
-        where Self: 'a;
-
-    fn next(&self) -> Self::NextFut<'_> {
-        async move {
-            let channel = self.inner.next().await?;
-            let wrapped = FramedBincode::new(channel, self.max_frame_length);
-            Ok(wrapped)
-        }
-        .boxed()
     }
 }
 
