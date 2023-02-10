@@ -11,6 +11,7 @@ pub mod quinn;
 #[cfg(feature = "quic")]
 /// Alias for quinn channel types
 pub use self::quinn::QuinnChannelTypes;
+#[cfg(feature = "combined")]
 /// Alias for combined channel types
 pub use combined::CombinedChannelTypes;
 #[cfg(feature = "http2")]
@@ -18,3 +19,5 @@ pub use combined::CombinedChannelTypes;
 pub use http2::Http2ChannelTypes;
 /// Alias for mem channel types
 pub use mem::MemChannelTypes;
+
+mod util;

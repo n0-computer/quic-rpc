@@ -1,5 +1,8 @@
 use anyhow::Context;
-use quic_rpc::{server::RpcServerError, ChannelTypes};
+use quic_rpc::{
+    server::RpcServerError,
+    ChannelTypes,
+};
 
 #[allow(unused)]
 pub async fn check_termination_anyhow<C: ChannelTypes>(

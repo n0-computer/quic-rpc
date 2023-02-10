@@ -1,4 +1,5 @@
 //! QUIC channel implementation based on quinn
+use crate::client2::{TypedConnection, ConnectionErrors};
 use crate::{LocalAddr, RpcMessage};
 use futures::channel::oneshot;
 use futures::future::BoxFuture;
@@ -11,6 +12,8 @@ use std::task::{self, ready, Poll};
 use std::{fmt, io, marker::PhantomData, pin::Pin, result};
 use tokio_serde::{formats::SymmetricalBincode, SymmetricallyFramed};
 use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
+
+use super::util::FramedBincode;
 
 type Socket<In, Out> = (SendSink<Out>, RecvStream<In>);
 
@@ -166,6 +169,29 @@ impl<In: RpcMessage, Out: RpcMessage> Clone for QuinnServerChannel<In, Out> {
     }
 }
 
+impl<In: RpcMessage, Out: RpcMessage> ConnectionErrors for QuinnServerChannel<In, Out> {
+    type SendError = io::Error;
+
+    type RecvError = io::Error;
+
+    type OpenError = quinn::ConnectionError;
+}
+
+impl<In: RpcMessage, Out: RpcMessage> TypedConnection<In, Out> for QuinnServerChannel<In, Out> {
+    type Channel = FramedBincode<QuinnSocket, In, Out>;
+
+    type NextFut<'a> = BoxFuture<'a, result::Result<FramedBincode<QuinnSocket, In, Out>, quinn::ConnectionError>>;
+
+    fn next(&self) -> Self::NextFut<'_> {
+        async move {
+            let (send, recv) = self.inner.receiver.recv_async().await.map_err(|_| quinn::ConnectionError::LocallyClosed)?;
+            let chan = QuinnSocket { send, recv };
+            let wrapped = FramedBincode::new(chan, 1024 * 1024);
+            Ok(wrapped)
+        }.boxed()
+    }
+}
+
 type SocketInner = (quinn::SendStream, quinn::RecvStream);
 
 #[derive(Debug)]
@@ -297,6 +323,37 @@ impl<In: RpcMessage, Out: RpcMessage> Clone for QuinnClientChannel<In, Out> {
             inner: self.inner.clone(),
             _phantom: PhantomData,
         }
+    }
+}
+
+impl<In: RpcMessage, Out: RpcMessage> ConnectionErrors for QuinnClientChannel<In, Out> {
+    
+    type SendError = io::Error;
+    
+    type RecvError = io::Error;
+
+    type OpenError = quinn::ConnectionError;
+}
+
+impl<In: RpcMessage, Out: RpcMessage> TypedConnection<In, Out> for QuinnClientChannel<In, Out> {
+    type Channel = FramedBincode<QuinnSocket, In, Out>;
+
+    type NextFut<'a> = BoxFuture<'a, result::Result<FramedBincode<QuinnSocket, In, Out>, quinn::ConnectionError>>;
+
+    fn next(&self) -> Self::NextFut<'_> {
+        async move {
+            let (sender, receiver) = oneshot::channel();
+            self.inner
+                .sender
+                .send_async(sender)
+                .await
+                .map_err(|_| quinn::ConnectionError::LocallyClosed)?;
+            receiver
+                .await
+                .map(|(send, recv)| FramedBincode::new(QuinnSocket { send, recv }, 1024 * 1024))
+                .map_err(|_| quinn::ConnectionError::LocallyClosed)
+        }
+        .boxed()
     }
 }
 
@@ -437,6 +494,7 @@ impl<'a, In, Out> Future for AcceptBiFuture<'a, In, Out> {
 //     BoxFuture<'a, result::Result<self::Socket<In, Out>, self::AcceptBiError>>;
 
 impl crate::ChannelTypes for QuinnChannelTypes {
+
     type SendSink<M: RpcMessage> = self::SendSink<M>;
 
     type RecvStream<M: RpcMessage> = self::RecvStream<M>;
@@ -492,6 +550,33 @@ impl<In: RpcMessage + Sync, Out: RpcMessage + Sync> crate::ServerChannel<In, Out
     }
 }
 
+#[derive(Debug)]
+pub struct ServerSource<In: RpcMessage, Out: RpcMessage> {
+    conn: quinn::Connection,
+    _p: PhantomData<(In, Out)>,
+}
+
+impl<In: RpcMessage, Out: RpcMessage> ConnectionErrors for ServerSource<In, Out> {
+    type SendError = io::Error;
+    type RecvError = io::Error;
+    type OpenError = quinn::ConnectionError;
+}
+
+impl<In: RpcMessage, Out: RpcMessage> TypedConnection<In, Out> for ServerSource<In, Out> {
+    type Channel = FramedBincode<QuinnSocket, In, Out>;
+
+    type NextFut<'a> = BoxFuture<'a, result::Result<FramedBincode<QuinnSocket, In, Out>, quinn::ConnectionError>>;
+
+    fn next(&self) -> Self::NextFut<'_> {
+        async move {
+            let (send, recv) = self.conn.accept_bi().await?;
+            let chan = QuinnSocket { send, recv };
+            let wrapped = FramedBincode::new(chan, 1024 * 1024);
+            Ok(wrapped)
+        }.boxed()
+    }
+}
+
 /// CreateChannelError for quinn channels.
 #[derive(Debug, Clone)]
 pub enum CreateChannelError {
@@ -528,3 +613,57 @@ impl fmt::Display for CreateChannelError {
 }
 
 impl std::error::Error for CreateChannelError {}
+
+/// Combines both ends of a quinn strea, into a single socket, so we can transform it as one.
+#[pin_project]
+pub struct QuinnSocket {
+    /// The send part of the quinn stream.
+    #[pin]
+    pub send: quinn::SendStream,
+    /// The receive part of the quinn stream.
+    #[pin]
+    pub recv: quinn::RecvStream,
+}
+
+impl tokio::io::AsyncRead for QuinnSocket {
+    fn poll_read(
+        self: Pin<&mut Self>,
+        cx: &mut task::Context<'_>,
+        buf: &mut tokio::io::ReadBuf<'_>,
+    ) -> Poll<std::io::Result<()>> {
+        self.project().recv.poll_read(cx, buf)
+    }
+}
+
+impl tokio::io::AsyncWrite for QuinnSocket {
+    fn poll_write(
+        self: Pin<&mut Self>,
+        cx: &mut task::Context<'_>,
+        buf: &[u8],
+    ) -> Poll<std::io::Result<usize>> {
+        self.project().send.poll_write(cx, buf)
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut task::Context<'_>) -> Poll<std::io::Result<()>> {
+        self.project().send.poll_flush(cx)
+    }
+
+    fn poll_shutdown(
+        self: Pin<&mut Self>,
+        cx: &mut task::Context<'_>,
+    ) -> Poll<std::io::Result<()>> {
+        self.project().send.poll_shutdown(cx)
+    }
+
+    fn poll_write_vectored(
+        self: Pin<&mut Self>,
+        cx: &mut task::Context<'_>,
+        bufs: &[std::io::IoSlice<'_>],
+    ) -> Poll<std::io::Result<usize>> {
+        self.project().send.poll_write_vectored(cx, bufs)
+    }
+
+    fn is_write_vectored(&self) -> bool {
+        self.send.is_write_vectored()
+    }
+}
