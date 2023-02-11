@@ -1,5 +1,5 @@
 //! Channel that combines two other channels
-use crate::{ChannelTypes as CT, LocalAddr, RpcMessage, ServerChannel as ServerChannelTrait};
+use crate::{ChannelTypes as CT, LocalAddr, RpcMessage, ServerChannel as ServerChannelTrait, client::TypedConnection};
 use futures::{
     future::{self, BoxFuture},
     FutureExt, Sink, Stream, TryFutureExt,

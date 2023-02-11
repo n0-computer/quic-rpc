@@ -42,7 +42,7 @@ tracing-subscriber = "0.3.16"
 http2 = ["hyper", "bincode", "bytes"]
 quic = ["quinn", "bincode", "tokio-serde", "tokio-util"]
 combined = []
-default = ["quic"]
+default = ["quic", "http2", "combined"]
 
-# [workspace]
-# members = ["examples/split/types", "examples/split/server", "examples/split/client"]
+[workspace]
+members = ["examples/split/types", "examples/split/server", "examples/split/client"]

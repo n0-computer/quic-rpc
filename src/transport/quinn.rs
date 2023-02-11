@@ -1,6 +1,6 @@
 //! QUIC channel implementation based on quinn
 use crate::client::{ConnectionErrors, TypedConnection};
-use crate::{LocalAddr, RpcMessage};
+use crate::{LocalAddr, RpcMessage, ChannelTypes2};
 use futures::channel::oneshot;
 use futures::future::BoxFuture;
 use futures::{Future, FutureExt, Sink, SinkExt, Stream, StreamExt};
@@ -505,9 +505,6 @@ impl<'a, In, Out> Future for AcceptBiFuture<'a, In, Out> {
     }
 }
 
-// pub type AcceptBiFuture<'a, In, Out> =
-//     BoxFuture<'a, result::Result<self::Socket<In, Out>, self::AcceptBiError>>;
-
 impl crate::ChannelTypes for QuinnChannelTypes {
     type SendSink<M: RpcMessage> = self::SendSink<M>;
 
@@ -528,6 +525,12 @@ impl crate::ChannelTypes for QuinnChannelTypes {
     type ClientChannel<In: RpcMessage, Out: RpcMessage> = self::QuinnClientChannel<In, Out>;
 
     type ServerChannel<In: RpcMessage, Out: RpcMessage> = self::QuinnServerChannel<In, Out>;
+}
+
+impl ChannelTypes2 for QuinnChannelTypes {
+    type ClientConnection<In: RpcMessage, Out: RpcMessage> = self::QuinnClientChannel<In, Out>;
+
+    type ServerConnection<In: RpcMessage, Out: RpcMessage> = self::QuinnServerChannel<In, Out>;
 }
 
 impl<In: RpcMessage + Sync, Out: RpcMessage + Sync> crate::ClientChannel<In, Out, QuinnChannelTypes>

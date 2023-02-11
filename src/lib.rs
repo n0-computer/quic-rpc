@@ -56,7 +56,7 @@
 //! ```
 // #![deny(missing_docs)]
 // #![deny(rustdoc::broken_intra_doc_links)]
-use client::ConnectionErrors;
+use client::{ConnectionErrors, TypedConnection};
 use futures::{Future, Sink, Stream};
 use serde::{de::DeserializeOwned, Serialize};
 use std::{
@@ -99,6 +99,14 @@ pub trait Service: Send + Sync + Debug + Clone + 'static {
     type Req: RpcMessage;
     /// Type of response messages
     type Res: RpcMessage;
+}
+
+/// Groups types for client and server connections
+pub trait ChannelTypes2 {
+    /// The client connection type
+    type ClientConnection<In: RpcMessage, Out: RpcMessage>: TypedConnection<In, Out>;
+    /// The server connection type
+    type ServerConnection<In: RpcMessage, Out: RpcMessage>: TypedConnection<In, Out>;
 }
 
 /// Defines a set of types for a kind of channel

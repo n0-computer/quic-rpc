@@ -207,10 +207,10 @@ macro_rules! __derive_create_dispatch {
         #[macro_export]
         macro_rules! $create_dispatch {
             ($target:ident, $handler:ident) => {
-                pub async fn $handler<C: $crate::ChannelTypes>(
+                pub async fn $handler<C: $crate::client::TypedConnection<<$service as $crate::Service>::Req, <$service as $crate::Service>::Res>>(
                     mut server: $crate::server::RpcServer<$service, C>,
                     msg: <$service as $crate::Service>::Req,
-                    chan: (C::SendSink<<$service as $crate::Service>::Res>, C::RecvStream<<$service as $crate::Service>::Req>),
+                    chan: (C::SendSink, C::RecvStream),
                     target: $target,
                 ) -> Result<$crate::server::RpcServer<$service, C>, $crate::server::RpcServerError<C>> {
                     let res = match msg {
@@ -321,9 +321,9 @@ macro_rules! __derive_create_client{
         macro_rules! $create_client {
             ($struct:ident) => {
                 #[derive(::std::clone::Clone, ::std::fmt::Debug)]
-                pub struct $struct<C: $crate::ChannelTypes>(pub $crate::client::RpcClient<$service, C>);
+                pub struct $struct<C: $crate::client::TypedConnection<<$service as $crate::Service>::Res, <$service as $crate::Service>::Req>>(pub $crate::client::RpcClient<$service, C>);
 
-                impl<C: $crate::ChannelTypes> $struct<C> {
+                impl<C: $crate::client::TypedConnection<<$service as $crate::Service>::Res, <$service as $crate::Service>::Req>> $struct<C> {
                     $(
                         $crate::__rpc_method!($m_pattern, $service, $m_name, $m_input, $m_output, $m_update);
                     )*

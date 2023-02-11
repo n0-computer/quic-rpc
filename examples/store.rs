@@ -7,7 +7,7 @@ use quic_rpc::{
     message::{BidiStreaming, ClientStreaming, Msg, ServerStreaming},
     server::RpcServerError,
     transport::mem::{self, MemChannelTypes},
-    ClientChannel, *,
+    ClientChannel, *, client::{TypedConnection, ServerConnection},
 };
 use serde::{Deserialize, Serialize};
 use std::{fmt::Debug, result};
@@ -178,9 +178,9 @@ impl Store {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    async fn server_future(
-        server: RpcServer<StoreService, MemChannelTypes>,
-    ) -> result::Result<(), RpcServerError<MemChannelTypes>> {
+    async fn server_future<C: ServerConnection<StoreService>>(
+        server: RpcServer<StoreService, C>,
+    ) -> result::Result<(), RpcServerError<C>> {
         let s = server;
         let store = Store;
         loop {
@@ -201,8 +201,8 @@ async fn main() -> anyhow::Result<()> {
     }
 
     let (server, client) = mem::connection::<StoreRequest, StoreResponse>(1);
-    let client = RpcClient::<StoreService, MemChannelTypes>::new(client);
-    let server = RpcServer::<StoreService, MemChannelTypes>::new(server);
+    let client = RpcClient::<StoreService, _>::new(client);
+    let server = RpcServer::<StoreService, _>::new(server);
     let server_handle = tokio::task::spawn(server_future(server));
 
     // a rpc call
@@ -249,7 +249,7 @@ async fn main() -> anyhow::Result<()> {
 async fn _main_unsugared() -> anyhow::Result<()> {
     let (server, client) = mem::connection::<u64, String>(1);
     let to_string_service = tokio::spawn(async move {
-        let (mut send, mut recv) = server.accept_bi().await?;
+        let (mut send, mut recv) = server.next().await?;
         while let Some(item) = recv.next().await {
             let item = item?;
             println!("server got: {item:?}");
@@ -257,7 +257,7 @@ async fn _main_unsugared() -> anyhow::Result<()> {
         }
         anyhow::Ok(())
     });
-    let (mut send, mut recv) = client.open_bi().await?;
+    let (mut send, mut recv) = client.next().await?;
     let print_result_service = tokio::spawn(async move {
         while let Some(item) = recv.next().await {
             let item = item?;

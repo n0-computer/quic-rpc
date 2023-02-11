@@ -1,7 +1,7 @@
 //! [RpcServer] and support types
 //!
 //! This defines the RPC server DSL
-use crate::client::{ConnectionErrors, TypedConnection};
+use crate::client::{ConnectionErrors, TypedConnection, ServerConnection};
 use crate::{
     message::{BidiStreaming, ClientStreaming, Msg, Rpc, ServerStreaming},
     Service,
@@ -43,7 +43,7 @@ impl<S: Service, C: ConnectionErrors> RpcServer<S, C> {
     }
 }
 
-impl<S: Service, C: TypedConnection<S::Req, S::Res>> RpcServer<S, C> {
+impl<S: Service, C: ServerConnection<S>> RpcServer<S, C> {
     /// Accepts a connection, handling the first request.
     ///
     /// This accepts a new client connection, which is represented as a tuple of a sender
@@ -243,13 +243,13 @@ impl<S: Service, C: TypedConnection<S::Req, S::Res>> RpcServer<S, C> {
 /// If there is any error with receiving or with decoding the updates, the stream will stall and the error will
 /// cause a termination of the RPC call.
 #[pin_project]
-pub struct UpdateStream<S: Service, C: TypedConnection<S::Req, S::Res>, M: Msg<S>>(
+pub struct UpdateStream<S: Service, C: ServerConnection<S>, M: Msg<S>>(
     #[pin] C::RecvStream,
     Option<oneshot::Sender<RpcServerError<C>>>,
     PhantomData<M>,
 );
 
-impl<S: Service, C: TypedConnection<S::Req, S::Res>, M: Msg<S>> UpdateStream<S, C, M> {
+impl<S: Service, C: ServerConnection<S>, M: Msg<S>> UpdateStream<S, C, M> {
     fn new(recv: C::RecvStream) -> (Self, UnwrapToPending<RpcServerError<C>>) {
         let (error_send, error_recv) = oneshot::channel();
         let error_recv = UnwrapToPending(error_recv);
@@ -257,7 +257,7 @@ impl<S: Service, C: TypedConnection<S::Req, S::Res>, M: Msg<S>> UpdateStream<S, 
     }
 }
 
-impl<S: Service, C: TypedConnection<S::Req, S::Res>, M: Msg<S>> Stream for UpdateStream<S, C, M> {
+impl<S: Service, C: ServerConnection<S>, M: Msg<S>> Stream for UpdateStream<S, C, M> {
     type Item = M::Update;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut task::Context<'_>) -> Poll<Option<Self::Item>> {
@@ -352,14 +352,13 @@ async fn race2<T, A: Future<Output = T>, B: Future<Output = T>>(f1: A, f2: B) ->
 /// Requests will be handled sequentially.
 pub async fn run_server_loop<S, C, T, F, Fut>(
     _service_type: S,
-    _channel_type: C,
     conn: C,
     target: T,
     mut handler: F,
 ) -> Result<(), RpcServerError<C>>
 where
     S: Service,
-    C: TypedConnection<S::Req, S::Res>,
+    C: ServerConnection<S>,
     T: Clone + Send + 'static,
     F: FnMut(RpcServer<S, C>, S::Req, (C::SendSink, C::RecvStream), T) -> Fut + Send + 'static,
     Fut: Future<Output = Result<RpcServer<S, C>, RpcServerError<C>>> + Send + 'static,

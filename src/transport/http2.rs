@@ -7,7 +7,7 @@ use std::{
     sync::Arc, task::Poll,
 };
 
-use crate::{ClientChannel, LocalAddr, RpcMessage, ServerChannel};
+use crate::{ClientChannel, LocalAddr, RpcMessage, ServerChannel, client::{TypedConnection, ConnectionErrors}};
 use bytes::Bytes;
 use flume::{r#async::RecvFut, Receiver, Sender};
 use futures::{future::FusedFuture, Future, FutureExt, Sink, SinkExt, StreamExt};
@@ -555,6 +555,12 @@ impl crate::ChannelTypes for Http2ChannelTypes {
     type ServerChannel<In: RpcMessage, Out: RpcMessage> = self::Http2ServerChannel<In, Out>;
 }
 
+impl crate::ChannelTypes2 for Http2ChannelTypes {
+    type ClientConnection<In: RpcMessage, Out: RpcMessage> = self::Http2ClientChannel<In, Out>;
+
+    type ServerConnection<In: RpcMessage, Out: RpcMessage> = self::Http2ServerChannel<In, Out>;
+}
+
 /// OpenBiError for mem channels.
 #[derive(Debug)]
 pub enum OpenBiError {
@@ -786,5 +792,47 @@ impl<In: RpcMessage, Out: RpcMessage> ServerChannel<In, Out, Http2ChannelTypes>
 
     fn local_addr(&self) -> &[crate::LocalAddr] {
         &self.local_addr
+    }
+}
+
+impl<In: RpcMessage, Out: RpcMessage> ConnectionErrors for Http2ClientChannel<In, Out> {
+    type SendError = self::SendError;
+
+    type RecvError = self::RecvError;
+
+    type OpenError = OpenBiError;
+}
+
+impl<In: RpcMessage, Out: RpcMessage> TypedConnection<In, Out> for Http2ClientChannel<In, Out>
+{
+    type RecvStream = self::RecvStream<In>;
+
+    type SendSink = self::SendSink<Out>;
+
+    type NextFut<'a> = OpenBiFuture<'a, In, Out>;
+
+    fn next(&self) -> Self::NextFut<'_> {
+        self.open_bi()
+    }
+}
+
+impl<In: RpcMessage, Out: RpcMessage> ConnectionErrors for Http2ServerChannel<In, Out> {
+    type SendError = self::SendError;
+
+    type RecvError = self::RecvError;
+
+    type OpenError = AcceptBiError;
+}
+
+impl<In: RpcMessage, Out: RpcMessage> TypedConnection<In, Out> for Http2ServerChannel<In, Out>
+{
+    type RecvStream = self::RecvStream<In>;
+
+    type SendSink = self::SendSink<Out>;
+
+    type NextFut<'a> = AcceptBiFuture<'a, In, Out>;
+
+    fn next(&self) -> Self::NextFut<'_> {
+        self.accept_bi()
     }
 }

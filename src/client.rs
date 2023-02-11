@@ -70,6 +70,16 @@ pub trait TypedConnection<In, Out>: ConnectionErrors {
     fn next(&self) -> Self::NextFut<'_>;
 }
 
+/// A client connection is a connection where requests are sent and responses are received
+pub trait ClientConnection<S: Service>: TypedConnection<S::Res, S::Req> {}
+
+impl<T: TypedConnection<S::Res, S::Req>, S: Service> ClientConnection<S> for T {}
+
+/// A server connection is a connection where requests are received and responses are sent
+pub trait ServerConnection<S: Service>: TypedConnection<S::Req, S::Res> {}
+
+impl<T: TypedConnection<S::Req, S::Res>, S: Service> ServerConnection<S> for T {}
+
 /// A client for a specific service
 ///
 /// This is a wrapper around a [SubstreamSource] that serves as the entry point for the client DSL.
@@ -93,12 +103,12 @@ impl<S, C: Clone> Clone for RpcClient<S, C> {
 /// that support it, [ClientStreaming] and [BidiStreaming].
 #[pin_project]
 #[derive(Debug)]
-pub struct UpdateSink<S: Service, C: TypedConnection<S::Res, S::Req>, M: Msg<S>>(
+pub struct UpdateSink<S: Service, C: ClientConnection<S>, M: Msg<S>>(
     #[pin] C::SendSink,
     PhantomData<M>,
 );
 
-impl<S: Service, C: TypedConnection<S::Res, S::Req>, M: Msg<S>> Sink<M::Update>
+impl<S: Service, C: ClientConnection<S>, M: Msg<S>> Sink<M::Update>
     for UpdateSink<S, C, M>
 {
     type Error = C::SendError;
@@ -121,7 +131,7 @@ impl<S: Service, C: TypedConnection<S::Res, S::Req>, M: Msg<S>> Sink<M::Update>
     }
 }
 
-impl<S: Service, C: TypedConnection<S::Res, S::Req>> RpcClient<S, C> {
+impl<S: Service, C: ClientConnection<S>> RpcClient<S, C> {
     /// Create a new rpc client from a channel
     pub fn new(source: C) -> Self {
         Self {

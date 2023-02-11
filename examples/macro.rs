@@ -53,7 +53,7 @@ use async_stream::stream;
 use futures::{SinkExt, Stream, StreamExt};
 use quic_rpc::client::RpcClient;
 use quic_rpc::server::run_server_loop;
-use quic_rpc::transport::mem::{self, MemChannelTypes};
+use quic_rpc::transport::mem;
 use store_rpc::*;
 
 #[derive(Clone)]
@@ -110,14 +110,13 @@ async fn main() -> anyhow::Result<()> {
         let target = Store;
         run_server_loop(
             StoreService,
-            MemChannelTypes,
             server,
             target,
             dispatch_store_request,
         )
         .await
     });
-    let client = RpcClient::<StoreService, MemChannelTypes>::new(client);
+    let client = RpcClient::<StoreService, _>::new(client);
     let mut client = StoreClient(client);
 
     // a rpc call

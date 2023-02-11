@@ -7,7 +7,7 @@
 //! [crossbeam]: https://docs.rs/crossbeam/
 use crate::{
     client::{ConnectionErrors, TypedConnection},
-    RpcMessage,
+    RpcMessage, ChannelTypes2,
 };
 use core::fmt;
 use futures::{future::BoxFuture, FutureExt, Sink, SinkExt, Stream, StreamExt};
@@ -83,6 +83,11 @@ impl<T: RpcMessage> Stream for RecvStream<T> {
 impl error::Error for RecvError {}
 
 pub struct MemChannelTypes;
+
+impl ChannelTypes2 for MemChannelTypes {
+    type ClientConnection<In: RpcMessage, Out: RpcMessage> = MemClientChannel<In, Out>;
+    type ServerConnection<In: RpcMessage, Out: RpcMessage> = MemServerChannel<In, Out>;
+}
 
 /// A mem channel
 pub struct MemServerChannel<In: RpcMessage, Out: RpcMessage> {

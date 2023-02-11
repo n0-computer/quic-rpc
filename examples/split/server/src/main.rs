@@ -65,7 +65,6 @@ async fn main() -> anyhow::Result<()> {
     let target = Compute;
     run_server_loop(
         ComputeService,
-        QuinnChannelTypes,
         channel.clone(),
         target,
         dispatch_compute_request,

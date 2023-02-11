@@ -19,7 +19,7 @@ async fn main() -> anyhow::Result<()> {
         server_addr,
         "localhost".to_string(),
     );
-    let client = RpcClient::<ComputeService, QuinnChannelTypes>::new(client);
+    let client = RpcClient::<ComputeService, _>::new(client);
     let mut client = ComputeClient(client);
 
     // a rpc call
