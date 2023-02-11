@@ -3,11 +3,10 @@
 //! This defines the RPC client DSL
 use crate::{
     message::{BidiStreaming, ClientStreaming, Msg, Rpc, ServerStreaming},
-    ClientConnection, ConnectionErrors, RpcError, Service,
+    ClientConnection, ConnectionErrors, Service,
 };
 use futures::{
-    future::BoxFuture, stream::BoxStream, Future, FutureExt, Sink, SinkExt, Stream, StreamExt,
-    TryFutureExt,
+    future::BoxFuture, stream::BoxStream, FutureExt, Sink, SinkExt, Stream, StreamExt, TryFutureExt,
 };
 use pin_project::pin_project;
 use std::{

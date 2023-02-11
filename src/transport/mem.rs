@@ -7,8 +7,8 @@
 //! [crossbeam]: https://docs.rs/crossbeam/
 use crate::{ChannelTypes2, Connection, ConnectionErrors, RpcMessage};
 use core::fmt;
-use futures::{future::BoxFuture, FutureExt, Sink, SinkExt, Stream, StreamExt};
-use std::{error, fmt::Display, pin::Pin, result, task::Poll};
+use futures::{Future, FutureExt, Sink, SinkExt, Stream, StreamExt};
+use std::{error, fmt::Display, marker::PhantomData, pin::Pin, result, task::Poll};
 
 /// Error when receiving from a channel
 ///
@@ -115,23 +115,70 @@ impl<In: RpcMessage, Out: RpcMessage> ConnectionErrors for MemServerChannel<In, 
     type OpenError = self::AcceptBiError;
 }
 
+type Socket<In, Out> = (self::SendSink<Out>, self::RecvStream<In>);
+
+/// Future returned by accept_bi
+pub struct OpenBiFuture<'a, In: RpcMessage, Out: RpcMessage> {
+    inner: flume::r#async::SendFut<'a, Socket<Out, In>>,
+    res: Option<Socket<In, Out>>,
+}
+
+impl<'a, In: RpcMessage, Out: RpcMessage> OpenBiFuture<'a, In, Out> {
+    fn new(inner: flume::r#async::SendFut<'a, Socket<Out, In>>, res: Socket<In, Out>) -> Self {
+        Self {
+            inner,
+            res: Some(res),
+        }
+    }
+}
+
+impl<'a, In: RpcMessage, Out: RpcMessage> Future for OpenBiFuture<'a, In, Out> {
+    type Output = result::Result<Socket<In, Out>, self::OpenBiError>;
+
+    fn poll(
+        mut self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Self::Output> {
+        match self.inner.poll_unpin(cx) {
+            Poll::Ready(Ok(())) => self
+                .res
+                .take()
+                .map(|x| Poll::Ready(Ok(x)))
+                .unwrap_or(Poll::Pending),
+            Poll::Ready(Err(_)) => Poll::Ready(Err(self::OpenBiError::RemoteDropped)),
+            Poll::Pending => Poll::Pending,
+        }
+    }
+}
+
+pub struct AcceptBiFuture<'a, In: RpcMessage, Out: RpcMessage> {
+    wrapped: flume::r#async::RecvFut<'a, (SendSink<Out>, RecvStream<In>)>,
+    _p: PhantomData<(In, Out)>,
+}
+
+impl<'a, In: RpcMessage, Out: RpcMessage> Future for AcceptBiFuture<'a, In, Out> {
+    type Output = result::Result<(SendSink<Out>, RecvStream<In>), AcceptBiError>;
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
+        match self.wrapped.poll_unpin(cx) {
+            Poll::Ready(Ok((send, recv))) => Poll::Ready(Ok((send, recv))),
+            Poll::Ready(Err(_)) => Poll::Ready(Err(AcceptBiError::RemoteDropped)),
+            Poll::Pending => Poll::Pending,
+        }
+    }
+}
+
 impl<In: RpcMessage, Out: RpcMessage> Connection<In, Out> for MemServerChannel<In, Out> {
     type SendSink = SendSink<Out>;
     type RecvStream = RecvStream<In>;
 
-    type NextFut<'a> =
-        BoxFuture<'a, result::Result<(Self::SendSink, Self::RecvStream), AcceptBiError>>;
+    type NextFut<'a> = AcceptBiFuture<'a, In, Out>;
 
     fn next(&self) -> Self::NextFut<'_> {
-        async move {
-            let channel = self
-                .stream
-                .recv_async()
-                .await
-                .map_err(|_| AcceptBiError::RemoteDropped)?;
-            Ok(channel)
+        AcceptBiFuture {
+            wrapped: self.stream.recv_async(),
+            _p: PhantomData,
         }
-        .boxed()
     }
 }
 
@@ -147,25 +194,20 @@ impl<In: RpcMessage, Out: RpcMessage> Connection<In, Out> for MemClientChannel<I
     type SendSink = SendSink<Out>;
     type RecvStream = RecvStream<In>;
 
-    type NextFut<'a> =
-        BoxFuture<'a, result::Result<(Self::SendSink, Self::RecvStream), OpenBiError>>;
+    type NextFut<'a> = OpenBiFuture<'a, In, Out>;
 
     fn next(&self) -> Self::NextFut<'_> {
-        async move {
-            let (local_send, remote_recv) = flume::bounded::<Out>(128);
-            let (remote_send, local_recv) = flume::bounded::<In>(128);
-            let remote_chan = (
-                SendSink(remote_send.into_sink()),
-                RecvStream(remote_recv.into_stream()),
-            );
-            let local_chan = (
-                SendSink(local_send.into_sink()),
-                RecvStream(local_recv.into_stream()),
-            );
-            self.sink.send_async(remote_chan).await.unwrap();
-            Ok(local_chan)
-        }
-        .boxed()
+        let (local_send, remote_recv) = flume::bounded::<Out>(128);
+        let (remote_send, local_recv) = flume::bounded::<In>(128);
+        let remote_chan = (
+            SendSink(remote_send.into_sink()),
+            RecvStream(remote_recv.into_stream()),
+        );
+        let local_chan = (
+            SendSink(local_send.into_sink()),
+            RecvStream(local_recv.into_stream()),
+        );
+        OpenBiFuture::new(self.sink.send_async(remote_chan), local_chan)
     }
 }
 

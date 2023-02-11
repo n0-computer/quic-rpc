@@ -354,11 +354,8 @@ impl<A: Connection<In, Out>, B: Connection<In, Out>, In: RpcMessage, Out: RpcMes
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::{
-        transport::{combined, mem},
-        ClientChannel,
-    };
+    
+    
 
     #[tokio::test]
     async fn open_empty_channel() {

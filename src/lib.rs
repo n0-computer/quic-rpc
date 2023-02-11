@@ -61,7 +61,6 @@ use serde::{de::DeserializeOwned, Serialize};
 use std::{
     fmt::{self, Debug, Display},
     net::SocketAddr,
-    result,
 };
 pub mod client;
 pub mod message;

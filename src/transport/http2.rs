@@ -735,6 +735,38 @@ where
     }
 }
 
+impl<In: RpcMessage, Out: RpcMessage> Http2ClientChannel<In, Out> {
+    fn open_bi(&self) -> OpenBiFuture<'_, In, Out> {
+        event!(Level::TRACE, "open_bi {}", self.inner.uri);
+        let (out_tx, out_rx) = flume::bounded::<io::Result<Bytes>>(32);
+        let req: Result<Request<Body>, OpenBiError> = Request::post(&self.inner.uri)
+            .body(Body::wrap_stream(out_rx.into_stream()))
+            .map_err(OpenBiError::HyperHttp);
+        let res = req.map(|req| {
+            (
+                self.inner.client.request(req),
+                out_tx,
+                self.inner.config.clone(),
+            )
+        });
+        OpenBiFuture::new(res)
+    }
+}
+
+impl<In: RpcMessage, Out: RpcMessage> Http2ServerChannel<In, Out> {
+    /// Accept a bi-directional stream from a client.
+    ///
+    /// The [`AcceptBiFuture`] returns a `(sender, receiver)` pair which can be used as
+    /// channels.
+    fn accept_bi(&self) -> AcceptBiFuture<'_, In, Out> {
+        AcceptBiFuture::new(self.channel.recv_async(), self.config.clone())
+    }
+
+    fn local_addr(&self) -> &[crate::LocalAddr] {
+        &self.local_addr
+    }
+}
+
 impl<In: RpcMessage, Out: RpcMessage> ConnectionErrors for Http2ClientChannel<In, Out> {
     type SendError = self::SendError;
 

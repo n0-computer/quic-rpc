@@ -6,10 +6,9 @@ use std::{
 use bincode::Options;
 use futures::{Sink, SinkExt, Stream, StreamExt};
 use pin_project::pin_project;
+use serde::{de::DeserializeOwned, Serialize};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio_util::codec::LengthDelimitedCodec;
-
-use crate::RpcMessage;
 
 type BincodeEncoding =
     bincode::config::WithOtherIntEncoding<bincode::DefaultOptions, bincode::config::FixintEncoding>;
@@ -25,7 +24,7 @@ pub struct FramedBincodeRead<T, In>(
     >,
 );
 
-impl<T: AsyncRead, In: RpcMessage> FramedBincodeRead<T, In> {
+impl<T: AsyncRead, In: DeserializeOwned> FramedBincodeRead<T, In> {
     /// Wrap a socket in a length delimited codec and bincode with fast fixint encoding
     pub fn new(inner: T, max_frame_length: usize) -> Self {
         // configure length delimited codec with max frame length
@@ -42,7 +41,9 @@ impl<T: AsyncRead, In: RpcMessage> FramedBincodeRead<T, In> {
         let framed = tokio_serde::Framed::new(framed, bincode);
         Self(framed)
     }
+}
 
+impl<T, In> FramedBincodeRead<T, In> {
     /// Get the underlying binary stream
     ///
     /// This can be useful if you want to drop the framing and use the underlying stream directly
@@ -52,7 +53,7 @@ impl<T: AsyncRead, In: RpcMessage> FramedBincodeRead<T, In> {
     }
 }
 
-impl<T: AsyncRead, In: RpcMessage> Stream for FramedBincodeRead<T, In> {
+impl<T: AsyncRead, In: DeserializeOwned> Stream for FramedBincodeRead<T, In> {
     type Item = Result<In, std::io::Error>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut task::Context<'_>) -> Poll<Option<Self::Item>> {
@@ -72,7 +73,7 @@ pub struct FramedBincodeWrite<T, Out>(
     >,
 );
 
-impl<T: AsyncWrite, Out: RpcMessage> FramedBincodeWrite<T, Out> {
+impl<T: AsyncWrite, Out: Serialize> FramedBincodeWrite<T, Out> {
     /// Wrap a socket in a length delimited codec and bincode with fast fixint encoding
     pub fn new(inner: T, max_frame_length: usize) -> Self {
         // configure length delimited codec with max frame length
@@ -89,7 +90,9 @@ impl<T: AsyncWrite, Out: RpcMessage> FramedBincodeWrite<T, Out> {
         let framed = tokio_serde::SymmetricallyFramed::new(framed, bincode);
         Self(framed)
     }
+}
 
+impl<T, Out> FramedBincodeWrite<T, Out> {
     /// Get the underlying binary stream
     ///
     /// This can be useful if you want to drop the framing and use the underlying stream directly
@@ -99,7 +102,7 @@ impl<T: AsyncWrite, Out: RpcMessage> FramedBincodeWrite<T, Out> {
     }
 }
 
-impl<T: AsyncWrite, Out: RpcMessage> Sink<Out> for FramedBincodeWrite<T, Out> {
+impl<T: AsyncWrite, Out: Serialize> Sink<Out> for FramedBincodeWrite<T, Out> {
     type Error = std::io::Error;
 
     fn poll_ready(
