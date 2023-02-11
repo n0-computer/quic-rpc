@@ -4,16 +4,12 @@ use std::{
 };
 
 use bincode::Options;
-use futures::{
-    Sink, SinkExt, Stream, StreamExt,
-};
+use futures::{Sink, SinkExt, Stream, StreamExt};
 use pin_project::pin_project;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio_util::codec::LengthDelimitedCodec;
 
-use crate::{
-    RpcMessage,
-};
+use crate::RpcMessage;
 
 type BincodeEncoding =
     bincode::config::WithOtherIntEncoding<bincode::DefaultOptions, bincode::config::FixintEncoding>;

@@ -108,118 +108,6 @@ pub trait ChannelTypes2 {
     type ServerConnection<In: RpcMessage, Out: RpcMessage>: Connection<In, Out>;
 }
 
-/// Defines a set of types for a kind of channel
-///
-/// Every distinct kind of channel has its own ChannelType. See e.g.
-/// [crate::transport::MemChannelTypes].
-pub trait ChannelTypes: Debug + Sized + Send + Sync + Unpin + Clone + 'static {
-    // type ServerSource<In, Out>: TypedConnection<In, Out>;
-
-    /// The sink used for sending either requests or responses on this channel
-    type SendSink<M: RpcMessage>: Sink<M, Error = Self::SendError> + Send + Unpin + 'static;
-    /// The stream used for receiving either requests or responses on this channel
-    type RecvStream<M: RpcMessage>: Stream<Item = result::Result<M, Self::RecvError>>
-        + Send
-        + Unpin
-        + 'static;
-    /// Error you might get while sending messages to a sink
-    type SendError: RpcError;
-    /// Error you might get while receiving messages from a stream
-    type RecvError: RpcError;
-    /// Error you might get when opening a new connection to the server
-    type OpenBiError: RpcError;
-    /// Future returned by open_bi
-    type OpenBiFuture<'a, In: RpcMessage, Out: RpcMessage>: Future<
-            Output = result::Result<(Self::SendSink<Out>, Self::RecvStream<In>), Self::OpenBiError>,
-        > + Send
-        + 'a
-    where
-        Self: 'a;
-
-    /// Error you might get when waiting for new streams on the server side
-    type AcceptBiError: RpcError;
-    /// Future returned by accept_bi
-    type AcceptBiFuture<'a, In: RpcMessage, Out: RpcMessage>: Future<
-            Output = result::Result<
-                (Self::SendSink<Out>, Self::RecvStream<In>),
-                Self::AcceptBiError,
-            >,
-        > + Send
-        + 'a
-    where
-        Self: 'a;
-
-    /// Channel type
-    type ClientChannel<In: RpcMessage, Out: RpcMessage>: ClientChannel<In, Out, Self>;
-
-    /// Channel type
-    type ServerChannel<In: RpcMessage, Out: RpcMessage>: ServerChannel<In, Out, Self>;
-}
-
-/// An abstract client channel with typed input and output
-pub trait ClientChannel<In: RpcMessage, Out: RpcMessage, T: ChannelTypes>:
-    Debug + Clone + Send + Sync + 'static
-{
-    /// Open a bidirectional stream
-    fn open_bi(&self) -> T::OpenBiFuture<'_, In, Out>;
-}
-
-#[derive(Debug)]
-struct ClientSource<In: RpcMessage, Out: RpcMessage, T: ChannelTypes> {
-    channel: T::ClientChannel<In, Out>,
-}
-
-impl<In: RpcMessage, Out: RpcMessage, T: ChannelTypes> Clone for ClientSource<In, Out, T> {
-    fn clone(&self) -> Self {
-        Self {
-            channel: self.channel.clone(),
-        }
-    }
-}
-
-impl<In: RpcMessage, Out: RpcMessage, T: ChannelTypes> ConnectionErrors
-    for ClientSource<In, Out, T>
-{
-    type SendError = T::SendError;
-
-    type RecvError = T::RecvError;
-
-    type OpenError = T::OpenBiError;
-}
-
-// impl<In: RpcMessage, Out: RpcMessage, T: ChannelTypes> TypedConnection<In, Out>
-//     for ClientSource<In, Out, T>
-// {
-//     type RecvStream = T::RecvStream<In>;
-
-//     type SendSink = T::SendSink<Out>;
-
-//     type SubstreamFut<'a> = T::OpenBiFuture<'a, In, Out>;
-
-//     fn next(&self) -> Self::SubstreamFut<'_> {
-//         self.channel.open_bi()
-//     }
-// }
-
-/// An abstract server with typed input and output
-pub trait ServerChannel<In: RpcMessage, Out: RpcMessage, T: ChannelTypes>:
-    Debug + Clone + Send + Sync + 'static
-{
-    /// Accepts a bidirectional stream.
-    ///
-    /// This returns a future who's `Output` is a tuple of a sender sink and receiver stream
-    /// to send and receive messages to and from the client respectively.  The sink and
-    /// stream `Item`s are the whole `In` and `Out` messages, an [`RpcMessage`].
-    fn accept_bi(&self) -> T::AcceptBiFuture<'_, In, Out>;
-
-    /// The local addresses this server is bound to.
-    ///
-    /// This is useful for publicly facing addresses when you start the server with a random
-    /// port, `:0` and let the kernel choose the real bind address.  This will return the
-    /// address with the actual port used.
-    fn local_addr(&self) -> &[LocalAddr];
-}
-
 /// The kinds of local addresses a [`ServerChannel`] can be bound to.
 ///
 /// Returned by [`ServerChannel::local_addr`].
@@ -280,7 +168,6 @@ impl Display for LocalAddr {
 //     }
 // }
 
-
 /// Errors that can happen when creating and using a channel
 ///
 /// This is independent of whether the channel is a byte channel or a message channel.
@@ -304,6 +191,7 @@ pub trait Connection<In, Out>: ConnectionErrors {
     type SendSink: Sink<Out, Error = Self::SendError> + Send + Unpin + 'static;
     /// The future that will resolve to a substream or an error
     type NextFut<'a>: Future<Output = Result<(Self::SendSink, Self::RecvStream), Self::OpenError>>
+        + Send
         + 'a
     where
         Self: 'a;
@@ -318,14 +206,14 @@ pub trait Connection<In, Out>: ConnectionErrors {
 }
 
 /// A client connection is a connection where requests are sent and responses are received
-/// 
+///
 /// This is just a trait alias for TypedConnection<S::Res, S::Req>
 pub trait ClientConnection<S: Service>: Connection<S::Res, S::Req> {}
 
 impl<T: Connection<S::Res, S::Req>, S: Service> ClientConnection<S> for T {}
 
 /// A server connection is a connection where requests are received and responses are sent
-/// 
+///
 /// This is just a trait alias for TypedConnection<S::Req, S::Res>
 pub trait ServerConnection<S: Service>: Connection<S::Req, S::Res> {}
 

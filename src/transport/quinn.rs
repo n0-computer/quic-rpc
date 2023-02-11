@@ -1,5 +1,5 @@
 //! QUIC channel implementation based on quinn
-use crate::{LocalAddr, RpcMessage, ChannelTypes2, ConnectionErrors, Connection};
+use crate::{ChannelTypes2, Connection, ConnectionErrors, LocalAddr, RpcMessage};
 use futures::channel::oneshot;
 use futures::future::BoxFuture;
 use futures::{Future, FutureExt, Sink, SinkExt, Stream, StreamExt};
@@ -504,66 +504,10 @@ impl<'a, In, Out> Future for AcceptBiFuture<'a, In, Out> {
     }
 }
 
-impl crate::ChannelTypes for QuinnChannelTypes {
-    type SendSink<M: RpcMessage> = self::SendSink<M>;
-
-    type RecvStream<M: RpcMessage> = self::RecvStream<M>;
-
-    type OpenBiError = self::OpenBiError;
-
-    type AcceptBiError = self::OpenBiError;
-
-    type SendError = io::Error;
-
-    type RecvError = io::Error;
-
-    type OpenBiFuture<'a, In: RpcMessage, Out: RpcMessage> = self::OpenBiFuture<'a, In, Out>;
-
-    type AcceptBiFuture<'a, In: RpcMessage, Out: RpcMessage> = self::AcceptBiFuture<'a, In, Out>;
-
-    type ClientChannel<In: RpcMessage, Out: RpcMessage> = self::QuinnClientChannel<In, Out>;
-
-    type ServerChannel<In: RpcMessage, Out: RpcMessage> = self::QuinnServerChannel<In, Out>;
-}
-
 impl ChannelTypes2 for QuinnChannelTypes {
     type ClientConnection<In: RpcMessage, Out: RpcMessage> = self::QuinnClientChannel<In, Out>;
 
     type ServerConnection<In: RpcMessage, Out: RpcMessage> = self::QuinnServerChannel<In, Out>;
-}
-
-impl<In: RpcMessage + Sync, Out: RpcMessage + Sync> crate::ClientChannel<In, Out, QuinnChannelTypes>
-    for self::QuinnClientChannel<In, Out>
-{
-    fn open_bi(&self) -> OpenBiFuture<'_, In, Out> {
-        OpenBiFuture(
-            async move {
-                let (sender, receiver) = oneshot::channel();
-                self.inner
-                    .sender
-                    .send_async(sender)
-                    .await
-                    .map_err(|_| quinn::ConnectionError::LocallyClosed)?;
-                receiver
-                    .await
-                    .map_err(|_| quinn::ConnectionError::LocallyClosed)
-            }
-            .boxed(),
-            PhantomData,
-        )
-    }
-}
-
-impl<In: RpcMessage + Sync, Out: RpcMessage + Sync> crate::ServerChannel<In, Out, QuinnChannelTypes>
-    for self::QuinnServerChannel<In, Out>
-{
-    fn accept_bi(&self) -> AcceptBiFuture<'_, In, Out> {
-        AcceptBiFuture(self.inner.receiver.recv_async(), PhantomData)
-    }
-
-    fn local_addr(&self) -> &[crate::LocalAddr] {
-        &self.inner.local_addr
-    }
 }
 
 /// CreateChannelError for quinn channels.

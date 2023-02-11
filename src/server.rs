@@ -3,7 +3,7 @@
 //! This defines the RPC server DSL
 use crate::{
     message::{BidiStreaming, ClientStreaming, Msg, Rpc, ServerStreaming},
-    Service, ConnectionErrors, ServerConnection,
+    ConnectionErrors, ServerConnection, Service,
 };
 use futures::{channel::oneshot, task, task::Poll, Future, FutureExt, SinkExt, Stream, StreamExt};
 use pin_project::pin_project;

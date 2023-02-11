@@ -3,7 +3,7 @@
 //! This defines the RPC client DSL
 use crate::{
     message::{BidiStreaming, ClientStreaming, Msg, Rpc, ServerStreaming},
-    RpcError, Service, ClientConnection, ConnectionErrors,
+    ClientConnection, ConnectionErrors, RpcError, Service,
 };
 use futures::{
     future::BoxFuture, stream::BoxStream, Future, FutureExt, Sink, SinkExt, Stream, StreamExt,
@@ -18,21 +18,6 @@ use std::{
     result,
     task::{Context, Poll},
 };
-use tokio::io::{AsyncRead, AsyncWrite};
-
-/// A source of bidirectional channels
-///
-/// Both the server and the client can be thought as a source of channels.
-/// On the client, acquiring channels means opening connections.
-/// On the server, acquiring channels means accepting connections.
-pub trait ChannelSource: Debug + Send + Sync + 'static {
-    type OpenError: RpcError;
-    type Channel: AsyncRead + AsyncWrite + Unpin + Send + 'static;
-    type ChannelFut<'a>: Future<Output = Result<Self::Channel, Self::OpenError>> + Send + 'a
-    where
-        Self: 'a;
-    fn next(&self) -> Self::ChannelFut<'_>;
-}
 
 /// A client for a specific service
 ///
@@ -62,9 +47,7 @@ pub struct UpdateSink<S: Service, C: ClientConnection<S>, M: Msg<S>>(
     PhantomData<M>,
 );
 
-impl<S: Service, C: ClientConnection<S>, M: Msg<S>> Sink<M::Update>
-    for UpdateSink<S, C, M>
-{
+impl<S: Service, C: ClientConnection<S>, M: Msg<S>> Sink<M::Update> for UpdateSink<S, C, M> {
     type Error = C::SendError;
 
     fn poll_ready(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {

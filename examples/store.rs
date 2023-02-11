@@ -7,7 +7,7 @@ use quic_rpc::{
     message::{BidiStreaming, ClientStreaming, Msg, ServerStreaming},
     server::RpcServerError,
     transport::mem,
-    *, Connection, ServerConnection,
+    Connection, ServerConnection, *,
 };
 use serde::{Deserialize, Serialize};
 use std::{fmt::Debug, result};

@@ -3,10 +3,9 @@ use async_stream::stream;
 use derive_more::{From, TryInto};
 use futures::{SinkExt, Stream, StreamExt, TryStreamExt};
 use quic_rpc::{
-    ServerConnection, ClientConnection,
     message::{BidiStreaming, ClientStreaming, Msg, RpcMsg, ServerStreaming},
     server::RpcServerError,
-    RpcClient, RpcServer, Service,
+    ClientConnection, RpcClient, RpcServer, ServerConnection, Service,
 };
 use serde::{Deserialize, Serialize};
 use std::{
@@ -210,9 +209,7 @@ impl ComputeService {
     }
 }
 
-pub async fn smoke_test<C: ClientConnection<ComputeService>>(
-    client: C,
-) -> anyhow::Result<()> {
+pub async fn smoke_test<C: ClientConnection<ComputeService>>(client: C) -> anyhow::Result<()> {
     let client = RpcClient::<ComputeService, C>::new(client);
     // a rpc call
     tracing::debug!("calling rpc S(1234)");

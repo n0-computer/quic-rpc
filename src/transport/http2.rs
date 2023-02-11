@@ -7,7 +7,7 @@ use std::{
     sync::Arc, task::Poll,
 };
 
-use crate::{ClientChannel, LocalAddr, RpcMessage, ServerChannel, Connection, ConnectionErrors};
+use crate::{Connection, ConnectionErrors, LocalAddr, RpcMessage};
 use bytes::Bytes;
 use flume::{r#async::RecvFut, Receiver, Sender};
 use futures::{future::FusedFuture, Future, FutureExt, Sink, SinkExt, StreamExt};
@@ -533,28 +533,6 @@ impl error::Error for RecvError {}
 #[derive(Debug, Clone)]
 pub struct Http2ChannelTypes;
 
-impl crate::ChannelTypes for Http2ChannelTypes {
-    type SendSink<M: RpcMessage> = self::SendSink<M>;
-
-    type RecvStream<M: RpcMessage> = self::RecvStream<M>;
-
-    type SendError = self::SendError;
-
-    type RecvError = self::RecvError;
-
-    type OpenBiError = self::OpenBiError;
-
-    type OpenBiFuture<'a, In: RpcMessage, Out: RpcMessage> = self::OpenBiFuture<'a, In, Out>;
-
-    type AcceptBiError = self::AcceptBiError;
-
-    type AcceptBiFuture<'a, In: RpcMessage, Out: RpcMessage> = self::AcceptBiFuture<'a, In, Out>;
-
-    type ClientChannel<In: RpcMessage, Out: RpcMessage> = self::Http2ClientChannel<In, Out>;
-
-    type ServerChannel<In: RpcMessage, Out: RpcMessage> = self::Http2ServerChannel<In, Out>;
-}
-
 impl crate::ChannelTypes2 for Http2ChannelTypes {
     type ClientConnection<In: RpcMessage, Out: RpcMessage> = self::Http2ClientChannel<In, Out>;
 
@@ -757,44 +735,6 @@ where
     }
 }
 
-impl<In, Out> ClientChannel<In, Out, Http2ChannelTypes> for Http2ClientChannel<In, Out>
-where
-    In: RpcMessage,
-    Out: RpcMessage,
-{
-    fn open_bi(&self) -> OpenBiFuture<'_, In, Out> {
-        event!(Level::TRACE, "open_bi {}", self.inner.uri);
-        let (out_tx, out_rx) = flume::bounded::<io::Result<Bytes>>(32);
-        let req: Result<Request<Body>, OpenBiError> = Request::post(&self.inner.uri)
-            .body(Body::wrap_stream(out_rx.into_stream()))
-            .map_err(OpenBiError::HyperHttp);
-        let res = req.map(|req| {
-            (
-                self.inner.client.request(req),
-                out_tx,
-                self.inner.config.clone(),
-            )
-        });
-        OpenBiFuture::new(res)
-    }
-}
-
-impl<In: RpcMessage, Out: RpcMessage> ServerChannel<In, Out, Http2ChannelTypes>
-    for Http2ServerChannel<In, Out>
-{
-    /// Accept a bi-directional stream from a client.
-    ///
-    /// The [`AcceptBiFuture`] returns a `(sender, receiver)` pair which can be used as
-    /// channels.
-    fn accept_bi(&self) -> AcceptBiFuture<'_, In, Out> {
-        AcceptBiFuture::new(self.channel.recv_async(), self.config.clone())
-    }
-
-    fn local_addr(&self) -> &[crate::LocalAddr] {
-        &self.local_addr
-    }
-}
-
 impl<In: RpcMessage, Out: RpcMessage> ConnectionErrors for Http2ClientChannel<In, Out> {
     type SendError = self::SendError;
 
@@ -803,8 +743,7 @@ impl<In: RpcMessage, Out: RpcMessage> ConnectionErrors for Http2ClientChannel<In
     type OpenError = OpenBiError;
 }
 
-impl<In: RpcMessage, Out: RpcMessage> Connection<In, Out> for Http2ClientChannel<In, Out>
-{
+impl<In: RpcMessage, Out: RpcMessage> Connection<In, Out> for Http2ClientChannel<In, Out> {
     type RecvStream = self::RecvStream<In>;
 
     type SendSink = self::SendSink<Out>;
@@ -824,8 +763,7 @@ impl<In: RpcMessage, Out: RpcMessage> ConnectionErrors for Http2ServerChannel<In
     type OpenError = AcceptBiError;
 }
 
-impl<In: RpcMessage, Out: RpcMessage> Connection<In, Out> for Http2ServerChannel<In, Out>
-{
+impl<In: RpcMessage, Out: RpcMessage> Connection<In, Out> for Http2ServerChannel<In, Out> {
     type RecvStream = self::RecvStream<In>;
 
     type SendSink = self::SendSink<Out>;

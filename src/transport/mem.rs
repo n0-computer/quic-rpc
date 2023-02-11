@@ -5,10 +5,7 @@
 //!
 //! [flume]: https://docs.rs/flume/
 //! [crossbeam]: https://docs.rs/crossbeam/
-use crate::{
-    ConnectionErrors, Connection,
-    RpcMessage, ChannelTypes2,
-};
+use crate::{ChannelTypes2, Connection, ConnectionErrors, RpcMessage};
 use core::fmt;
 use futures::{future::BoxFuture, FutureExt, Sink, SinkExt, Stream, StreamExt};
 use std::{error, fmt::Display, pin::Pin, result, task::Poll};

@@ -108,13 +108,7 @@ async fn main() -> anyhow::Result<()> {
     let (server, client) = mem::connection::<StoreRequest, StoreResponse>(1);
     let server_handle = tokio::task::spawn(async move {
         let target = Store;
-        run_server_loop(
-            StoreService,
-            server,
-            target,
-            dispatch_store_request,
-        )
-        .await
+        run_server_loop(StoreService, server, target, dispatch_store_request).await
     });
     let client = RpcClient::<StoreService, _>::new(client);
     let mut client = StoreClient(client);

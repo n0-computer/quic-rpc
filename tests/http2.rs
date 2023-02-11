@@ -5,12 +5,10 @@ use derive_more::{From, TryInto};
 use flume::Receiver;
 use hyper::Uri;
 use quic_rpc::{
+    client::RpcClientError,
     message::{Msg, Rpc},
     server::RpcServerError,
-    client::RpcClientError,
-    transport::http2::{
-        self, Http2ClientChannel, Http2ServerChannel, RecvError,
-    },
+    transport::http2::{self, Http2ClientChannel, Http2ServerChannel, RecvError},
     RpcClient, RpcServer, Service,
 };
 use serde::{Deserialize, Serialize};
@@ -61,7 +59,6 @@ async fn http2_channel_smoke() -> anyhow::Result<()> {
 
 #[tokio::test]
 async fn http2_channel_errors() -> anyhow::Result<()> {
-
     type CC = Http2ClientChannel<TestRequest, TestResponse>;
     type SC = Http2ServerChannel<TestRequest, TestResponse>;
 
