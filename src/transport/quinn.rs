@@ -334,35 +334,45 @@ impl<In: RpcMessage, Out: RpcMessage> Connection<In, Out> for QuinnClientChannel
     type SendSink = self::SendSink<Out>;
     type RecvStream = self::RecvStream<In>;
 
-    type NextFut<'a> =
-        BoxFuture<'a, result::Result<(Self::SendSink, Self::RecvStream), quinn::ConnectionError>>;
+    // type NextFut<'a> = BoxFuture<'a, result::Result<(Self::SendSink, Self::RecvStream), quinn::ConnectionError>>;
+    type NextFut<'a> = OpenBiFuture<'a, In, Out>;
 
     fn next(&self) -> Self::NextFut<'_> {
-        async move {
-            let (sender, receiver) = oneshot::channel();
-            self.inner
-                .sender
-                .send_async(sender)
-                .await
-                .map_err(|_| quinn::ConnectionError::LocallyClosed)?;
-            receiver
-                .await
-                .map(|(send, recv)| {
-                    let send = FramedBincodeWrite::new(send, MAX_FRAME_LENGTH);
-                    let recv = FramedBincodeRead::new(recv, MAX_FRAME_LENGTH);
-                    let send = SendSink(send);
-                    let recv = RecvStream(recv);
-                    (send, recv)
-                })
-                .map_err(|_| quinn::ConnectionError::LocallyClosed)
-        }
-        .boxed()
+        let (sender, receiver) = oneshot::channel();
+        OpenBiFuture(OpenBiFutureState::Sending(self.inner
+            .sender
+            .send_async(sender), receiver), PhantomData)
+        // async move {
+        //     let (sender, receiver) = oneshot::channel();
+        //     self.inner
+        //         .sender
+        //         .send_async(sender)
+        //         .await
+        //         .map_err(|_| quinn::ConnectionError::LocallyClosed)?;
+        //     receiver
+        //         .await
+        //         .map(|(send, recv)| {
+        //             let send = SendSink::new(send);
+        //             let recv = RecvStream::new(recv);
+        //             (send, recv)
+        //         })
+        //         .map_err(|_| quinn::ConnectionError::LocallyClosed)
+        // }
+        // .boxed()
     }
 }
 
 /// A sink that wraps a quinn SendStream with length delimiting and bincode
 #[pin_project]
 pub struct SendSink<Out>(#[pin] FramedBincodeWrite<quinn::SendStream, Out>);
+
+impl<Out: Serialize> SendSink<Out> {
+
+    fn new(inner: quinn::SendStream) -> Self {
+        let inner = FramedBincodeWrite::new(inner, MAX_FRAME_LENGTH);
+        Self(inner)
+    }
+}
 
 impl<Out> SendSink<Out> {
     pub fn into_inner(self) -> quinn::SendStream {
@@ -403,6 +413,14 @@ impl<Out: Serialize> Sink<Out> for SendSink<Out> {
 #[pin_project]
 pub struct RecvStream<In>(#[pin] FramedBincodeRead<quinn::RecvStream, In>);
 
+impl<In: DeserializeOwned> RecvStream<In> {
+
+    fn new(inner: quinn::RecvStream) -> Self {
+        let inner = FramedBincodeRead::new(inner, MAX_FRAME_LENGTH);
+        Self(inner)
+    }
+}
+
 impl<In> RecvStream<In> {
     pub fn into_inner(self) -> quinn::RecvStream {
         self.0.into_inner()
@@ -433,11 +451,14 @@ pub type AcceptBiError = quinn::ConnectionError;
 pub struct QuinnChannelTypes;
 
 enum OpenBiFutureState<'a> {
+    /// Sending the oneshot sender to the server
     Sending(
         flume::r#async::SendFut<'a, oneshot::Sender<(quinn::SendStream, quinn::RecvStream)>>,
         oneshot::Receiver<(quinn::SendStream, quinn::RecvStream)>,
     ),
+    /// Receiving the channel from the server
     Receiving(oneshot::Receiver<(quinn::SendStream, quinn::RecvStream)>),
+    /// Taken or done
     Taken,
 }
 
@@ -469,10 +490,8 @@ impl<'a, In: RpcMessage, Out: RpcMessage> Future for OpenBiFuture<'a, In, Out> {
             },
             OpenBiFutureState::Receiving(mut fut) => match fut.poll_unpin(cx) {
                 Poll::Ready(Ok((send, recv))) => {
-                    let send = FramedBincodeWrite::new(send, MAX_FRAME_LENGTH);
-                    let recv = FramedBincodeRead::new(recv, MAX_FRAME_LENGTH);
-                    let send = SendSink(send);
-                    let recv = RecvStream(recv);
+                    let send = SendSink::new(send);
+                    let recv = RecvStream::new(recv);
                     Poll::Ready(Ok((send, recv)))
                 }
                 Poll::Pending => {
@@ -505,10 +524,8 @@ impl<'a, In: RpcMessage, Out: RpcMessage> Future for AcceptBiFuture<'a, In, Out>
                 tracing::warn!("accept_bi: error receiving connection: {}", e);
                 quinn::ConnectionError::LocallyClosed
             })?;
-            let send = FramedBincodeWrite::new(send, MAX_FRAME_LENGTH);
-            let recv = FramedBincodeRead::new(recv, MAX_FRAME_LENGTH);
-            let send = SendSink(send);
-            let recv = RecvStream(recv);
+            let send = SendSink::new(send);
+            let recv = RecvStream::new(recv);
             Ok((send, recv))
         })
     }
