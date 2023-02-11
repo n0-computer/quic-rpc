@@ -5,10 +5,10 @@ use async_stream::stream;
 use futures::{Stream, StreamExt};
 use math::*;
 use quic_rpc::{
-    client::{TypedConnection, ServerConnection},
+    ServerConnection,
     message::{BidiStreaming, ClientStreaming, Msg, RpcMsg, ServerStreaming},
     server::RpcServerError,
-    ChannelTypes, RpcServer, Service,
+    RpcServer, Service,
 };
 
 #[derive(Debug, Clone)]

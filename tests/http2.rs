@@ -5,11 +5,11 @@ use derive_more::{From, TryInto};
 use flume::Receiver;
 use hyper::Uri;
 use quic_rpc::{
-    client::{RpcClientError, TypedConnection},
     message::{Msg, Rpc},
     server::RpcServerError,
+    client::RpcClientError,
     transport::http2::{
-        self, Http2ChannelTypes, Http2ClientChannel, Http2ServerChannel, RecvError,
+        self, Http2ClientChannel, Http2ServerChannel, RecvError,
     },
     RpcClient, RpcServer, Service,
 };

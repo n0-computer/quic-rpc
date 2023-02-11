@@ -56,7 +56,6 @@
 //! ```
 // #![deny(missing_docs)]
 // #![deny(rustdoc::broken_intra_doc_links)]
-use client::{ConnectionErrors, TypedConnection};
 use futures::{Future, Sink, Stream};
 use serde::{de::DeserializeOwned, Serialize};
 use std::{
@@ -104,9 +103,9 @@ pub trait Service: Send + Sync + Debug + Clone + 'static {
 /// Groups types for client and server connections
 pub trait ChannelTypes2 {
     /// The client connection type
-    type ClientConnection<In: RpcMessage, Out: RpcMessage>: TypedConnection<In, Out>;
+    type ClientConnection<In: RpcMessage, Out: RpcMessage>: Connection<In, Out>;
     /// The server connection type
-    type ServerConnection<In: RpcMessage, Out: RpcMessage>: TypedConnection<In, Out>;
+    type ServerConnection<In: RpcMessage, Out: RpcMessage>: Connection<In, Out>;
 }
 
 /// Defines a set of types for a kind of channel
@@ -280,3 +279,54 @@ impl Display for LocalAddr {
 //         self.channel.accept_bi()
 //     }
 // }
+
+
+/// Errors that can happen when creating and using a channel
+///
+/// This is independent of whether the channel is a byte channel or a message channel.
+pub trait ConnectionErrors: Debug + Clone + Send + Sync + 'static {
+    /// Error when sending messages
+    type SendError: RpcError;
+    /// Error when receiving messages
+    type RecvError: RpcError;
+    /// Error when opening a substream
+    type OpenError: RpcError;
+}
+
+/// A connection, aka a source of typed channels
+///
+/// Both the server and the client can be thought as a source of channels.
+/// On the client, acquiring channels means open.
+/// On the server, acquiring channels means accept.
+pub trait Connection<In, Out>: ConnectionErrors {
+    /// A typed bidirectional message channel
+    type RecvStream: Stream<Item = Result<In, Self::RecvError>> + Send + Unpin + 'static;
+    type SendSink: Sink<Out, Error = Self::SendError> + Send + Unpin + 'static;
+    /// The future that will resolve to a substream or an error
+    type NextFut<'a>: Future<Output = Result<(Self::SendSink, Self::RecvStream), Self::OpenError>>
+        + 'a
+    where
+        Self: 'a;
+    /// Get the next substream
+    ///
+    /// On the client side, this will open a new substream. This should complete
+    /// immediately if the connection is already open.
+    ///
+    /// On the server side, this will accept a new substream. This can block
+    /// indefinitely if no new client is interested.
+    fn next(&self) -> Self::NextFut<'_>;
+}
+
+/// A client connection is a connection where requests are sent and responses are received
+/// 
+/// This is just a trait alias for TypedConnection<S::Res, S::Req>
+pub trait ClientConnection<S: Service>: Connection<S::Res, S::Req> {}
+
+impl<T: Connection<S::Res, S::Req>, S: Service> ClientConnection<S> for T {}
+
+/// A server connection is a connection where requests are received and responses are sent
+/// 
+/// This is just a trait alias for TypedConnection<S::Req, S::Res>
+pub trait ServerConnection<S: Service>: Connection<S::Req, S::Res> {}
+
+impl<T: Connection<S::Req, S::Res>, S: Service> ServerConnection<S> for T {}

@@ -1,10 +1,9 @@
 //! [RpcServer] and support types
 //!
 //! This defines the RPC server DSL
-use crate::client::{ConnectionErrors, TypedConnection, ServerConnection};
 use crate::{
     message::{BidiStreaming, ClientStreaming, Msg, Rpc, ServerStreaming},
-    Service,
+    Service, ConnectionErrors, ServerConnection,
 };
 use futures::{channel::oneshot, task, task::Poll, Future, FutureExt, SinkExt, Stream, StreamExt};
 use pin_project::pin_project;

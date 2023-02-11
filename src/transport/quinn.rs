@@ -1,6 +1,5 @@
 //! QUIC channel implementation based on quinn
-use crate::client::{ConnectionErrors, TypedConnection};
-use crate::{LocalAddr, RpcMessage, ChannelTypes2};
+use crate::{LocalAddr, RpcMessage, ChannelTypes2, ConnectionErrors, Connection};
 use futures::channel::oneshot;
 use futures::future::BoxFuture;
 use futures::{Future, FutureExt, Sink, SinkExt, Stream, StreamExt};
@@ -179,7 +178,7 @@ impl<In: RpcMessage, Out: RpcMessage> ConnectionErrors for QuinnServerChannel<In
     type OpenError = quinn::ConnectionError;
 }
 
-impl<In: RpcMessage, Out: RpcMessage> TypedConnection<In, Out> for QuinnServerChannel<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> Connection<In, Out> for QuinnServerChannel<In, Out> {
     type RecvStream = FramedBincodeRead<quinn::RecvStream, In>;
     type SendSink = FramedBincodeWrite<quinn::SendStream, Out>;
 
@@ -344,7 +343,7 @@ impl<In: RpcMessage, Out: RpcMessage> ConnectionErrors for QuinnClientChannel<In
     type OpenError = quinn::ConnectionError;
 }
 
-impl<In: RpcMessage, Out: RpcMessage> TypedConnection<In, Out> for QuinnClientChannel<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> Connection<In, Out> for QuinnClientChannel<In, Out> {
     type SendSink = FramedBincodeWrite<quinn::SendStream, Out>;
     type RecvStream = FramedBincodeRead<quinn::RecvStream, In>;
 

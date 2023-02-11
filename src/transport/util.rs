@@ -132,5 +132,5 @@ impl<T: AsyncWrite, Out: RpcMessage> Sink<Out> for FramedBincodeWrite<T, Out> {
     }
 }
 
-fn assert_sink<T>(_: &impl Sink<T>) {}
-fn assert_stream<T>(_: &impl Stream<Item = T>) {}
+// fn assert_sink<T>(_: &impl Sink<T>) {}
+// fn assert_stream<T>(_: &impl Stream<Item = T>) {}

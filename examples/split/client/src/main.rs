@@ -1,6 +1,6 @@
 use futures::sink::SinkExt;
 use futures::stream::StreamExt;
-use quic_rpc::{transport::QuinnChannelTypes, RpcClient};
+use quic_rpc::RpcClient;
 use quinn::{ClientConfig, Endpoint};
 use std::io;
 use std::net::SocketAddr;

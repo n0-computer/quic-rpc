@@ -3,7 +3,7 @@
 //! This defines the RPC client DSL
 use crate::{
     message::{BidiStreaming, ClientStreaming, Msg, Rpc, ServerStreaming},
-    RpcError, Service,
+    RpcError, Service, ClientConnection, ConnectionErrors,
 };
 use futures::{
     future::BoxFuture, stream::BoxStream, Future, FutureExt, Sink, SinkExt, Stream, StreamExt,
@@ -33,52 +33,6 @@ pub trait ChannelSource: Debug + Send + Sync + 'static {
         Self: 'a;
     fn next(&self) -> Self::ChannelFut<'_>;
 }
-
-/// Errors that can happen when creating and using a channel
-///
-/// This is independent of whether the channel is a byte channel or a message channel.
-pub trait ConnectionErrors: Debug + Clone + Send + Sync + 'static {
-    /// Error when sending messages
-    type SendError: RpcError;
-    /// Error when receiving messages
-    type RecvError: RpcError;
-    /// Error when opening a substream
-    type OpenError: RpcError;
-}
-
-/// A connection, aka a source of typed channels
-///
-/// Both the server and the client can be thought as a source of channels.
-/// On the client, acquiring channels means open.
-/// On the server, acquiring channels means accept.
-pub trait TypedConnection<In, Out>: ConnectionErrors {
-    /// A typed bidirectional message channel
-    type RecvStream: Stream<Item = Result<In, Self::RecvError>> + Send + Unpin + 'static;
-    type SendSink: Sink<Out, Error = Self::SendError> + Send + Unpin + 'static;
-    /// The future that will resolve to a substream or an error
-    type NextFut<'a>: Future<Output = Result<(Self::SendSink, Self::RecvStream), Self::OpenError>>
-        + 'a
-    where
-        Self: 'a;
-    /// Get the next substream
-    ///
-    /// On the client side, this will open a new substream. This should complete
-    /// immediately if the connection is already open.
-    ///
-    /// On the server side, this will accept a new substream. This can block
-    /// indefinitely if no new client is interested.
-    fn next(&self) -> Self::NextFut<'_>;
-}
-
-/// A client connection is a connection where requests are sent and responses are received
-pub trait ClientConnection<S: Service>: TypedConnection<S::Res, S::Req> {}
-
-impl<T: TypedConnection<S::Res, S::Req>, S: Service> ClientConnection<S> for T {}
-
-/// A server connection is a connection where requests are received and responses are sent
-pub trait ServerConnection<S: Service>: TypedConnection<S::Req, S::Res> {}
-
-impl<T: TypedConnection<S::Req, S::Res>, S: Service> ServerConnection<S> for T {}
 
 /// A client for a specific service
 ///

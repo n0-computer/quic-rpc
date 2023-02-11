@@ -7,7 +7,7 @@ use std::{
     sync::Arc, task::Poll,
 };
 
-use crate::{ClientChannel, LocalAddr, RpcMessage, ServerChannel, client::{TypedConnection, ConnectionErrors}};
+use crate::{ClientChannel, LocalAddr, RpcMessage, ServerChannel, Connection, ConnectionErrors};
 use bytes::Bytes;
 use flume::{r#async::RecvFut, Receiver, Sender};
 use futures::{future::FusedFuture, Future, FutureExt, Sink, SinkExt, StreamExt};
@@ -803,7 +803,7 @@ impl<In: RpcMessage, Out: RpcMessage> ConnectionErrors for Http2ClientChannel<In
     type OpenError = OpenBiError;
 }
 
-impl<In: RpcMessage, Out: RpcMessage> TypedConnection<In, Out> for Http2ClientChannel<In, Out>
+impl<In: RpcMessage, Out: RpcMessage> Connection<In, Out> for Http2ClientChannel<In, Out>
 {
     type RecvStream = self::RecvStream<In>;
 
@@ -824,7 +824,7 @@ impl<In: RpcMessage, Out: RpcMessage> ConnectionErrors for Http2ServerChannel<In
     type OpenError = AcceptBiError;
 }
 
-impl<In: RpcMessage, Out: RpcMessage> TypedConnection<In, Out> for Http2ServerChannel<In, Out>
+impl<In: RpcMessage, Out: RpcMessage> Connection<In, Out> for Http2ServerChannel<In, Out>
 {
     type RecvStream = self::RecvStream<In>;
 

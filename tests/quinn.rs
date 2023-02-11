@@ -4,7 +4,7 @@ use std::{
     sync::Arc,
 };
 
-use quic_rpc::{transport::QuinnChannelTypes, RpcClient, RpcServer};
+use quic_rpc::{RpcClient, RpcServer};
 use quinn::{ClientConfig, Endpoint, ServerConfig};
 use tokio::task::JoinHandle;
 
@@ -108,16 +108,16 @@ async fn quinn_channel_bench() -> anyhow::Result<()> {
         server,
         server_addr,
     } = make_endpoints(12345)?;
-    tracing::info!("Starting server");
+    tracing::debug!("Starting server");
     let server_handle = run_server(server);
-    tracing::info!("Starting client");
+    tracing::debug!("Starting client");
     let client = quic_rpc::transport::quinn::QuinnClientChannel::new(
         client,
         server_addr,
         "localhost".into(),
     );
     let client = RpcClient::<ComputeService, _>::new(client);
-    tracing::info!("Starting benchmark");
+    tracing::debug!("Starting benchmark");
     bench(client, 50000).await?;
     server_handle.abort();
     Ok(())

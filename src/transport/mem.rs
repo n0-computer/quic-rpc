@@ -6,7 +6,7 @@
 //! [flume]: https://docs.rs/flume/
 //! [crossbeam]: https://docs.rs/crossbeam/
 use crate::{
-    client::{ConnectionErrors, TypedConnection},
+    ConnectionErrors, Connection,
     RpcMessage, ChannelTypes2,
 };
 use core::fmt;
@@ -118,7 +118,7 @@ impl<In: RpcMessage, Out: RpcMessage> ConnectionErrors for MemServerChannel<In, 
     type OpenError = self::AcceptBiError;
 }
 
-impl<In: RpcMessage, Out: RpcMessage> TypedConnection<In, Out> for MemServerChannel<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> Connection<In, Out> for MemServerChannel<In, Out> {
     type SendSink = SendSink<Out>;
     type RecvStream = RecvStream<In>;
 
@@ -146,7 +146,7 @@ impl<In: RpcMessage, Out: RpcMessage> ConnectionErrors for MemClientChannel<In, 
     type OpenError = self::OpenBiError;
 }
 
-impl<In: RpcMessage, Out: RpcMessage> TypedConnection<In, Out> for MemClientChannel<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> Connection<In, Out> for MemClientChannel<In, Out> {
     type SendSink = SendSink<Out>;
     type RecvStream = RecvStream<In>;
 

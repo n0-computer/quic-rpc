@@ -6,8 +6,8 @@ use message::RpcMsg;
 use quic_rpc::{
     message::{BidiStreaming, ClientStreaming, Msg, ServerStreaming},
     server::RpcServerError,
-    transport::mem::{self, MemChannelTypes},
-    ClientChannel, *, client::{TypedConnection, ServerConnection},
+    transport::mem,
+    *, Connection, ServerConnection,
 };
 use serde::{Deserialize, Serialize};
 use std::{fmt::Debug, result};

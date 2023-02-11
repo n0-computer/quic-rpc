@@ -1,11 +1,11 @@
 use anyhow::Context;
-use quic_rpc::{client::TypedConnection, server::RpcServerError, RpcMessage};
+use quic_rpc::{Connection, server::RpcServerError, RpcMessage};
 
 #[allow(unused)]
 pub async fn check_termination_anyhow<
     In: RpcMessage,
     Out: RpcMessage,
-    C: TypedConnection<In, Out>,
+    C: Connection<In, Out>,
 >(
     server_handle: tokio::task::JoinHandle<anyhow::Result<()>>,
 ) -> anyhow::Result<()> {
