@@ -5,7 +5,7 @@
 //!
 //! [flume]: https://docs.rs/flume/
 //! [crossbeam]: https://docs.rs/crossbeam/
-use crate::{ChannelTypes2, Connection, ConnectionErrors, RpcMessage};
+use crate::{Connection, ConnectionErrors, RpcMessage, ServerEndpoint};
 use core::fmt;
 use futures::{Future, FutureExt, Sink, SinkExt, Stream, StreamExt};
 use std::{error, fmt::Display, marker::PhantomData, pin::Pin, result, task::Poll};
@@ -78,13 +78,6 @@ impl<T: RpcMessage> Stream for RecvStream<T> {
 }
 
 impl error::Error for RecvError {}
-
-pub struct MemChannelTypes;
-
-impl ChannelTypes2 for MemChannelTypes {
-    type ClientConnection<In: RpcMessage, Out: RpcMessage> = MemClientChannel<In, Out>;
-    type ServerConnection<In: RpcMessage, Out: RpcMessage> = MemServerChannel<In, Out>;
-}
 
 /// A mem channel
 pub struct MemServerChannel<In: RpcMessage, Out: RpcMessage> {
@@ -168,13 +161,13 @@ impl<'a, In: RpcMessage, Out: RpcMessage> Future for AcceptBiFuture<'a, In, Out>
     }
 }
 
-impl<In: RpcMessage, Out: RpcMessage> Connection<In, Out> for MemServerChannel<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> ServerEndpoint<In, Out> for MemServerChannel<In, Out> {
     type SendSink = SendSink<Out>;
     type RecvStream = RecvStream<In>;
 
-    type NextFut<'a> = AcceptBiFuture<'a, In, Out>;
+    type AcceptBiFut<'a> = AcceptBiFuture<'a, In, Out>;
 
-    fn next(&self) -> Self::NextFut<'_> {
+    fn accept_bi(&self) -> Self::AcceptBiFut<'_> {
         AcceptBiFuture {
             wrapped: self.stream.recv_async(),
             _p: PhantomData,
@@ -194,9 +187,9 @@ impl<In: RpcMessage, Out: RpcMessage> Connection<In, Out> for MemClientChannel<I
     type SendSink = SendSink<Out>;
     type RecvStream = RecvStream<In>;
 
-    type NextFut<'a> = OpenBiFuture<'a, In, Out>;
+    type OpenBiFut<'a> = OpenBiFuture<'a, In, Out>;
 
-    fn next(&self) -> Self::NextFut<'_> {
+    fn open_bi(&self) -> Self::OpenBiFut<'_> {
         let (local_send, remote_recv) = flume::bounded::<Out>(128);
         let (remote_send, local_recv) = flume::bounded::<In>(128);
         let remote_chan = (

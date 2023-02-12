@@ -3,7 +3,7 @@
 //! This defines the RPC client DSL
 use crate::{
     message::{BidiStreaming, ClientStreaming, Msg, Rpc, ServerStreaming},
-    ClientConnection, ConnectionErrors, Service,
+    ServiceConnection, ConnectionErrors, Service,
 };
 use futures::{
     future::BoxFuture, stream::BoxStream, FutureExt, Sink, SinkExt, Stream, StreamExt, TryFutureExt,
@@ -41,12 +41,12 @@ impl<S, C: Clone> Clone for RpcClient<S, C> {
 /// that support it, [ClientStreaming] and [BidiStreaming].
 #[pin_project]
 #[derive(Debug)]
-pub struct UpdateSink<S: Service, C: ClientConnection<S>, M: Msg<S>>(
+pub struct UpdateSink<S: Service, C: ServiceConnection<S>, M: Msg<S>>(
     #[pin] C::SendSink,
     PhantomData<M>,
 );
 
-impl<S: Service, C: ClientConnection<S>, M: Msg<S>> Sink<M::Update> for UpdateSink<S, C, M> {
+impl<S: Service, C: ServiceConnection<S>, M: Msg<S>> Sink<M::Update> for UpdateSink<S, C, M> {
     type Error = C::SendError;
 
     fn poll_ready(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
@@ -67,7 +67,7 @@ impl<S: Service, C: ClientConnection<S>, M: Msg<S>> Sink<M::Update> for UpdateSi
     }
 }
 
-impl<S: Service, C: ClientConnection<S>> RpcClient<S, C> {
+impl<S: Service, C: ServiceConnection<S>> RpcClient<S, C> {
     /// Create a new rpc client from a channel
     pub fn new(source: C) -> Self {
         Self {
@@ -82,7 +82,7 @@ impl<S: Service, C: ClientConnection<S>> RpcClient<S, C> {
         M: Msg<S, Pattern = Rpc> + Into<S::Req>,
     {
         let msg = msg.into();
-        let (mut send, mut recv) = self.source.next().await.map_err(RpcClientError::Open)?;
+        let (mut send, mut recv) = self.source.open_bi().await.map_err(RpcClientError::Open)?;
         send.send(msg).await.map_err(RpcClientError::<C>::Send)?;
         let res = recv
             .next()
@@ -108,7 +108,7 @@ impl<S: Service, C: ClientConnection<S>> RpcClient<S, C> {
         let msg = msg.into();
         let (mut send, recv) = self
             .source
-            .next()
+            .open_bi()
             .await
             .map_err(StreamingResponseError::Open)?;
         send.send(msg)
@@ -142,7 +142,7 @@ impl<S: Service, C: ClientConnection<S>> RpcClient<S, C> {
         let msg = msg.into();
         let (mut send, mut recv) = self
             .source
-            .next()
+            .open_bi()
             .await
             .map_err(ClientStreamingError::Open)?;
         send.send(msg).map_err(ClientStreamingError::Send).await?;
@@ -179,7 +179,7 @@ impl<S: Service, C: ClientConnection<S>> RpcClient<S, C> {
         M: Msg<S, Pattern = BidiStreaming> + Into<S::Req>,
     {
         let msg = msg.into();
-        let (mut send, recv) = self.source.next().await.map_err(BidiError::Open)?;
+        let (mut send, recv) = self.source.open_bi().await.map_err(BidiError::Open)?;
         send.send(msg).await.map_err(BidiError::<C>::Send)?;
         let send = UpdateSink(send, PhantomData);
         let recv = recv

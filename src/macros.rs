@@ -207,20 +207,19 @@ macro_rules! __derive_create_dispatch {
         #[macro_export]
         macro_rules! $create_dispatch {
             ($target:ident, $handler:ident) => {
-                pub async fn $handler<C: $crate::Connection<<$service as $crate::Service>::Req, <$service as $crate::Service>::Res>>(
-                    mut server: $crate::server::RpcServer<$service, C>,
+                pub async fn $handler<C: $crate::ServerEndpoint<<$service as $crate::Service>::Req, <$service as $crate::Service>::Res>>(
+                    mut chan: $crate::server::RpcChannel<$service, C>,
                     msg: <$service as $crate::Service>::Req,
-                    chan: (C::SendSink, C::RecvStream),
                     target: $target,
-                ) -> Result<$crate::server::RpcServer<$service, C>, $crate::server::RpcServerError<C>> {
+                ) -> Result<(), $crate::server::RpcServerError<C>> {
                     let res = match msg {
                         $(
-                            $request::$m_input(msg) => { $crate::__rpc_invoke!($m_pattern, $m_name, $target, server, msg, chan, target) },
+                            $request::$m_input(msg) => { $crate::__rpc_invoke!($m_pattern, $m_name, $target, msg, chan, target) },
                         )*
                         _ => Err($crate::server::RpcServerError::<C>::UnexpectedStartMessage),
                     };
                     res?;
-                    Ok(server)
+                    Ok(())
                 }
             }
         }
@@ -283,22 +282,22 @@ macro_rules! __rpc_message {
 #[doc(hidden)]
 #[macro_export]
 macro_rules! __rpc_invoke {
-    (Rpc, $m_name:ident, $target_ty:ident, $server:ident, $msg:ident, $chan:ident, $target:ident) => {
-        $server.rpc($msg, $chan, $target, $target_ty::$m_name).await
+    (Rpc, $m_name:ident, $target_ty:ident, $msg:ident, $chan:ident, $target:ident) => {
+        $chan.rpc($msg, $target, $target_ty::$m_name).await
     };
-    (ClientStreaming, $m_name:ident, $target_ty:ident, $server:ident, $msg:ident, $chan:ident, $target:ident) => {
-        $server
-            .client_streaming($msg, $chan, $target, $target_ty::$m_name)
+    (ClientStreaming, $m_name:ident, $target_ty:ident, $msg:ident, $chan:ident, $target:ident) => {
+        $chan
+            .client_streaming($msg, $target, $target_ty::$m_name)
             .await
     };
-    (ServerStreaming, $m_name:ident, $target_ty:ident, $server:ident, $msg:ident, $chan:ident, $target:ident) => {
-        $server
-            .server_streaming($msg, $chan, $target, $target_ty::$m_name)
+    (ServerStreaming, $m_name:ident, $target_ty:ident, $msg:ident, $chan:ident, $target:ident) => {
+        $chan
+            .server_streaming($msg, $target, $target_ty::$m_name)
             .await
     };
-    (BidiStreaming, $m_name:ident, $target_ty:ident, $server:ident, $msg:ident, $chan:ident, $target:ident) => {
-        $server
-            .bidi_streaming($msg, $chan, $target, $target_ty::$m_name)
+    (BidiStreaming, $m_name:ident, $target_ty:ident, $msg:ident, $chan:ident, $target:ident) => {
+        $chan
+            .bidi_streaming($msg, $target, $target_ty::$m_name)
             .await
     };
 }

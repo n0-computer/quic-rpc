@@ -5,7 +5,7 @@ use futures::{SinkExt, Stream, StreamExt, TryStreamExt};
 use quic_rpc::{
     message::{BidiStreaming, ClientStreaming, Msg, RpcMsg, ServerStreaming},
     server::RpcServerError,
-    ClientConnection, RpcClient, RpcServer, ServerConnection, Service,
+    ServiceConnection, RpcClient, RpcServer, ServiceEndpoint, Service,
 };
 use serde::{Deserialize, Serialize};
 use std::{
@@ -142,23 +142,22 @@ impl ComputeService {
         }
     }
 
-    pub async fn server<C: ServerConnection<ComputeService>>(
+    pub async fn server<C: ServiceEndpoint<ComputeService>>(
         server: RpcServer<ComputeService, C>,
     ) -> result::Result<(), RpcServerError<C>> {
         let s = server;
         let service = ComputeService;
         loop {
             let (req, chan) = s.accept_one().await?;
-            let s = s.clone();
             let service = service.clone();
             tokio::spawn(async move {
                 use ComputeRequest::*;
                 #[rustfmt::skip]
                 match req {
-                    Sqr(msg) => s.rpc(msg, chan, service, ComputeService::sqr).await,
-                    Sum(msg) => s.client_streaming(msg, chan, service, ComputeService::sum).await,
-                    Fibonacci(msg) => s.server_streaming(msg, chan, service, ComputeService::fibonacci).await,
-                    Multiply(msg) => s.bidi_streaming(msg, chan, service, ComputeService::multiply).await,
+                    Sqr(msg) => chan.rpc(msg, service, ComputeService::sqr).await,
+                    Sum(msg) => chan.client_streaming(msg, service, ComputeService::sum).await,
+                    Fibonacci(msg) => chan.server_streaming(msg, service, ComputeService::fibonacci).await,
+                    Multiply(msg) => chan.bidi_streaming(msg, service, ComputeService::multiply).await,
                     SumUpdate(_) => Err(RpcServerError::UnexpectedStartMessage)?,
                     MultiplyUpdate(_) => Err(RpcServerError::UnexpectedStartMessage)?,
                 }?;
@@ -167,7 +166,7 @@ impl ComputeService {
         }
     }
 
-    pub async fn server_par<C: ServerConnection<ComputeService>>(
+    pub async fn server_par<C: ServiceEndpoint<ComputeService>>(
         server: RpcServer<ComputeService, C>,
         parallelism: usize,
     ) -> result::Result<(), RpcServerError<C>> {
@@ -181,16 +180,15 @@ impl ComputeService {
         };
         let process_stream = request_stream.map(move |r| {
             let service = service.clone();
-            let s = s.clone();
             async move {
                 let (req, chan) = r?;
                 use ComputeRequest::*;
                 #[rustfmt::skip]
                 match req {
-                    Sqr(msg) => s.rpc(msg, chan, service, ComputeService::sqr).await,
-                    Sum(msg) => s.client_streaming(msg, chan, service, ComputeService::sum).await,
-                    Fibonacci(msg) => s.server_streaming(msg, chan, service, ComputeService::fibonacci).await,
-                    Multiply(msg) => s.bidi_streaming(msg, chan, service, ComputeService::multiply).await,
+                    Sqr(msg) => chan.rpc(msg, service, ComputeService::sqr).await,
+                    Sum(msg) => chan.client_streaming(msg, service, ComputeService::sum).await,
+                    Fibonacci(msg) => chan.server_streaming(msg, service, ComputeService::fibonacci).await,
+                    Multiply(msg) => chan.bidi_streaming(msg, service, ComputeService::multiply).await,
                     SumUpdate(_) => Err(RpcServerError::UnexpectedStartMessage)?,
                     MultiplyUpdate(_) => Err(RpcServerError::UnexpectedStartMessage)?,
                 }?;
@@ -209,7 +207,7 @@ impl ComputeService {
     }
 }
 
-pub async fn smoke_test<C: ClientConnection<ComputeService>>(client: C) -> anyhow::Result<()> {
+pub async fn smoke_test<C: ServiceConnection<ComputeService>>(client: C) -> anyhow::Result<()> {
     let client = RpcClient::<ComputeService, C>::new(client);
     // a rpc call
     tracing::debug!("calling rpc S(1234)");
@@ -258,7 +256,7 @@ fn clear_line() {
     print!("\r{}\r", " ".repeat(80));
 }
 
-pub async fn bench<C: ClientConnection<ComputeService>>(
+pub async fn bench<C: ServiceConnection<ComputeService>>(
     client: RpcClient<ComputeService, C>,
     n: u64,
 ) -> anyhow::Result<()>

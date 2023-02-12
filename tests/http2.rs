@@ -211,29 +211,29 @@ async fn http2_channel_errors() -> anyhow::Result<()> {
                 let res = match x {
                     Ok((req, chan)) => match req {
                         TestRequest::BigRequest(req) => {
-                            server.rpc(req, chan, TestService, TestService::big).await
+                            chan.rpc(req, TestService, TestService::big).await
                         }
                         TestRequest::NoSerRequest(req) => {
-                            server.rpc(req, chan, TestService, TestService::noser).await
+                            chan.rpc(req, TestService, TestService::noser).await
                         }
                         TestRequest::NoDeserRequest(req) => {
-                            server
-                                .rpc(req, chan, TestService, TestService::nodeser)
+                            chan
+                                .rpc(req, TestService, TestService::nodeser)
                                 .await
                         }
                         TestRequest::NoSerResponseRequest(req) => {
-                            server
-                                .rpc(req, chan, TestService, TestService::noserresponse)
+                            chan
+                                .rpc(req, TestService, TestService::noserresponse)
                                 .await
                         }
                         TestRequest::NoDeserResponseRequest(req) => {
-                            server
-                                .rpc(req, chan, TestService, TestService::nodeserresponse)
+                            chan
+                                .rpc(req, TestService, TestService::nodeserresponse)
                                 .await
                         }
                         TestRequest::BigResponseRequest(req) => {
-                            server
-                                .rpc(req, chan, TestService, TestService::bigresponse)
+                            chan
+                                .rpc(req, TestService, TestService::bigresponse)
                                 .await
                         }
                     },

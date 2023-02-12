@@ -7,7 +7,7 @@ use quic_rpc::{
     message::{BidiStreaming, ClientStreaming, Msg, ServerStreaming},
     server::RpcServerError,
     transport::mem,
-    Connection, ServerConnection, *,
+    Connection, ServiceEndpoint, *,
 };
 use serde::{Deserialize, Serialize};
 use std::{fmt::Debug, result};
@@ -178,7 +178,7 @@ impl Store {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    async fn server_future<C: ServerConnection<StoreService>>(
+    async fn server_future<C: ServiceEndpoint<StoreService>>(
         server: RpcServer<StoreService, C>,
     ) -> result::Result<(), RpcServerError<C>> {
         let s = server;
@@ -189,11 +189,11 @@ async fn main() -> anyhow::Result<()> {
             let store = store.clone();
             #[rustfmt::skip]
             match req {
-                Put(msg) => s.rpc(msg, chan, store, Store::put).await,
-                Get(msg) => s.rpc(msg, chan, store, Store::get).await,
-                PutFile(msg) => s.client_streaming(msg, chan, store, Store::put_file).await,
-                GetFile(msg) => s.server_streaming(msg, chan, store, Store::get_file).await,
-                ConvertFile(msg) => s.bidi_streaming(msg, chan, store, Store::convert_file).await,
+                Put(msg) => chan.rpc(msg, store, Store::put).await,
+                Get(msg) => chan.rpc(msg, store, Store::get).await,
+                PutFile(msg) => chan.client_streaming(msg, store, Store::put_file).await,
+                GetFile(msg) => chan.server_streaming(msg, store, Store::get_file).await,
+                ConvertFile(msg) => chan.bidi_streaming(msg, store, Store::convert_file).await,
                 PutFileUpdate(_) => Err(RpcServerError::UnexpectedStartMessage)?,
                 ConvertFileUpdate(_) => Err(RpcServerError::UnexpectedStartMessage)?,
             }?;
@@ -249,7 +249,7 @@ async fn main() -> anyhow::Result<()> {
 async fn _main_unsugared() -> anyhow::Result<()> {
     let (server, client) = mem::connection::<u64, String>(1);
     let to_string_service = tokio::spawn(async move {
-        let (mut send, mut recv) = server.next().await?;
+        let (mut send, mut recv) = server.accept_bi().await?;
         while let Some(item) = recv.next().await {
             let item = item?;
             println!("server got: {item:?}");
@@ -257,7 +257,7 @@ async fn _main_unsugared() -> anyhow::Result<()> {
         }
         anyhow::Ok(())
     });
-    let (mut send, mut recv) = client.next().await?;
+    let (mut send, mut recv) = client.open_bi().await?;
     let print_result_service = tokio::spawn(async move {
         while let Some(item) = recv.next().await {
             let item = item?;

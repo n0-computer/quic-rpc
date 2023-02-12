@@ -99,14 +99,6 @@ pub trait Service: Send + Sync + Debug + Clone + 'static {
     type Res: RpcMessage;
 }
 
-/// Groups types for client and server connections
-pub trait ChannelTypes2 {
-    /// The client connection type
-    type ClientConnection<In: RpcMessage, Out: RpcMessage>: Connection<In, Out>;
-    /// The server connection type
-    type ServerConnection<In: RpcMessage, Out: RpcMessage>: Connection<In, Out>;
-}
-
 /// The kinds of local addresses a [`ServerChannel`] can be bound to.
 ///
 /// Returned by [`ServerChannel::local_addr`].
@@ -130,90 +122,66 @@ impl Display for LocalAddr {
     }
 }
 
-// #[derive(Debug)]
-// struct ServerSource<In: RpcMessage, Out: RpcMessage, T: ChannelTypes> {
-//     channel: T::ServerChannel<In, Out>,
-// }
-
-// impl<In: RpcMessage, Out: RpcMessage, T: ChannelTypes> Clone for ServerSource<In, Out, T> {
-//     fn clone(&self) -> Self {
-//         Self {
-//             channel: self.channel.clone(),
-//         }
-//     }
-// }
-
-// impl<In: RpcMessage, Out: RpcMessage, T: ChannelTypes> ConnectionErrors
-//     for ServerSource<In, Out, T>
-// {
-//     type SendError = T::SendError;
-
-//     type RecvError = T::RecvError;
-
-//     type OpenError = T::AcceptBiError;
-// }
-
-// impl<In: RpcMessage, Out: RpcMessage, T: ChannelTypes> TypedConnection<In, Out>
-//     for ServerSource<In, Out, T>
-// {
-//     type RecvStream = T::RecvStream<In>;
-
-//     type SendSink = T::SendSink<Out>;
-
-//     type SubstreamFut<'a> = T::AcceptBiFuture<'a, In, Out>;
-
-//     fn next(&self) -> Self::SubstreamFut<'_> {
-//         self.channel.accept_bi()
-//     }
-// }
-
 /// Errors that can happen when creating and using a channel
 ///
 /// This is independent of whether the channel is a byte channel or a message channel.
 pub trait ConnectionErrors: Debug + Clone + Send + Sync + 'static {
+    /// Error when opening a substream
+    type OpenError: RpcError;
     /// Error when sending messages
     type SendError: RpcError;
     /// Error when receiving messages
     type RecvError: RpcError;
-    /// Error when opening a substream
-    type OpenError: RpcError;
 }
 
-/// A connection, aka a source of typed channels
+/// A connection to a specific remote machine
 ///
-/// Both the server and the client can be thought as a source of channels.
-/// On the client, acquiring channels means open.
-/// On the server, acquiring channels means accept.
+/// A connection is a source of bidirectional typed channels.
 pub trait Connection<In, Out>: ConnectionErrors {
     /// A typed bidirectional message channel
     type RecvStream: Stream<Item = Result<In, Self::RecvError>> + Send + Unpin + 'static;
     type SendSink: Sink<Out, Error = Self::SendError> + Send + Unpin + 'static;
     /// The future that will resolve to a substream or an error
-    type NextFut<'a>: Future<Output = Result<(Self::SendSink, Self::RecvStream), Self::OpenError>>
+    type OpenBiFut<'a>: Future<Output = Result<(Self::SendSink, Self::RecvStream), Self::OpenError>>
         + Send
         + 'a
     where
         Self: 'a;
-    /// Get the next substream
-    ///
-    /// On the client side, this will open a new substream. This should complete
-    /// immediately if the connection is already open.
-    ///
-    /// On the server side, this will accept a new substream. This can block
-    /// indefinitely if no new client is interested.
-    fn next(&self) -> Self::NextFut<'_>;
+    /// Open a channel to the remote
+    fn open_bi(&self) -> Self::OpenBiFut<'_>;
 }
 
-/// A client connection is a connection where requests are sent and responses are received
+/// A server endpoint that listens for connections
+pub trait ServerEndpoint<In, Out>: ConnectionErrors {
+    type RecvStream: Stream<Item = Result<In, Self::RecvError>> + Send + Unpin + 'static;
+    type SendSink: Sink<Out, Error = Self::SendError> + Send + Unpin + 'static;
+    /// The future that will resolve to a substream or an error
+    type AcceptBiFut<'a>: Future<Output = Result<(Self::SendSink, Self::RecvStream), Self::OpenError>>
+        + Send
+        + 'a
+    where
+        Self: 'a;
+
+    /// Accept a new typed bidirectional channel on any of the connections we
+    /// have currently opened.
+    fn accept_bi(&self) -> Self::AcceptBiFut<'_>;
+}
+
+/// A connection to a specific service on a specific remote machine
+/// 
+/// This is just a trait alias for a [Connection] with the right types.
 ///
-/// This is just a trait alias for TypedConnection<S::Res, S::Req>
-pub trait ClientConnection<S: Service>: Connection<S::Res, S::Req> {}
+/// This can be used to create a [RpcClient] that can be used to send requests.
+pub trait ServiceConnection<S: Service>: Connection<S::Res, S::Req> {}
 
-impl<T: Connection<S::Res, S::Req>, S: Service> ClientConnection<S> for T {}
+impl<T: Connection<S::Res, S::Req>, S: Service> ServiceConnection<S> for T {}
 
-/// A server connection is a connection where requests are received and responses are sent
+/// A server endpoint for a specific service
 ///
-/// This is just a trait alias for TypedConnection<S::Req, S::Res>
-pub trait ServerConnection<S: Service>: Connection<S::Req, S::Res> {}
+/// This is just a trait alias for a [ServerEndpoint] with the right types.
+///
+/// This can be used to create a [RpcServer] that can be used to handle
+/// requests.
+pub trait ServiceEndpoint<S: Service>: ServerEndpoint<S::Req, S::Res> {}
 
-impl<T: Connection<S::Req, S::Res>, S: Service> ServerConnection<S> for T {}
+impl<T: ServerEndpoint<S::Req, S::Res>, S: Service> ServiceEndpoint<S> for T {}

@@ -1,7 +1,6 @@
 //! QUIC channel implementation based on quinn
-use crate::{ChannelTypes2, Connection, ConnectionErrors, LocalAddr, RpcMessage};
+use crate::{Connection, ConnectionErrors, LocalAddr, RpcMessage, ServerEndpoint};
 use futures::channel::oneshot;
-use futures::future::BoxFuture;
 use futures::{Future, FutureExt, Sink, SinkExt, Stream, StreamExt};
 use pin_project::pin_project;
 use serde::de::DeserializeOwned;
@@ -177,13 +176,13 @@ impl<In: RpcMessage, Out: RpcMessage> ConnectionErrors for QuinnServerChannel<In
     type OpenError = quinn::ConnectionError;
 }
 
-impl<In: RpcMessage, Out: RpcMessage> Connection<In, Out> for QuinnServerChannel<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> ServerEndpoint<In, Out> for QuinnServerChannel<In, Out> {
     type RecvStream = self::RecvStream<In>;
     type SendSink = self::SendSink<Out>;
 
-    type NextFut<'a> = AcceptBiFuture<'a, In, Out>;
+    type AcceptBiFut<'a> = AcceptBiFuture<'a, In, Out>;
 
-    fn next(&self) -> Self::NextFut<'_> {
+    fn accept_bi(&self) -> Self::AcceptBiFut<'_> {
         AcceptBiFuture(self.inner.receiver.recv_async(), PhantomData)
     }
 }
@@ -335,9 +334,9 @@ impl<In: RpcMessage, Out: RpcMessage> Connection<In, Out> for QuinnClientChannel
     type RecvStream = self::RecvStream<In>;
 
     // type NextFut<'a> = BoxFuture<'a, result::Result<(Self::SendSink, Self::RecvStream), quinn::ConnectionError>>;
-    type NextFut<'a> = OpenBiFuture<'a, In, Out>;
+    type OpenBiFut<'a> = OpenBiFuture<'a, In, Out>;
 
-    fn next(&self) -> Self::NextFut<'_> {
+    fn open_bi(&self) -> Self::OpenBiFut<'_> {
         let (sender, receiver) = oneshot::channel();
         OpenBiFuture(OpenBiFutureState::Sending(self.inner
             .sender
@@ -529,12 +528,6 @@ impl<'a, In: RpcMessage, Out: RpcMessage> Future for AcceptBiFuture<'a, In, Out>
             Ok((send, recv))
         })
     }
-}
-
-impl ChannelTypes2 for QuinnChannelTypes {
-    type ClientConnection<In: RpcMessage, Out: RpcMessage> = self::QuinnClientChannel<In, Out>;
-
-    type ServerConnection<In: RpcMessage, Out: RpcMessage> = self::QuinnServerChannel<In, Out>;
 }
 
 /// CreateChannelError for quinn channels.

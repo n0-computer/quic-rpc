@@ -7,7 +7,7 @@ use std::{
     sync::Arc, task::Poll,
 };
 
-use crate::{Connection, ConnectionErrors, LocalAddr, RpcMessage};
+use crate::{Connection, ConnectionErrors, LocalAddr, RpcMessage, ServerEndpoint};
 use bytes::Bytes;
 use flume::{r#async::RecvFut, Receiver, Sender};
 use futures::{future::FusedFuture, Future, FutureExt, Sink, SinkExt, StreamExt};
@@ -529,16 +529,6 @@ impl fmt::Display for RecvError {
 
 impl error::Error for RecvError {}
 
-/// Http2 channel types
-#[derive(Debug, Clone)]
-pub struct Http2ChannelTypes;
-
-impl crate::ChannelTypes2 for Http2ChannelTypes {
-    type ClientConnection<In: RpcMessage, Out: RpcMessage> = self::Http2ClientChannel<In, Out>;
-
-    type ServerConnection<In: RpcMessage, Out: RpcMessage> = self::Http2ServerChannel<In, Out>;
-}
-
 /// OpenBiError for mem channels.
 #[derive(Debug)]
 pub enum OpenBiError {
@@ -754,13 +744,6 @@ impl<In: RpcMessage, Out: RpcMessage> Http2ClientChannel<In, Out> {
 }
 
 impl<In: RpcMessage, Out: RpcMessage> Http2ServerChannel<In, Out> {
-    /// Accept a bi-directional stream from a client.
-    ///
-    /// The [`AcceptBiFuture`] returns a `(sender, receiver)` pair which can be used as
-    /// channels.
-    fn accept_bi(&self) -> AcceptBiFuture<'_, In, Out> {
-        AcceptBiFuture::new(self.channel.recv_async(), self.config.clone())
-    }
 
     fn local_addr(&self) -> &[crate::LocalAddr] {
         &self.local_addr
@@ -780,9 +763,9 @@ impl<In: RpcMessage, Out: RpcMessage> Connection<In, Out> for Http2ClientChannel
 
     type SendSink = self::SendSink<Out>;
 
-    type NextFut<'a> = OpenBiFuture<'a, In, Out>;
+    type OpenBiFut<'a> = OpenBiFuture<'a, In, Out>;
 
-    fn next(&self) -> Self::NextFut<'_> {
+    fn open_bi(&self) -> Self::OpenBiFut<'_> {
         self.open_bi()
     }
 }
@@ -795,14 +778,14 @@ impl<In: RpcMessage, Out: RpcMessage> ConnectionErrors for Http2ServerChannel<In
     type OpenError = AcceptBiError;
 }
 
-impl<In: RpcMessage, Out: RpcMessage> Connection<In, Out> for Http2ServerChannel<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> ServerEndpoint<In, Out> for Http2ServerChannel<In, Out> {
     type RecvStream = self::RecvStream<In>;
 
     type SendSink = self::SendSink<Out>;
 
-    type NextFut<'a> = AcceptBiFuture<'a, In, Out>;
+    type AcceptBiFut<'a> = AcceptBiFuture<'a, In, Out>;
 
-    fn next(&self) -> Self::NextFut<'_> {
-        self.accept_bi()
+    fn accept_bi(&self) -> Self::AcceptBiFut<'_> {
+        AcceptBiFuture::new(self.channel.recv_async(), self.config.clone())
     }
 }

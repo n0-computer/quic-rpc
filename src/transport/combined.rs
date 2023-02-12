@@ -275,14 +275,14 @@ impl<A: ConnectionErrors, B: ConnectionErrors, In: RpcMessage, Out: RpcMessage>
 impl<A: Connection<In, Out>, B: Connection<In, Out>, In: RpcMessage, Out: RpcMessage>
     crate::Connection<In, Out> for CombinedClientChannel<A, B, In, Out>
 {
-    fn next(&self) -> OpenBiFuture<'_, A, B, In, Out> {
+    fn open_bi(&self) -> OpenBiFuture<'_, A, B, In, Out> {
         async {
             // try a first, then b
             if let Some(a) = &self.a {
-                let (send, recv) = a.next().await.map_err(OpenBiError::A)?;
+                let (send, recv) = a.open_bi().await.map_err(OpenBiError::A)?;
                 Ok((SendSink::A(send), RecvStream::A(recv)))
             } else if let Some(b) = &self.b {
-                let (send, recv) = b.next().await.map_err(OpenBiError::B)?;
+                let (send, recv) = b.open_bi().await.map_err(OpenBiError::B)?;
                 Ok((SendSink::B(send), RecvStream::B(recv)))
             } else {
                 future::err(OpenBiError::NoChannel).await
@@ -295,7 +295,7 @@ impl<A: Connection<In, Out>, B: Connection<In, Out>, In: RpcMessage, Out: RpcMes
 
     type SendSink = self::SendSink<A, B, In, Out>;
 
-    type NextFut<'a> = OpenBiFuture<'a, A, B, In, Out>;
+    type OpenBiFut<'a> = OpenBiFuture<'a, A, B, In, Out>;
 }
 
 impl<A: ConnectionErrors, B: ConnectionErrors, In: RpcMessage, Out: RpcMessage>
@@ -309,9 +309,9 @@ impl<A: ConnectionErrors, B: ConnectionErrors, In: RpcMessage, Out: RpcMessage>
 impl<A: Connection<In, Out>, B: Connection<In, Out>, In: RpcMessage, Out: RpcMessage>
     crate::Connection<In, Out> for CombinedServerChannel<A, B, In, Out>
 {
-    fn next(&self) -> AcceptBiFuture<'_, A, B, In, Out> {
+    fn open_bi(&self) -> AcceptBiFuture<'_, A, B, In, Out> {
         let a_fut = if let Some(a) = &self.a {
-            a.next()
+            a.open_bi()
                 .map_ok(|(send, recv)| {
                     (
                         SendSink::<A, B, In, Out>::A(send),
@@ -324,7 +324,7 @@ impl<A: Connection<In, Out>, B: Connection<In, Out>, In: RpcMessage, Out: RpcMes
             future::pending().right_future()
         };
         let b_fut = if let Some(b) = &self.b {
-            b.next()
+            b.open_bi()
                 .map_ok(|(send, recv)| {
                     (
                         SendSink::<A, B, In, Out>::B(send),
@@ -349,23 +349,22 @@ impl<A: Connection<In, Out>, B: Connection<In, Out>, In: RpcMessage, Out: RpcMes
 
     type SendSink = self::SendSink<A, B, In, Out>;
 
-    type NextFut<'a> = AcceptBiFuture<'a, A, B, In, Out>;
+    type OpenBiFut<'a> = AcceptBiFuture<'a, A, B, In, Out>;
 }
 
 #[cfg(test)]
 mod tests {
-    
-    
+    use crate::{transport::{combined::{self, OpenBiError}, mem}, Connection};
 
     #[tokio::test]
     async fn open_empty_channel() {
-        // let channel = combined::CombinedClientChannel::<
-        //     mem::MemChannelTypes,
-        //     mem::MemChannelTypes,
-        //     (),
-        //     (),
-        // >::new(None, None);
-        // let res = channel.open_bi().await;
-        // assert!(matches!(res, Err(OpenBiError::NoChannel)));
+        let channel = combined::CombinedClientChannel::<
+             mem::MemClientChannel<(), ()>,
+             mem::MemClientChannel<(), ()>,
+             (),
+             (),
+        >::new(None, None);
+        let res = channel.open_bi().await;
+        assert!(matches!(res, Err(OpenBiError::NoChannel)));
     }
 }

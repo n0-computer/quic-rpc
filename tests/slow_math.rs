@@ -7,7 +7,7 @@ use math::*;
 use quic_rpc::{
     message::{BidiStreaming, ClientStreaming, Msg, RpcMsg, ServerStreaming},
     server::RpcServerError,
-    RpcServer, ServerConnection, Service,
+    RpcServer, ServiceEndpoint, Service,
 };
 
 #[derive(Debug, Clone)]
@@ -91,7 +91,7 @@ impl ComputeService {
         }
     }
 
-    pub async fn server<C: ServerConnection<ComputeService>>(
+    pub async fn server<C: ServiceEndpoint<ComputeService>>(
         server: RpcServer<ComputeService, C>,
     ) -> result::Result<(), RpcServerError<C>> {
         let s = server;
@@ -102,10 +102,10 @@ impl ComputeService {
             let service = service.clone();
             #[rustfmt::skip]
             match req {
-                Sqr(msg) => s.rpc(msg, chan, service, ComputeService::sqr).await,
-                Sum(msg) => s.client_streaming(msg, chan, service, ComputeService::sum).await,
-                Fibonacci(msg) => s.server_streaming(msg, chan, service, ComputeService::fibonacci).await,
-                Multiply(msg) => s.bidi_streaming(msg, chan, service, ComputeService::multiply).await,
+                Sqr(msg) => chan.rpc(msg, service, ComputeService::sqr).await,
+                Sum(msg) => chan.client_streaming(msg, service, ComputeService::sum).await,
+                Fibonacci(msg) => chan.server_streaming(msg, service, ComputeService::fibonacci).await,
+                Multiply(msg) => chan.bidi_streaming(msg, service, ComputeService::multiply).await,
                 SumUpdate(_) => Err(RpcServerError::UnexpectedStartMessage)?,
                 MultiplyUpdate(_) => Err(RpcServerError::UnexpectedStartMessage)?,
             }?;
