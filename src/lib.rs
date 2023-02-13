@@ -138,8 +138,9 @@ pub trait ConnectionErrors: Debug + Clone + Send + Sync + 'static {
 ///
 /// A connection is a source of bidirectional typed channels.
 pub trait Connection<In, Out>: ConnectionErrors {
-    /// A typed bidirectional message channel
+    /// Receive side of a bidirectional typed channel
     type RecvStream: Stream<Item = Result<In, Self::RecvError>> + Send + Unpin + 'static;
+    /// Send side of a bidirectional typed channel
     type SendSink: Sink<Out, Error = Self::SendError> + Send + Unpin + 'static;
     /// The future that will resolve to a substream or an error
     type OpenBiFut<'a>: Future<Output = Result<(Self::SendSink, Self::RecvStream), Self::OpenError>>
@@ -153,7 +154,9 @@ pub trait Connection<In, Out>: ConnectionErrors {
 
 /// A server endpoint that listens for connections
 pub trait ServerEndpoint<In, Out>: ConnectionErrors {
+    /// Receive side of a bidirectional typed channel
     type RecvStream: Stream<Item = Result<In, Self::RecvError>> + Send + Unpin + 'static;
+    /// Send side of a bidirectional typed channel
     type SendSink: Sink<Out, Error = Self::SendError> + Send + Unpin + 'static;
     /// The future that will resolve to a substream or an error
     type AcceptBiFut<'a>: Future<Output = Result<(Self::SendSink, Self::RecvStream), Self::OpenError>>
@@ -165,10 +168,13 @@ pub trait ServerEndpoint<In, Out>: ConnectionErrors {
     /// Accept a new typed bidirectional channel on any of the connections we
     /// have currently opened.
     fn accept_bi(&self) -> Self::AcceptBiFut<'_>;
+
+    /// The local addresses this endpoint is bound to.
+    fn local_addr(&self) -> &[crate::LocalAddr];
 }
 
 /// A connection to a specific service on a specific remote machine
-/// 
+///
 /// This is just a trait alias for a [Connection] with the right types.
 ///
 /// This can be used to create a [RpcClient] that can be used to send requests.

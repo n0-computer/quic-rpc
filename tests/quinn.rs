@@ -52,7 +52,6 @@ fn configure_client(server_certs: &[&[u8]]) -> anyhow::Result<ClientConfig> {
     for cert in server_certs {
         certs.add(&rustls::Certificate(cert.to_vec()))?;
     }
-
     Ok(ClientConfig::with_root_certificates(certs))
 }
 
@@ -111,7 +110,7 @@ async fn quinn_channel_bench() -> anyhow::Result<()> {
     tracing::debug!("Starting server");
     let server_handle = run_server(server);
     tracing::debug!("Starting client");
-    let client = quic_rpc::transport::quinn::QuinnClientChannel::new(
+    let client = quic_rpc::transport::quinn::QuinnConnection::new(
         client,
         server_addr,
         "localhost".into(),
@@ -132,7 +131,7 @@ async fn quinn_channel_smoke() -> anyhow::Result<()> {
         server_addr,
     } = make_endpoints(12346)?;
     let server_handle = run_server(server);
-    let client_connection = quic_rpc::transport::quinn::QuinnClientChannel::new(
+    let client_connection = quic_rpc::transport::quinn::QuinnConnection::new(
         client,
         server_addr,
         "localhost".into(),

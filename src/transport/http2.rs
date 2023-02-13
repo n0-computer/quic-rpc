@@ -743,13 +743,6 @@ impl<In: RpcMessage, Out: RpcMessage> Http2ClientChannel<In, Out> {
     }
 }
 
-impl<In: RpcMessage, Out: RpcMessage> Http2ServerChannel<In, Out> {
-
-    fn local_addr(&self) -> &[crate::LocalAddr] {
-        &self.local_addr
-    }
-}
-
 impl<In: RpcMessage, Out: RpcMessage> ConnectionErrors for Http2ClientChannel<In, Out> {
     type SendError = self::SendError;
 
@@ -784,6 +777,10 @@ impl<In: RpcMessage, Out: RpcMessage> ServerEndpoint<In, Out> for Http2ServerCha
     type SendSink = self::SendSink<Out>;
 
     type AcceptBiFut<'a> = AcceptBiFuture<'a, In, Out>;
+
+    fn local_addr(&self) -> &[crate::LocalAddr] {
+        &self.local_addr
+    }
 
     fn accept_bi(&self) -> Self::AcceptBiFut<'_> {
         AcceptBiFuture::new(self.channel.recv_async(), self.config.clone())

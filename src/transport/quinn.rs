@@ -70,12 +70,12 @@ impl<In: RpcMessage, Out: RpcMessage> QuinnServerChannel<In, Out> {
 
     async fn endpoint_handler(endpoint: quinn::Endpoint, sender: flume::Sender<SocketInner>) {
         loop {
-            tracing::info!("Waiting for incoming connection...");
+            tracing::debug!("Waiting for incoming connection...");
             let connecting = match endpoint.accept().await {
                 Some(connecting) => connecting,
                 None => break,
             };
-            tracing::info!("Awaiting connection from connect...");
+            tracing::debug!("Awaiting connection from connect...");
             let conection = match connecting.await {
                 Ok(conection) => conection,
                 Err(e) => {
@@ -83,11 +83,11 @@ impl<In: RpcMessage, Out: RpcMessage> QuinnServerChannel<In, Out> {
                     continue;
                 }
             };
-            tracing::info!(
+            tracing::debug!(
                 "Connection established from {:?}",
                 conection.remote_address()
             );
-            tracing::info!("Spawning connection handler...");
+            tracing::debug!("Spawning connection handler...");
             tokio::spawn(Self::connection_handler(conection, sender.clone()));
         }
     }
@@ -185,6 +185,10 @@ impl<In: RpcMessage, Out: RpcMessage> ServerEndpoint<In, Out> for QuinnServerCha
     fn accept_bi(&self) -> Self::AcceptBiFut<'_> {
         AcceptBiFuture(self.inner.receiver.recv_async(), PhantomData)
     }
+
+    fn local_addr(&self) -> &[LocalAddr] {
+        &self.inner.local_addr
+    }
 }
 
 type SocketInner = (quinn::SendStream, quinn::RecvStream);
@@ -214,12 +218,12 @@ impl Drop for ClientChannelInner {
 }
 
 /// A client channel using a quinn connection
-pub struct QuinnClientChannel<In: RpcMessage, Out: RpcMessage> {
+pub struct QuinnConnection<In: RpcMessage, Out: RpcMessage> {
     inner: Arc<ClientChannelInner>,
     _phantom: PhantomData<(In, Out)>,
 }
 
-impl<In: RpcMessage, Out: RpcMessage> QuinnClientChannel<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> QuinnConnection<In, Out> {
     /// Client connection handler.
     ///
     /// It will run until the send side of the channel is dropped.
@@ -232,7 +236,7 @@ impl<In: RpcMessage, Out: RpcMessage> QuinnClientChannel<In, Out> {
         requests: flume::Receiver<oneshot::Sender<SocketInner>>,
     ) -> result::Result<(), flume::RecvError> {
         'outer: loop {
-            tracing::info!("Connecting to {} as {}", addr, name);
+            tracing::debug!("Connecting to {} as {}", addr, name);
             let connecting = match endpoint.connect(addr, &name) {
                 Ok(connecting) => connecting,
                 Err(e) => {
@@ -304,7 +308,7 @@ impl<In: RpcMessage, Out: RpcMessage> QuinnClientChannel<In, Out> {
     }
 }
 
-impl<In: RpcMessage, Out: RpcMessage> fmt::Debug for QuinnClientChannel<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> fmt::Debug for QuinnConnection<In, Out> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ClientChannel")
             .field("inner", &self.inner)
@@ -312,7 +316,7 @@ impl<In: RpcMessage, Out: RpcMessage> fmt::Debug for QuinnClientChannel<In, Out>
     }
 }
 
-impl<In: RpcMessage, Out: RpcMessage> Clone for QuinnClientChannel<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> Clone for QuinnConnection<In, Out> {
     fn clone(&self) -> Self {
         Self {
             inner: self.inner.clone(),
@@ -321,7 +325,7 @@ impl<In: RpcMessage, Out: RpcMessage> Clone for QuinnClientChannel<In, Out> {
     }
 }
 
-impl<In: RpcMessage, Out: RpcMessage> ConnectionErrors for QuinnClientChannel<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> ConnectionErrors for QuinnConnection<In, Out> {
     type SendError = io::Error;
 
     type RecvError = io::Error;
@@ -329,7 +333,7 @@ impl<In: RpcMessage, Out: RpcMessage> ConnectionErrors for QuinnClientChannel<In
     type OpenError = quinn::ConnectionError;
 }
 
-impl<In: RpcMessage, Out: RpcMessage> Connection<In, Out> for QuinnClientChannel<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> Connection<In, Out> for QuinnConnection<In, Out> {
     type SendSink = self::SendSink<Out>;
     type RecvStream = self::RecvStream<In>;
 
@@ -338,26 +342,10 @@ impl<In: RpcMessage, Out: RpcMessage> Connection<In, Out> for QuinnClientChannel
 
     fn open_bi(&self) -> Self::OpenBiFut<'_> {
         let (sender, receiver) = oneshot::channel();
-        OpenBiFuture(OpenBiFutureState::Sending(self.inner
-            .sender
-            .send_async(sender), receiver), PhantomData)
-        // async move {
-        //     let (sender, receiver) = oneshot::channel();
-        //     self.inner
-        //         .sender
-        //         .send_async(sender)
-        //         .await
-        //         .map_err(|_| quinn::ConnectionError::LocallyClosed)?;
-        //     receiver
-        //         .await
-        //         .map(|(send, recv)| {
-        //             let send = SendSink::new(send);
-        //             let recv = RecvStream::new(recv);
-        //             (send, recv)
-        //         })
-        //         .map_err(|_| quinn::ConnectionError::LocallyClosed)
-        // }
-        // .boxed()
+        OpenBiFuture(
+            OpenBiFutureState::Sending(self.inner.sender.send_async(sender), receiver),
+            PhantomData,
+        )
     }
 }
 
@@ -366,7 +354,6 @@ impl<In: RpcMessage, Out: RpcMessage> Connection<In, Out> for QuinnClientChannel
 pub struct SendSink<Out>(#[pin] FramedBincodeWrite<quinn::SendStream, Out>);
 
 impl<Out: Serialize> SendSink<Out> {
-
     fn new(inner: quinn::SendStream) -> Self {
         let inner = FramedBincodeWrite::new(inner, MAX_FRAME_LENGTH);
         Self(inner)
@@ -413,7 +400,6 @@ impl<Out: Serialize> Sink<Out> for SendSink<Out> {
 pub struct RecvStream<In>(#[pin] FramedBincodeRead<quinn::RecvStream, In>);
 
 impl<In: DeserializeOwned> RecvStream<In> {
-
     fn new(inner: quinn::RecvStream) -> Self {
         let inner = FramedBincodeRead::new(inner, MAX_FRAME_LENGTH);
         Self(inner)
@@ -566,3 +552,13 @@ impl fmt::Display for CreateChannelError {
 }
 
 impl std::error::Error for CreateChannelError {}
+
+/// Get the handshake data from a quinn connection that uses rustls.
+pub fn get_handshake_data(connection: &quinn::Connection) -> Option<quinn::crypto::rustls::HandshakeData> {
+    let handshake_data = connection.handshake_data()?;
+    let tls_connection = handshake_data.downcast_ref::<quinn::crypto::rustls::HandshakeData>()?;
+    Some(quinn::crypto::rustls::HandshakeData {
+        protocol: tls_connection.protocol.clone(),
+        server_name: tls_connection.server_name.clone(),
+    })
+}

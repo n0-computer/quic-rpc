@@ -5,7 +5,7 @@ use futures::{SinkExt, Stream, StreamExt, TryStreamExt};
 use quic_rpc::{
     message::{BidiStreaming, ClientStreaming, Msg, RpcMsg, ServerStreaming},
     server::RpcServerError,
-    ServiceConnection, RpcClient, RpcServer, ServiceEndpoint, Service,
+    RpcClient, RpcServer, Service, ServiceConnection, ServiceEndpoint,
 };
 use serde::{Deserialize, Serialize};
 use std::{

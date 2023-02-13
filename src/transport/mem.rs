@@ -173,6 +173,10 @@ impl<In: RpcMessage, Out: RpcMessage> ServerEndpoint<In, Out> for MemServerChann
             _p: PhantomData,
         }
     }
+
+    fn local_addr(&self) -> &[crate::LocalAddr] {
+        &[crate::LocalAddr::Mem]
+    }
 }
 
 impl<In: RpcMessage, Out: RpcMessage> ConnectionErrors for MemClientChannel<In, Out> {

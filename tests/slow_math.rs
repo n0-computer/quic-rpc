@@ -7,7 +7,7 @@ use math::*;
 use quic_rpc::{
     message::{BidiStreaming, ClientStreaming, Msg, RpcMsg, ServerStreaming},
     server::RpcServerError,
-    RpcServer, ServiceEndpoint, Service,
+    RpcServer, Service, ServiceEndpoint,
 };
 
 #[derive(Debug, Clone)]

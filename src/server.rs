@@ -3,7 +3,7 @@
 //! This defines the RPC server DSL
 use crate::{
     message::{BidiStreaming, ClientStreaming, Msg, Rpc, ServerStreaming},
-    ConnectionErrors, ServiceEndpoint, Service,
+    ConnectionErrors, Service, ServiceEndpoint,
 };
 use futures::{channel::oneshot, task, task::Poll, Future, FutureExt, SinkExt, Stream, StreamExt};
 use pin_project::pin_project;
@@ -72,7 +72,9 @@ impl<S: Service, C: ServiceEndpoint<S>> RpcChannel<S, C> {
         Fut: Future<Output = M::Response>,
         T: Send + 'static,
     {
-        let Self { mut send, mut recv, ..} = self;
+        let Self {
+            mut send, mut recv, ..
+        } = self;
         // cancel if we get an update, no matter what it is
         let cancel = recv
             .next()
@@ -104,7 +106,7 @@ impl<S: Service, C: ServiceEndpoint<S>> RpcChannel<S, C> {
         Fut: Future<Output = M::Response> + Send + 'static,
         T: Send + 'static,
     {
-        let Self { mut send, recv, ..} = self;
+        let Self { mut send, recv, .. } = self;
         let (updates, read_error) = UpdateStream::new(recv);
         race2(read_error.map(Err), async move {
             // get the response
@@ -132,7 +134,7 @@ impl<S: Service, C: ServiceEndpoint<S>> RpcChannel<S, C> {
         Str: Stream<Item = M::Response> + Send + 'static,
         T: Send + 'static,
     {
-        let Self { mut send, recv, ..} = self;
+        let Self { mut send, recv, .. } = self;
         // downcast the updates
         let (updates, read_error) = UpdateStream::new(recv);
         // get the response
@@ -167,7 +169,9 @@ impl<S: Service, C: ServiceEndpoint<S>> RpcChannel<S, C> {
         Str: Stream<Item = M::Response> + Send + 'static,
         T: Send + 'static,
     {
-        let Self { mut send, mut recv, ..} = self;
+        let Self {
+            mut send, mut recv, ..
+        } = self;
         // cancel if we get an update, no matter what it is
         let cancel = recv
             .next()
@@ -228,16 +232,20 @@ impl<S: Service, C: ServiceEndpoint<S>> RpcServer<S, C> {
     /// The return value is a tuple of `(request, (sink, stream))`.  Here `request` is the
     /// first request which is already read from the stream.  The `sink` and `stream` are
     /// used to send more requests and/or receive more responses.
-    /// 
+    ///
     /// Often sink and stream will wrap an an underlying byte stream. In this case you can
-    /// call into_inner() on them to get 
+    /// call into_inner() on them to get
     ///
     /// [`Sink`]: futures::sink::Sink
     /// [`Stream`]: futures::stream::Stream
     pub async fn accept_one(
         &self,
     ) -> result::Result<(S::Req, RpcChannel<S, C>), RpcServerError<C>> {
-        let (send, mut recv) = self.source.accept_bi().await.map_err(RpcServerError::Accept)?;
+        let (send, mut recv) = self
+            .source
+            .accept_bi()
+            .await
+            .map_err(RpcServerError::Accept)?;
 
         // get the first message from the client. This will tell us what it wants to do.
         let request: S::Req = recv
@@ -247,7 +255,7 @@ impl<S: Service, C: ServiceEndpoint<S>> RpcServer<S, C> {
             .ok_or(RpcServerError::EarlyClose)?
             // recv error
             .map_err(RpcServerError::RecvError)?;
-        Ok((request,RpcChannel::new(send, recv)))
+        Ok((request, RpcChannel::new(send, recv)))
     }
 
     /// A rpc call that also maps the error from the user type to the wire type

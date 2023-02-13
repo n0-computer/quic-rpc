@@ -3,7 +3,7 @@
 //! This defines the RPC client DSL
 use crate::{
     message::{BidiStreaming, ClientStreaming, Msg, Rpc, ServerStreaming},
-    ServiceConnection, ConnectionErrors, Service,
+    ConnectionErrors, Service, ServiceConnection,
 };
 use futures::{
     future::BoxFuture, stream::BoxStream, FutureExt, Sink, SinkExt, Stream, StreamExt, TryFutureExt,

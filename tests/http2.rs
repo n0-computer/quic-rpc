@@ -217,24 +217,17 @@ async fn http2_channel_errors() -> anyhow::Result<()> {
                             chan.rpc(req, TestService, TestService::noser).await
                         }
                         TestRequest::NoDeserRequest(req) => {
-                            chan
-                                .rpc(req, TestService, TestService::nodeser)
-                                .await
+                            chan.rpc(req, TestService, TestService::nodeser).await
                         }
                         TestRequest::NoSerResponseRequest(req) => {
-                            chan
-                                .rpc(req, TestService, TestService::noserresponse)
-                                .await
+                            chan.rpc(req, TestService, TestService::noserresponse).await
                         }
                         TestRequest::NoDeserResponseRequest(req) => {
-                            chan
-                                .rpc(req, TestService, TestService::nodeserresponse)
+                            chan.rpc(req, TestService, TestService::nodeserresponse)
                                 .await
                         }
                         TestRequest::BigResponseRequest(req) => {
-                            chan
-                                .rpc(req, TestService, TestService::bigresponse)
-                                .await
+                            chan.rpc(req, TestService, TestService::bigresponse).await
                         }
                     },
                     Err(e) => Err(e),

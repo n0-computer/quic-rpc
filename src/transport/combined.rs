@@ -354,15 +354,21 @@ impl<A: Connection<In, Out>, B: Connection<In, Out>, In: RpcMessage, Out: RpcMes
 
 #[cfg(test)]
 mod tests {
-    use crate::{transport::{combined::{self, OpenBiError}, mem}, Connection};
+    use crate::{
+        transport::{
+            combined::{self, OpenBiError},
+            mem,
+        },
+        Connection,
+    };
 
     #[tokio::test]
     async fn open_empty_channel() {
         let channel = combined::CombinedClientChannel::<
-             mem::MemClientChannel<(), ()>,
-             mem::MemClientChannel<(), ()>,
-             (),
-             (),
+            mem::MemClientChannel<(), ()>,
+            mem::MemClientChannel<(), ()>,
+            (),
+            (),
         >::new(None, None);
         let res = channel.open_bi().await;
         assert!(matches!(res, Err(OpenBiError::NoChannel)));
