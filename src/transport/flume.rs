@@ -1,11 +1,10 @@
-//! Memory channel implementation
-//!
-//! This is currently based on [flume], but since no flume types are exposed it can be changed to another
-//! mpmc channel implementation, like [crossbeam].
+//! Memory channel implementation using [flume]
 //!
 //! [flume]: https://docs.rs/flume/
-//! [crossbeam]: https://docs.rs/crossbeam/
-use crate::{Connection, ConnectionErrors, RpcMessage, ServerEndpoint};
+use crate::{
+    transport::{Connection, ConnectionErrors, LocalAddr, ServerEndpoint},
+    RpcMessage,
+};
 use core::fmt;
 use futures::{Future, FutureExt, Sink, SinkExt, Stream, StreamExt};
 use std::{error, fmt::Display, marker::PhantomData, pin::Pin, result, task::Poll};
@@ -22,6 +21,7 @@ impl fmt::Display for RecvError {
     }
 }
 
+/// Sink for memory channels
 pub struct SendSink<T: RpcMessage>(flume::r#async::SendSink<'static, T>);
 
 impl<T: RpcMessage> Sink<T> for SendSink<T> {
@@ -60,6 +60,8 @@ impl<T: RpcMessage> Sink<T> for SendSink<T> {
             .map_err(|_| SendError::ReceiverDropped)
     }
 }
+
+/// Stream for memory channels
 pub struct RecvStream<T: RpcMessage>(flume::r#async::RecvStream<'static, T>);
 
 impl<T: RpcMessage> Stream for RecvStream<T> {
@@ -144,6 +146,7 @@ impl<'a, In: RpcMessage, Out: RpcMessage> Future for OpenBiFuture<'a, In, Out> {
     }
 }
 
+/// Future returned by [MemServerChannel::accept_bi]
 pub struct AcceptBiFuture<'a, In: RpcMessage, Out: RpcMessage> {
     wrapped: flume::r#async::RecvFut<'a, (SendSink<Out>, RecvStream<In>)>,
     _p: PhantomData<(In, Out)>,
@@ -174,8 +177,8 @@ impl<In: RpcMessage, Out: RpcMessage> ServerEndpoint<In, Out> for MemServerChann
         }
     }
 
-    fn local_addr(&self) -> &[crate::LocalAddr] {
-        &[crate::LocalAddr::Mem]
+    fn local_addr(&self) -> &[LocalAddr] {
+        &[LocalAddr::Mem]
     }
 }
 

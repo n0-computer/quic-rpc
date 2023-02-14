@@ -1,5 +1,8 @@
-//! QUIC channel implementation based on quinn
-use crate::{Connection, ConnectionErrors, LocalAddr, RpcMessage, ServerEndpoint};
+//! QUIC channel implementation based on [quinn](https://crates.io/crates/quinn)
+use crate::{
+    transport::{Connection, ConnectionErrors, LocalAddr, ServerEndpoint},
+    RpcMessage,
+};
 use futures::channel::oneshot;
 use futures::{Future, FutureExt, Sink, SinkExt, Stream, StreamExt};
 use pin_project::pin_project;
@@ -350,6 +353,9 @@ impl<In: RpcMessage, Out: RpcMessage> Connection<In, Out> for QuinnConnection<In
 }
 
 /// A sink that wraps a quinn SendStream with length delimiting and bincode
+///
+/// If you want to send bytes directly, use [SendSink::into_inner] to get the
+/// underlying [quinn::SendStream].
 #[pin_project]
 pub struct SendSink<Out>(#[pin] FramedBincodeWrite<quinn::SendStream, Out>);
 
@@ -361,6 +367,8 @@ impl<Out: Serialize> SendSink<Out> {
 }
 
 impl<Out> SendSink<Out> {
+    /// Get the underlying [quinn::SendStream], which implements
+    /// [tokio::io::AsyncWrite] and can be used to send bytes directly.
     pub fn into_inner(self) -> quinn::SendStream {
         self.0.into_inner()
     }
@@ -396,6 +404,9 @@ impl<Out: Serialize> Sink<Out> for SendSink<Out> {
 }
 
 /// A stream that wraps a quinn RecvStream with length delimiting and bincode
+///
+/// If you want to receive bytes directly, use [RecvStream::into_inner] to get
+/// the underlying [quinn::RecvStream].
 #[pin_project]
 pub struct RecvStream<In>(#[pin] FramedBincodeRead<quinn::RecvStream, In>);
 
@@ -407,6 +418,8 @@ impl<In: DeserializeOwned> RecvStream<In> {
 }
 
 impl<In> RecvStream<In> {
+    /// Get the underlying [quinn::RecvStream], which implements
+    /// [tokio::io::AsyncRead] and can be used to receive bytes directly.
     pub fn into_inner(self) -> quinn::RecvStream {
         self.0.into_inner()
     }
@@ -554,7 +567,9 @@ impl fmt::Display for CreateChannelError {
 impl std::error::Error for CreateChannelError {}
 
 /// Get the handshake data from a quinn connection that uses rustls.
-pub fn get_handshake_data(connection: &quinn::Connection) -> Option<quinn::crypto::rustls::HandshakeData> {
+pub fn get_handshake_data(
+    connection: &quinn::Connection,
+) -> Option<quinn::crypto::rustls::HandshakeData> {
     let handshake_data = connection.handshake_data()?;
     let tls_connection = handshake_data.downcast_ref::<quinn::crypto::rustls::HandshakeData>()?;
     Some(quinn::crypto::rustls::HandshakeData {

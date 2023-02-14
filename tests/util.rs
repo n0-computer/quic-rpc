@@ -1,5 +1,5 @@
 use anyhow::Context;
-use quic_rpc::{server::RpcServerError, Connection, RpcMessage};
+use quic_rpc::{server::RpcServerError, transport::Connection, RpcMessage};
 
 #[allow(unused)]
 pub async fn check_termination_anyhow<In: RpcMessage, Out: RpcMessage, C: Connection<In, Out>>(

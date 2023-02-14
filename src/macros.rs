@@ -207,7 +207,7 @@ macro_rules! __derive_create_dispatch {
         #[macro_export]
         macro_rules! $create_dispatch {
             ($target:ident, $handler:ident) => {
-                pub async fn $handler<C: $crate::ServerEndpoint<<$service as $crate::Service>::Req, <$service as $crate::Service>::Res>>(
+                pub async fn $handler<C: $crate::ServiceEndpoint<$service>>(
                     mut chan: $crate::server::RpcChannel<$service, C>,
                     msg: <$service as $crate::Service>::Req,
                     target: $target,
@@ -320,9 +320,9 @@ macro_rules! __derive_create_client{
         macro_rules! $create_client {
             ($struct:ident) => {
                 #[derive(::std::clone::Clone, ::std::fmt::Debug)]
-                pub struct $struct<C: $crate::Connection<<$service as $crate::Service>::Res, <$service as $crate::Service>::Req>>(pub $crate::client::RpcClient<$service, C>);
+                pub struct $struct<C: $crate::ServiceConnection<$service>>(pub $crate::client::RpcClient<$service, C>);
 
-                impl<C: $crate::Connection<<$service as $crate::Service>::Res, <$service as $crate::Service>::Req>> $struct<C> {
+                impl<C: $crate::ServiceConnection<$service>> $struct<C> {
                     $(
                         $crate::__rpc_method!($m_pattern, $service, $m_name, $m_input, $m_output, $m_update);
                     )*

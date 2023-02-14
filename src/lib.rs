@@ -7,7 +7,7 @@
 //! # Example
 //! ```
 //! # async fn example() -> anyhow::Result<()> {
-//! use quic_rpc::{message::RpcMsg, Service, RpcClient, transport::MemChannelTypes};
+//! use quic_rpc::{message::RpcMsg, Service, RpcClient};
 //! use serde::{Serialize, Deserialize};
 //! use derive_more::{From, TryInto};
 //!
@@ -54,14 +54,11 @@
 //! # Ok(())
 //! # }
 //! ```
-// #![deny(missing_docs)]
-// #![deny(rustdoc::broken_intra_doc_links)]
-use futures::{Future, Sink, Stream};
+#![deny(missing_docs)]
+#![deny(rustdoc::broken_intra_doc_links)]
 use serde::{de::DeserializeOwned, Serialize};
-use std::{
-    fmt::{self, Debug, Display},
-    net::SocketAddr,
-};
+use std::fmt::{Debug, Display};
+use transport::{Connection, ServerEndpoint};
 pub mod client;
 pub mod message;
 pub mod server;
@@ -86,91 +83,36 @@ impl<T> RpcMessage for T where
 
 /// Requirements for an internal error
 ///
-/// All errors have to be Send and 'static so they can be sent across threads.
+/// All errors have to be Send, Sync and 'static so they can be sent across threads.
+/// They also have to be Debug and Display so they can be logged.
+///
+/// We don't require them to implement [std::error::Error] so we can use
+/// anyhow::Error as an error type.
 pub trait RpcError: Debug + Display + Send + Sync + Unpin + 'static {}
 
 impl<T> RpcError for T where T: Debug + Display + Send + Sync + Unpin + 'static {}
 
 /// A service
+///
+/// A service has request and response message types. These types have to be the
+/// union of all possible request and response types for all interactions with
+/// the service.
+///
+/// Usually you will define an enum for the request and response
+/// type, and use the [derive_more](https://crates.io/crates/derive_more) crate to
+/// define the conversions between the enum and the actual request and response types.
+///
+/// To make a message type usable as a request for a service, implement [message::Msg]
+/// for it. This is how you define the interaction patterns for each request type.
+///
+/// A message type can be used for multiple services. E.g. you might have a
+/// Status request that is understood by multiple services and returns a
+/// standard status response.
 pub trait Service: Send + Sync + Debug + Clone + 'static {
     /// Type of request messages
     type Req: RpcMessage;
     /// Type of response messages
     type Res: RpcMessage;
-}
-
-/// The kinds of local addresses a [`ServerChannel`] can be bound to.
-///
-/// Returned by [`ServerChannel::local_addr`].
-///
-/// [`Display`]: fmt::Display
-#[derive(Debug, Clone)]
-#[non_exhaustive]
-pub enum LocalAddr {
-    /// A local socket.
-    Socket(SocketAddr),
-    /// An in-memory address.
-    Mem,
-}
-
-impl Display for LocalAddr {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            LocalAddr::Socket(sockaddr) => write!(f, "{sockaddr}"),
-            LocalAddr::Mem => write!(f, "mem"),
-        }
-    }
-}
-
-/// Errors that can happen when creating and using a channel
-///
-/// This is independent of whether the channel is a byte channel or a message channel.
-pub trait ConnectionErrors: Debug + Clone + Send + Sync + 'static {
-    /// Error when opening a substream
-    type OpenError: RpcError;
-    /// Error when sending messages
-    type SendError: RpcError;
-    /// Error when receiving messages
-    type RecvError: RpcError;
-}
-
-/// A connection to a specific remote machine
-///
-/// A connection is a source of bidirectional typed channels.
-pub trait Connection<In, Out>: ConnectionErrors {
-    /// Receive side of a bidirectional typed channel
-    type RecvStream: Stream<Item = Result<In, Self::RecvError>> + Send + Unpin + 'static;
-    /// Send side of a bidirectional typed channel
-    type SendSink: Sink<Out, Error = Self::SendError> + Send + Unpin + 'static;
-    /// The future that will resolve to a substream or an error
-    type OpenBiFut<'a>: Future<Output = Result<(Self::SendSink, Self::RecvStream), Self::OpenError>>
-        + Send
-        + 'a
-    where
-        Self: 'a;
-    /// Open a channel to the remote
-    fn open_bi(&self) -> Self::OpenBiFut<'_>;
-}
-
-/// A server endpoint that listens for connections
-pub trait ServerEndpoint<In, Out>: ConnectionErrors {
-    /// Receive side of a bidirectional typed channel
-    type RecvStream: Stream<Item = Result<In, Self::RecvError>> + Send + Unpin + 'static;
-    /// Send side of a bidirectional typed channel
-    type SendSink: Sink<Out, Error = Self::SendError> + Send + Unpin + 'static;
-    /// The future that will resolve to a substream or an error
-    type AcceptBiFut<'a>: Future<Output = Result<(Self::SendSink, Self::RecvStream), Self::OpenError>>
-        + Send
-        + 'a
-    where
-        Self: 'a;
-
-    /// Accept a new typed bidirectional channel on any of the connections we
-    /// have currently opened.
-    fn accept_bi(&self) -> Self::AcceptBiFut<'_>;
-
-    /// The local addresses this endpoint is bound to.
-    fn local_addr(&self) -> &[crate::LocalAddr];
 }
 
 /// A connection to a specific service on a specific remote machine

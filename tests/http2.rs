@@ -207,7 +207,7 @@ async fn http2_channel_errors() -> anyhow::Result<()> {
         let (res_tx, res_rx) = flume::unbounded();
         let handle = tokio::spawn(async move {
             loop {
-                let x = server.accept_one().await;
+                let x = server.accept().await;
                 let res = match x {
                     Ok((req, chan)) => match req {
                         TestRequest::BigRequest(req) => {

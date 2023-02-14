@@ -53,7 +53,7 @@ use async_stream::stream;
 use futures::{SinkExt, Stream, StreamExt};
 use quic_rpc::client::RpcClient;
 use quic_rpc::server::run_server_loop;
-use quic_rpc::transport::mem;
+use quic_rpc::transport::flume;
 use store_rpc::*;
 
 #[derive(Clone)]
@@ -105,7 +105,7 @@ create_store_client!(StoreClient);
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let (server, client) = mem::connection::<StoreRequest, StoreResponse>(1);
+    let (server, client) = flume::connection::<StoreRequest, StoreResponse>(1);
     let server_handle = tokio::task::spawn(async move {
         let target = Store;
         run_server_loop(StoreService, server, target, dispatch_store_request).await

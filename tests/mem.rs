@@ -1,11 +1,11 @@
 mod math;
 use math::*;
-use quic_rpc::{server::RpcServerError, transport::mem, RpcClient, RpcServer};
+use quic_rpc::{server::RpcServerError, transport::flume, RpcClient, RpcServer};
 
 #[tokio::test]
 async fn mem_channel_bench() -> anyhow::Result<()> {
     tracing_subscriber::fmt::try_init().ok();
-    let (server, client) = mem::connection::<ComputeRequest, ComputeResponse>(1);
+    let (server, client) = flume::connection::<ComputeRequest, ComputeResponse>(1);
 
     let server = RpcServer::<ComputeService, _>::new(server);
     let server_handle = tokio::task::spawn(ComputeService::server(server));
@@ -23,7 +23,7 @@ async fn mem_channel_bench() -> anyhow::Result<()> {
 #[tokio::test]
 async fn mem_channel_smoke() -> anyhow::Result<()> {
     tracing_subscriber::fmt::try_init().ok();
-    let (server, client) = mem::connection::<ComputeRequest, ComputeResponse>(1);
+    let (server, client) = flume::connection::<ComputeRequest, ComputeResponse>(1);
 
     let server = RpcServer::<ComputeService, _>::new(server);
     let server_handle = tokio::task::spawn(ComputeService::server(server));

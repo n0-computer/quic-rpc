@@ -6,8 +6,8 @@ use message::RpcMsg;
 use quic_rpc::{
     message::{BidiStreaming, ClientStreaming, Msg, ServerStreaming},
     server::RpcServerError,
-    transport::mem,
-    Connection, ServiceEndpoint, *,
+    transport::{flume, Connection, ServerEndpoint},
+    ServiceEndpoint, *,
 };
 use serde::{Deserialize, Serialize};
 use std::{fmt::Debug, result};
@@ -184,7 +184,7 @@ async fn main() -> anyhow::Result<()> {
         let s = server;
         let store = Store;
         loop {
-            let (req, chan) = s.accept_one().await?;
+            let (req, chan) = s.accept().await?;
             use StoreRequest::*;
             let store = store.clone();
             #[rustfmt::skip]
@@ -200,7 +200,7 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
-    let (server, client) = mem::connection::<StoreRequest, StoreResponse>(1);
+    let (server, client) = flume::connection::<StoreRequest, StoreResponse>(1);
     let client = RpcClient::<StoreService, _>::new(client);
     let server = RpcServer::<StoreService, _>::new(server);
     let server_handle = tokio::task::spawn(server_future(server));
@@ -247,7 +247,7 @@ async fn main() -> anyhow::Result<()> {
 }
 
 async fn _main_unsugared() -> anyhow::Result<()> {
-    let (server, client) = mem::connection::<u64, String>(1);
+    let (server, client) = flume::connection::<u64, String>(1);
     let to_string_service = tokio::spawn(async move {
         let (mut send, mut recv) = server.accept_bi().await?;
         while let Some(item) = recv.next().await {

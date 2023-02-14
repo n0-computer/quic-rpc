@@ -3,7 +3,8 @@
 //! This defines the RPC client DSL
 use crate::{
     message::{BidiStreaming, ClientStreaming, Msg, Rpc, ServerStreaming},
-    ConnectionErrors, Service, ServiceConnection,
+    transport::ConnectionErrors,
+    Service, ServiceConnection,
 };
 use futures::{
     future::BoxFuture, stream::BoxStream, FutureExt, Sink, SinkExt, Stream, StreamExt, TryFutureExt,
@@ -20,8 +21,8 @@ use std::{
 
 /// A client for a specific service
 ///
-/// This is a wrapper around a [SubstreamSource] that serves as the entry point for the client DSL.
-/// `S` is the service type, `C` is the substream source.
+/// This is a wrapper around a [ServiceConnection] that serves as the entry point
+/// for the client DSL. `S` is the service type, `C` is the substream source.
 #[derive(Debug)]
 pub struct RpcClient<S, C> {
     source: C,
