@@ -17,7 +17,7 @@ use super::util::{FramedBincodeRead, FramedBincodeWrite};
 
 type Socket<In, Out> = (SendSink<Out>, RecvStream<In>);
 
-const MAX_FRAME_LENGTH: usize = 1024 * 1024;
+const MAX_FRAME_LENGTH: usize = 1024 * 1024 * 16;
 
 #[derive(Debug)]
 struct ServerChannelInner {
