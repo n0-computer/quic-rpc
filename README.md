@@ -81,11 +81,11 @@ substreams including per substream backpressure. However, I found that for raw
 data transfer http2/tcp has still superior performance. This is why the http2
 transport exists.
 
-Currently you would use the quic transport for cases where you want to have
+Currently you would use the quinn transport for cases where you want to have
 connections to many different peers and can't accept a large per connection
 overhead, or where you want low latency for small messages.
 
-You would use the http2 transport for cases where you have a small number of
+You would use the hyper transport for cases where you have a small number of
 connections, so per connection overhead does not matter that much, and where
 you want maximum throughput at the expense of some latency.
 

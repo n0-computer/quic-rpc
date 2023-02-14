@@ -53,7 +53,7 @@ use async_stream::stream;
 use futures::{SinkExt, Stream, StreamExt};
 use quic_rpc::client::RpcClient;
 use quic_rpc::server::run_server_loop;
-use quic_rpc::transport::mem::{self, MemChannelTypes};
+use quic_rpc::transport::flume;
 use store_rpc::*;
 
 #[derive(Clone)]
@@ -105,19 +105,12 @@ create_store_client!(StoreClient);
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let (server, client) = mem::connection::<StoreRequest, StoreResponse>(1);
+    let (server, client) = flume::connection::<StoreRequest, StoreResponse>(1);
     let server_handle = tokio::task::spawn(async move {
         let target = Store;
-        run_server_loop(
-            StoreService,
-            MemChannelTypes,
-            server,
-            target,
-            dispatch_store_request,
-        )
-        .await
+        run_server_loop(StoreService, server, target, dispatch_store_request).await
     });
-    let client = RpcClient::<StoreService, MemChannelTypes>::new(client);
+    let client = RpcClient::<StoreService, _>::new(client);
     let mut client = StoreClient(client);
 
     // a rpc call
@@ -126,7 +119,7 @@ async fn main() -> anyhow::Result<()> {
         let mut client = client.clone();
         tokio::task::spawn(async move {
             let res = client.get(Get([0u8; 32])).await;
-            println!("rpc res [{i}]: {:?}", res);
+            println!("rpc res [{i}]: {res:?}");
         });
     }
 
@@ -134,7 +127,7 @@ async fn main() -> anyhow::Result<()> {
     println!("a server streaming call");
     let mut s = client.get_file(GetFile([0u8; 32])).await?;
     while let Some(res) = s.next().await {
-        println!("streaming res: {:?}", res);
+        println!("streaming res: {res:?}");
     }
 
     // client streaming call
@@ -146,7 +139,7 @@ async fn main() -> anyhow::Result<()> {
         }
     });
     let res = recv.await?;
-    println!("client stremaing res: {:?}", res);
+    println!("client stremaing res: {res:?}");
 
     // bidi streaming call
     println!("a bidi streaming call");
@@ -157,7 +150,7 @@ async fn main() -> anyhow::Result<()> {
         }
     });
     while let Some(res) = recv.next().await {
-        println!("bidi res: {:?}", res);
+        println!("bidi res: {res:?}");
     }
 
     // dropping the client will cause the server to terminate

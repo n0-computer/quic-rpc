@@ -207,20 +207,19 @@ macro_rules! __derive_create_dispatch {
         #[macro_export]
         macro_rules! $create_dispatch {
             ($target:ident, $handler:ident) => {
-                pub async fn $handler<C: $crate::ChannelTypes>(
-                    mut server: $crate::server::RpcServer<$service, C>,
+                pub async fn $handler<C: $crate::ServiceEndpoint<$service>>(
+                    mut chan: $crate::server::RpcChannel<$service, C>,
                     msg: <$service as $crate::Service>::Req,
-                    chan: (C::SendSink<<$service as $crate::Service>::Res>, C::RecvStream<<$service as $crate::Service>::Req>),
                     target: $target,
-                ) -> Result<$crate::server::RpcServer<$service, C>, $crate::server::RpcServerError<C>> {
+                ) -> Result<(), $crate::server::RpcServerError<C>> {
                     let res = match msg {
                         $(
-                            $request::$m_input(msg) => { $crate::__rpc_invoke!($m_pattern, $m_name, $target, server, msg, chan, target) },
+                            $request::$m_input(msg) => { $crate::__rpc_invoke!($m_pattern, $m_name, $target, msg, chan, target) },
                         )*
                         _ => Err($crate::server::RpcServerError::<C>::UnexpectedStartMessage),
                     };
                     res?;
-                    Ok(server)
+                    Ok(())
                 }
             }
         }
@@ -283,22 +282,22 @@ macro_rules! __rpc_message {
 #[doc(hidden)]
 #[macro_export]
 macro_rules! __rpc_invoke {
-    (Rpc, $m_name:ident, $target_ty:ident, $server:ident, $msg:ident, $chan:ident, $target:ident) => {
-        $server.rpc($msg, $chan, $target, $target_ty::$m_name).await
+    (Rpc, $m_name:ident, $target_ty:ident, $msg:ident, $chan:ident, $target:ident) => {
+        $chan.rpc($msg, $target, $target_ty::$m_name).await
     };
-    (ClientStreaming, $m_name:ident, $target_ty:ident, $server:ident, $msg:ident, $chan:ident, $target:ident) => {
-        $server
-            .client_streaming($msg, $chan, $target, $target_ty::$m_name)
+    (ClientStreaming, $m_name:ident, $target_ty:ident, $msg:ident, $chan:ident, $target:ident) => {
+        $chan
+            .client_streaming($msg, $target, $target_ty::$m_name)
             .await
     };
-    (ServerStreaming, $m_name:ident, $target_ty:ident, $server:ident, $msg:ident, $chan:ident, $target:ident) => {
-        $server
-            .server_streaming($msg, $chan, $target, $target_ty::$m_name)
+    (ServerStreaming, $m_name:ident, $target_ty:ident, $msg:ident, $chan:ident, $target:ident) => {
+        $chan
+            .server_streaming($msg, $target, $target_ty::$m_name)
             .await
     };
-    (BidiStreaming, $m_name:ident, $target_ty:ident, $server:ident, $msg:ident, $chan:ident, $target:ident) => {
-        $server
-            .bidi_streaming($msg, $chan, $target, $target_ty::$m_name)
+    (BidiStreaming, $m_name:ident, $target_ty:ident, $msg:ident, $chan:ident, $target:ident) => {
+        $chan
+            .bidi_streaming($msg, $target, $target_ty::$m_name)
             .await
     };
 }
@@ -321,9 +320,9 @@ macro_rules! __derive_create_client{
         macro_rules! $create_client {
             ($struct:ident) => {
                 #[derive(::std::clone::Clone, ::std::fmt::Debug)]
-                pub struct $struct<C: $crate::ChannelTypes>(pub $crate::client::RpcClient<$service, C>);
+                pub struct $struct<C: $crate::ServiceConnection<$service>>(pub $crate::client::RpcClient<$service, C>);
 
-                impl<C: $crate::ChannelTypes> $struct<C> {
+                impl<C: $crate::ServiceConnection<$service>> $struct<C> {
                     $(
                         $crate::__rpc_method!($m_pattern, $service, $m_name, $m_input, $m_output, $m_update);
                     )*

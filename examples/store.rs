@@ -6,8 +6,8 @@ use message::RpcMsg;
 use quic_rpc::{
     message::{BidiStreaming, ClientStreaming, Msg, ServerStreaming},
     server::RpcServerError,
-    transport::mem::{self, MemChannelTypes},
-    ClientChannel, *,
+    transport::{flume, Connection, ServerEndpoint},
+    ServiceEndpoint, *,
 };
 use serde::{Deserialize, Serialize};
 use std::{fmt::Debug, result};
@@ -178,43 +178,43 @@ impl Store {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    async fn server_future(
-        server: RpcServer<StoreService, MemChannelTypes>,
-    ) -> result::Result<(), RpcServerError<MemChannelTypes>> {
+    async fn server_future<C: ServiceEndpoint<StoreService>>(
+        server: RpcServer<StoreService, C>,
+    ) -> result::Result<(), RpcServerError<C>> {
         let s = server;
         let store = Store;
         loop {
-            let (req, chan) = s.accept_one().await?;
+            let (req, chan) = s.accept().await?;
             use StoreRequest::*;
             let store = store.clone();
             #[rustfmt::skip]
             match req {
-                Put(msg) => s.rpc(msg, chan, store, Store::put).await,
-                Get(msg) => s.rpc(msg, chan, store, Store::get).await,
-                PutFile(msg) => s.client_streaming(msg, chan, store, Store::put_file).await,
-                GetFile(msg) => s.server_streaming(msg, chan, store, Store::get_file).await,
-                ConvertFile(msg) => s.bidi_streaming(msg, chan, store, Store::convert_file).await,
+                Put(msg) => chan.rpc(msg, store, Store::put).await,
+                Get(msg) => chan.rpc(msg, store, Store::get).await,
+                PutFile(msg) => chan.client_streaming(msg, store, Store::put_file).await,
+                GetFile(msg) => chan.server_streaming(msg, store, Store::get_file).await,
+                ConvertFile(msg) => chan.bidi_streaming(msg, store, Store::convert_file).await,
                 PutFileUpdate(_) => Err(RpcServerError::UnexpectedStartMessage)?,
                 ConvertFileUpdate(_) => Err(RpcServerError::UnexpectedStartMessage)?,
             }?;
         }
     }
 
-    let (server, client) = mem::connection::<StoreRequest, StoreResponse>(1);
-    let client = RpcClient::<StoreService, MemChannelTypes>::new(client);
-    let server = RpcServer::<StoreService, MemChannelTypes>::new(server);
+    let (server, client) = flume::connection::<StoreRequest, StoreResponse>(1);
+    let client = RpcClient::<StoreService, _>::new(client);
+    let server = RpcServer::<StoreService, _>::new(server);
     let server_handle = tokio::task::spawn(server_future(server));
 
     // a rpc call
     println!("a rpc call");
     let res = client.rpc(Get([0u8; 32])).await?;
-    println!("{:?}", res);
+    println!("{res:?}");
 
     // server streaming call
     println!("a server streaming call");
     let mut s = client.server_streaming(GetFile([0u8; 32])).await?;
     while let Some(res) = s.next().await {
-        println!("{:?}", res);
+        println!("{res:?}");
     }
 
     // client streaming call
@@ -226,7 +226,7 @@ async fn main() -> anyhow::Result<()> {
         }
     });
     let res = recv.await?;
-    println!("{:?}", res);
+    println!("{res:?}");
 
     // bidi streaming call
     println!("a bidi streaming call");
@@ -237,7 +237,7 @@ async fn main() -> anyhow::Result<()> {
         }
     });
     while let Some(res) = recv.next().await {
-        println!("{:?}", res);
+        println!("{res:?}");
     }
 
     // dropping the client will cause the server to terminate
@@ -247,12 +247,12 @@ async fn main() -> anyhow::Result<()> {
 }
 
 async fn _main_unsugared() -> anyhow::Result<()> {
-    let (server, client) = mem::connection::<u64, String>(1);
+    let (server, client) = flume::connection::<u64, String>(1);
     let to_string_service = tokio::spawn(async move {
         let (mut send, mut recv) = server.accept_bi().await?;
         while let Some(item) = recv.next().await {
             let item = item?;
-            println!("server got: {:?}", item);
+            println!("server got: {item:?}");
             send.send(item.to_string()).await?;
         }
         anyhow::Ok(())
@@ -261,7 +261,7 @@ async fn _main_unsugared() -> anyhow::Result<()> {
     let print_result_service = tokio::spawn(async move {
         while let Some(item) = recv.next().await {
             let item = item?;
-            println!("got result: {}", item);
+            println!("got result: {item}");
         }
         anyhow::Ok(())
     });

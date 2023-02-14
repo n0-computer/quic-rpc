@@ -5,7 +5,7 @@ use futures::{SinkExt, Stream, StreamExt, TryStreamExt};
 use quic_rpc::{
     message::{BidiStreaming, ClientStreaming, Msg, RpcMsg, ServerStreaming},
     server::RpcServerError,
-    ChannelTypes, RpcClient, RpcServer, Service,
+    RpcClient, RpcServer, Service, ServiceConnection, ServiceEndpoint,
 };
 use serde::{Deserialize, Serialize};
 use std::{
@@ -142,23 +142,22 @@ impl ComputeService {
         }
     }
 
-    pub async fn server<C: ChannelTypes>(
+    pub async fn server<C: ServiceEndpoint<ComputeService>>(
         server: RpcServer<ComputeService, C>,
     ) -> result::Result<(), RpcServerError<C>> {
         let s = server;
         let service = ComputeService;
         loop {
-            let (req, chan) = s.accept_one().await?;
-            let s = s.clone();
+            let (req, chan) = s.accept().await?;
             let service = service.clone();
             tokio::spawn(async move {
                 use ComputeRequest::*;
                 #[rustfmt::skip]
                 match req {
-                    Sqr(msg) => s.rpc(msg, chan, service, ComputeService::sqr).await,
-                    Sum(msg) => s.client_streaming(msg, chan, service, ComputeService::sum).await,
-                    Fibonacci(msg) => s.server_streaming(msg, chan, service, ComputeService::fibonacci).await,
-                    Multiply(msg) => s.bidi_streaming(msg, chan, service, ComputeService::multiply).await,
+                    Sqr(msg) => chan.rpc(msg, service, ComputeService::sqr).await,
+                    Sum(msg) => chan.client_streaming(msg, service, ComputeService::sum).await,
+                    Fibonacci(msg) => chan.server_streaming(msg, service, ComputeService::fibonacci).await,
+                    Multiply(msg) => chan.bidi_streaming(msg, service, ComputeService::multiply).await,
                     SumUpdate(_) => Err(RpcServerError::UnexpectedStartMessage)?,
                     MultiplyUpdate(_) => Err(RpcServerError::UnexpectedStartMessage)?,
                 }?;
@@ -167,7 +166,7 @@ impl ComputeService {
         }
     }
 
-    pub async fn server_par<C: ChannelTypes>(
+    pub async fn server_par<C: ServiceEndpoint<ComputeService>>(
         server: RpcServer<ComputeService, C>,
         parallelism: usize,
     ) -> result::Result<(), RpcServerError<C>> {
@@ -176,21 +175,20 @@ impl ComputeService {
         let service = ComputeService;
         let request_stream = stream! {
             loop {
-                yield s2.accept_one().await;
+                yield s2.accept().await;
             }
         };
         let process_stream = request_stream.map(move |r| {
             let service = service.clone();
-            let s = s.clone();
             async move {
                 let (req, chan) = r?;
                 use ComputeRequest::*;
                 #[rustfmt::skip]
                 match req {
-                    Sqr(msg) => s.rpc(msg, chan, service, ComputeService::sqr).await,
-                    Sum(msg) => s.client_streaming(msg, chan, service, ComputeService::sum).await,
-                    Fibonacci(msg) => s.server_streaming(msg, chan, service, ComputeService::fibonacci).await,
-                    Multiply(msg) => s.bidi_streaming(msg, chan, service, ComputeService::multiply).await,
+                    Sqr(msg) => chan.rpc(msg, service, ComputeService::sqr).await,
+                    Sum(msg) => chan.client_streaming(msg, service, ComputeService::sum).await,
+                    Fibonacci(msg) => chan.server_streaming(msg, service, ComputeService::fibonacci).await,
+                    Multiply(msg) => chan.bidi_streaming(msg, service, ComputeService::multiply).await,
                     SumUpdate(_) => Err(RpcServerError::UnexpectedStartMessage)?,
                     MultiplyUpdate(_) => Err(RpcServerError::UnexpectedStartMessage)?,
                 }?;
@@ -201,7 +199,7 @@ impl ComputeService {
             .buffer_unordered(parallelism)
             .for_each(|x| async move {
                 if let Err(e) = x {
-                    eprintln!("error: {:?}", e);
+                    eprintln!("error: {e:?}");
                 }
             })
             .await;
@@ -209,15 +207,16 @@ impl ComputeService {
     }
 }
 
-pub async fn smoke_test<C: ChannelTypes>(
-    client: C::ClientChannel<ComputeResponse, ComputeRequest>,
-) -> anyhow::Result<()> {
+pub async fn smoke_test<C: ServiceConnection<ComputeService>>(client: C) -> anyhow::Result<()> {
     let client = RpcClient::<ComputeService, C>::new(client);
     // a rpc call
+    tracing::debug!("calling rpc S(1234)");
     let res = client.rpc(Sqr(1234)).await?;
+    tracing::debug!("got response {:?}", res);
     assert_eq!(res, SqrResponse(1522756));
 
     // client streaming call
+    tracing::debug!("calling client_streaming Sum");
     let (mut send, recv) = client.client_streaming(Sum).await?;
     tokio::task::spawn(async move {
         for i in 1..=3 {
@@ -226,14 +225,18 @@ pub async fn smoke_test<C: ChannelTypes>(
         Ok::<_, C::SendError>(())
     });
     let res = recv.await?;
+    tracing::debug!("got response {:?}", res);
     assert_eq!(res, SumResponse(6));
 
     // server streaming call
+    tracing::debug!("calling server_streaming Fibonacci(10)");
     let s = client.server_streaming(Fibonacci(10)).await?;
     let res = s.map_ok(|x| x.0).try_collect::<Vec<_>>().await?;
+    tracing::debug!("got response {:?}", res);
     assert_eq!(res, vec![0, 1, 1, 2, 3, 5, 8, 13, 21, 34]);
 
     // bidi streaming call
+    tracing::debug!("calling bidi Multiply(2)");
     let (mut send, recv) = client.bidi(Multiply(2)).await?;
     tokio::task::spawn(async move {
         for i in 1..=3 {
@@ -242,7 +245,10 @@ pub async fn smoke_test<C: ChannelTypes>(
         Ok::<_, C::SendError>(())
     });
     let res = recv.map_ok(|x| x.0).try_collect::<Vec<_>>().await?;
+    tracing::debug!("got response {:?}", res);
     assert_eq!(res, vec![2, 4, 6]);
+
+    tracing::debug!("dropping client!");
     Ok(())
 }
 
@@ -250,7 +256,7 @@ fn clear_line() {
     print!("\r{}\r", " ".repeat(80));
 }
 
-pub async fn bench<C: ChannelTypes>(
+pub async fn bench<C: ServiceConnection<ComputeService>>(
     client: RpcClient<ComputeService, C>,
     n: u64,
 ) -> anyhow::Result<()>

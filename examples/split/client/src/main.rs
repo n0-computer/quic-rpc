@@ -1,6 +1,6 @@
 use futures::sink::SinkExt;
 use futures::stream::StreamExt;
-use quic_rpc::{transport::QuinnChannelTypes, RpcClient};
+use quic_rpc::RpcClient;
 use quinn::{ClientConfig, Endpoint};
 use std::io;
 use std::net::SocketAddr;
@@ -11,11 +11,15 @@ types::create_compute_client!(ComputeClient);
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    tracing_subscriber::fmt::init();
     let server_addr: SocketAddr = "127.0.0.1:12345".parse()?;
     let endpoint = make_insecure_client_endpoint("0.0.0.0:0".parse()?)?;
-    let client = endpoint.connect(server_addr, "localhost")?.await?;
-    let client = quic_rpc::transport::quinn::QuinnClientChannel::new(client);
-    let client = RpcClient::<ComputeService, QuinnChannelTypes>::new(client);
+    let client = quic_rpc::transport::quinn::QuinnConnection::new(
+        endpoint,
+        server_addr,
+        "localhost".to_string(),
+    );
+    let client = RpcClient::<ComputeService, _>::new(client);
     let mut client = ComputeClient(client);
 
     // a rpc call
@@ -38,7 +42,7 @@ async fn main() -> anyhow::Result<()> {
         }
     });
     let res = recv.await?;
-    println!("client streaming res: {:?}", res);
+    println!("client streaming res: {res:?}");
 
     // server streaming call
     println!("server streaming call: fibonacci(10)");

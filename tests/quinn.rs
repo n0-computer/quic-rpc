@@ -4,15 +4,13 @@ use std::{
     sync::Arc,
 };
 
-use anyhow::Context;
-use quic_rpc::{transport::QuinnChannelTypes, RpcClient, RpcServer};
+use quic_rpc::{RpcClient, RpcServer};
 use quinn::{ClientConfig, Endpoint, ServerConfig};
 use tokio::task::JoinHandle;
 
 mod math;
 use math::*;
 mod util;
-use util::*;
 
 /// Constructs a QUIC endpoint configured for use a client only.
 ///
@@ -54,7 +52,6 @@ fn configure_client(server_certs: &[&[u8]]) -> anyhow::Result<ClientConfig> {
     for cert in server_certs {
         certs.add(&rustls::Certificate(cert.to_vec()))?;
     }
-
     Ok(ClientConfig::with_root_certificates(certs))
 }
 
@@ -81,8 +78,8 @@ pub struct Endpoints {
     server_addr: SocketAddr,
 }
 
-pub fn make_endpoints() -> anyhow::Result<Endpoints> {
-    let server_addr: SocketAddr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 12345));
+pub fn make_endpoints(port: u16) -> anyhow::Result<Endpoints> {
+    let server_addr: SocketAddr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, port));
     let (server, server_certs) = make_server_endpoint(server_addr)?;
     let client = make_client_endpoint("0.0.0.0:0".parse()?, &[&server_certs])?;
     Ok(Endpoints {
@@ -94,46 +91,46 @@ pub fn make_endpoints() -> anyhow::Result<Endpoints> {
 
 fn run_server(server: quinn::Endpoint) -> JoinHandle<anyhow::Result<()>> {
     tokio::task::spawn(async move {
-        let local_addr = server.local_addr()?;
-        let conn = server.accept().await.context("accept failed")?.await?;
-        let connection = quic_rpc::transport::quinn::QuinnServerChannel::new(conn, local_addr);
-        let server = RpcServer::<ComputeService, QuinnChannelTypes>::new(connection);
+        let connection = quic_rpc::transport::quinn::QuinnServerChannel::new(server)?;
+        let server = RpcServer::<ComputeService, _>::new(connection);
         ComputeService::server(server).await?;
         anyhow::Ok(())
     })
 }
 
+// #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[tokio::test]
 async fn quinn_channel_bench() -> anyhow::Result<()> {
-    type C = QuinnChannelTypes;
+    tracing_subscriber::fmt::try_init().ok();
     let Endpoints {
         client,
         server,
         server_addr,
-    } = make_endpoints()?;
+    } = make_endpoints(12345)?;
+    tracing::debug!("Starting server");
     let server_handle = run_server(server);
-    let client = client.connect(server_addr, "localhost")?.await?;
-    let client = quic_rpc::transport::quinn::QuinnClientChannel::new(client);
-    let client = RpcClient::<ComputeService, C>::new(client);
+    tracing::debug!("Starting client");
+    let client =
+        quic_rpc::transport::quinn::QuinnConnection::new(client, server_addr, "localhost".into());
+    let client = RpcClient::<ComputeService, _>::new(client);
+    tracing::debug!("Starting benchmark");
     bench(client, 50000).await?;
-    println!("waiting for server");
-    check_termination_anyhow::<C>(server_handle).await?;
+    server_handle.abort();
     Ok(())
 }
 
 #[tokio::test]
-#[ignore]
 async fn quinn_channel_smoke() -> anyhow::Result<()> {
-    type C = QuinnChannelTypes;
+    tracing_subscriber::fmt::try_init().ok();
     let Endpoints {
         client,
         server,
         server_addr,
-    } = make_endpoints()?;
+    } = make_endpoints(12346)?;
     let server_handle = run_server(server);
-    let client_connection = client.connect(server_addr, "localhost")?.await?;
-    let client_connection = quic_rpc::transport::quinn::QuinnClientChannel::new(client_connection);
-    smoke_test::<C>(client_connection).await?;
-    check_termination_anyhow::<C>(server_handle).await?;
+    let client_connection =
+        quic_rpc::transport::quinn::QuinnConnection::new(client, server_addr, "localhost".into());
+    smoke_test(client_connection).await?;
+    server_handle.abort();
     Ok(())
 }

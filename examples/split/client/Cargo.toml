@@ -7,10 +7,11 @@ edition = "2021"
 
 [dependencies]
 anyhow = "1"
-futures = "0.3.25"
-quic-rpc = { path = "../../..", features = ["quic"] }
-quinn = "0.9.0"
-rustls = { version = "0.20.7", features = ["dangerous_configuration"] }
+futures = "0.3.26"
+quic-rpc = { path = "../../..", features = ["quinn-transport"] }
+quinn = "0.9.3"
+rustls = { version = "0.20.8", features = ["dangerous_configuration"] }
+tracing-subscriber = "0.3.16"
 serde = { version = "1", features = ["derive"] }
 tokio = { version = "1", features = ["full"] }
 types = { path = "../types" }
