@@ -1,7 +1,4 @@
 //! Transports for quic-rpc
-//!
-//! mem and combined are enabled by default. quic and http2 are enabled by feature flags.
-
 use crate::RpcError;
 use futures::{Future, Sink, Stream};
 use std::{

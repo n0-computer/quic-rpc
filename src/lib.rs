@@ -1,4 +1,10 @@
-//! A streaming rpc system based on quic
+//! A streaming rpc system for transports that support multiple bidirectional
+//! streams, such as QUIC and HTTP2.
+//!
+//! A lightweight memory transport is provided for cases where you want have
+//! multiple cleanly separated substreams in the same process.
+//!
+//! For supported transports, see the [transport] module.
 //!
 //! # Motivation
 //!
@@ -7,7 +13,7 @@
 //! # Example
 //! ```
 //! # async fn example() -> anyhow::Result<()> {
-//! use quic_rpc::{message::RpcMsg, Service, RpcClient};
+//! use quic_rpc::{message::RpcMsg, Service, RpcClient, RpcServer};
 //! use serde::{Serialize, Deserialize};
 //! use derive_more::{From, TryInto};
 //!
@@ -19,6 +25,8 @@
 //! struct Pong;
 //!
 //! // Define your RPC service and its request/response types
+//! #[derive(Debug, Clone)]
+//! struct PingService;
 //!
 //! #[derive(Debug, Serialize, Deserialize, From, TryInto)]
 //! enum PingRequest {
@@ -30,9 +38,6 @@
 //!     Pong(Pong),
 //! }
 //!
-//! #[derive(Debug, Clone)]
-//! struct PingService;
-//!
 //! impl Service for PingService {
 //!   type Req = PingRequest;
 //!   type Res = PingResponse;
@@ -43,14 +48,44 @@
 //!   type Response = Pong;
 //! }
 //!
-//! // create a transport channel
-//! let (server, client) = quic_rpc::transport::mem::connection::<PingRequest, PingResponse>(1);
+//! // create a transport channel, here a memory channel for testing
+//! let (server, client) = quic_rpc::transport::flume::connection::<PingRequest, PingResponse>(1);
 //!
+//! // client side
 //! // create the rpc client given the channel and the service type
 //! let mut client = RpcClient::<PingService, _>::new(client);
 //!
 //! // call the service
 //! let res = client.rpc(Ping).await?;
+//!
+//! // server side
+//! // create the rpc server given the channel and the service type
+//! let mut server = RpcServer::<PingService, _>::new(server);
+//!
+//! let handler = Handler;
+//! loop {
+//!   // accept connections
+//!   let (msg, chan) = server.accept().await?;
+//!   // dispatch the message to the appropriate handler
+//!   match msg {
+//!     PingRequest::Ping(ping) => chan.rpc(ping, handler, Handler::ping).await?,
+//!   }
+//! }
+//!
+//! // the handler. For a more complex example, this would contain any state
+//! // needed to handle the request.
+//! #[derive(Debug, Clone, Copy)]
+//! struct Handler;
+//!
+//! impl Handler {
+//!   // the handle fn for a Ping request.
+//!
+//!   // The return type is the response type for the service.
+//!   // Note that this must take self by value, not by reference.
+//!   async fn ping(self, _req: Ping) -> Pong {
+//!     Pong
+//!   }
+//! }
 //! # Ok(())
 //! # }
 //! ```
