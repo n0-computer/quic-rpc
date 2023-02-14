@@ -1,4 +1,4 @@
-//! QUIC channel implementation based on [quinn](https://crates.io/crates/quinn)
+//! QUIC transport implementation based on [quinn](https://crates.io/crates/quinn)
 use crate::{
     transport::{Connection, ConnectionErrors, LocalAddr, ServerEndpoint},
     RpcMessage,
@@ -38,14 +38,14 @@ impl Drop for ServerChannelInner {
     }
 }
 
-/// A server channel using a quinn connection
+/// A server endpoint using a quinn connection
 #[derive(Debug)]
-pub struct QuinnServerChannel<In: RpcMessage, Out: RpcMessage> {
+pub struct QuinnServerEndpoint<In: RpcMessage, Out: RpcMessage> {
     inner: Arc<ServerChannelInner>,
     _phantom: PhantomData<(In, Out)>,
 }
 
-impl<In: RpcMessage, Out: RpcMessage> QuinnServerChannel<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> QuinnServerEndpoint<In, Out> {
     /// handles RPC requests from a connection
     ///
     /// to cleanly shutdown the handler, drop the receiver side of the sender.
@@ -162,7 +162,7 @@ impl<In: RpcMessage, Out: RpcMessage> QuinnServerChannel<In, Out> {
     }
 }
 
-impl<In: RpcMessage, Out: RpcMessage> Clone for QuinnServerChannel<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> Clone for QuinnServerEndpoint<In, Out> {
     fn clone(&self) -> Self {
         Self {
             inner: self.inner.clone(),
@@ -171,7 +171,7 @@ impl<In: RpcMessage, Out: RpcMessage> Clone for QuinnServerChannel<In, Out> {
     }
 }
 
-impl<In: RpcMessage, Out: RpcMessage> ConnectionErrors for QuinnServerChannel<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> ConnectionErrors for QuinnServerEndpoint<In, Out> {
     type SendError = io::Error;
 
     type RecvError = io::Error;
@@ -179,7 +179,7 @@ impl<In: RpcMessage, Out: RpcMessage> ConnectionErrors for QuinnServerChannel<In
     type OpenError = quinn::ConnectionError;
 }
 
-impl<In: RpcMessage, Out: RpcMessage> ServerEndpoint<In, Out> for QuinnServerChannel<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> ServerEndpoint<In, Out> for QuinnServerEndpoint<In, Out> {
     type RecvStream = self::RecvStream<In>;
     type SendSink = self::SendSink<Out>;
 
@@ -220,7 +220,7 @@ impl Drop for ClientChannelInner {
     }
 }
 
-/// A client channel using a quinn connection
+/// A connection using a quinn connection
 pub struct QuinnConnection<In: RpcMessage, Out: RpcMessage> {
     inner: Arc<ClientChannelInner>,
     _phantom: PhantomData<(In, Out)>,
@@ -441,12 +441,6 @@ pub type OpenBiError = quinn::ConnectionError;
 
 /// Error for accept_bi. Currently just a quinn::ConnectionError
 pub type AcceptBiError = quinn::ConnectionError;
-
-/// Types for quinn channels.
-///
-/// This exposes the types from quinn directly without attempting to wrap them.
-#[derive(Debug, Clone, Copy)]
-pub struct QuinnChannelTypes;
 
 enum OpenBiFutureState<'a> {
     /// Sending the oneshot sender to the server

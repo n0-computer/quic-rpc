@@ -91,7 +91,7 @@ pub fn make_endpoints(port: u16) -> anyhow::Result<Endpoints> {
 
 fn run_server(server: quinn::Endpoint) -> JoinHandle<anyhow::Result<()>> {
     tokio::task::spawn(async move {
-        let connection = quic_rpc::transport::quinn::QuinnServerChannel::new(server)?;
+        let connection = quic_rpc::transport::quinn::QuinnServerEndpoint::new(server)?;
         let server = RpcServer::<ComputeService, _>::new(connection);
         ComputeService::server(server).await?;
         anyhow::Ok(())

@@ -59,7 +59,7 @@
 /// ```ignore
 /// create_store_client!(MyClient);
 /// let client = quic_rpc::quinn::Channel::new(client);
-/// let client = quic_rpc::client::RpcClient::<MyService, QuinnChannelTypes>::new(client);
+/// let client = quic_rpc::client::RpcClient::<MyService, _>::new(client);
 /// let mut client = MyClient(client);
 /// let sum = client.add(Add(3, 4)).await?;
 /// // Sum(7)

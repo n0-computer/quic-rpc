@@ -1,4 +1,4 @@
-//! Memory channel implementation using [flume]
+//! Memory transport implementation using [flume]
 //!
 //! [flume]: https://docs.rs/flume/
 use crate::{
@@ -81,12 +81,14 @@ impl<T: RpcMessage> Stream for RecvStream<T> {
 
 impl error::Error for RecvError {}
 
-/// A mem channel
-pub struct MemServerChannel<In: RpcMessage, Out: RpcMessage> {
+/// A flume based server endpoint.
+///
+/// Created using [connection].
+pub struct FlumeServerEndpoint<In: RpcMessage, Out: RpcMessage> {
     stream: flume::Receiver<(SendSink<Out>, RecvStream<In>)>,
 }
 
-impl<In: RpcMessage, Out: RpcMessage> Clone for MemServerChannel<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> Clone for FlumeServerEndpoint<In, Out> {
     fn clone(&self) -> Self {
         Self {
             stream: self.stream.clone(),
@@ -94,15 +96,15 @@ impl<In: RpcMessage, Out: RpcMessage> Clone for MemServerChannel<In, Out> {
     }
 }
 
-impl<In: RpcMessage, Out: RpcMessage> fmt::Debug for MemServerChannel<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> fmt::Debug for FlumeServerEndpoint<In, Out> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("ServerChannel")
+        f.debug_struct("FlumeServerEndpoint")
             .field("stream", &self.stream)
             .finish()
     }
 }
 
-impl<In: RpcMessage, Out: RpcMessage> ConnectionErrors for MemServerChannel<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> ConnectionErrors for FlumeServerEndpoint<In, Out> {
     type SendError = self::SendError;
 
     type RecvError = self::RecvError;
@@ -112,7 +114,7 @@ impl<In: RpcMessage, Out: RpcMessage> ConnectionErrors for MemServerChannel<In, 
 
 type Socket<In, Out> = (self::SendSink<Out>, self::RecvStream<In>);
 
-/// Future returned by accept_bi
+/// Future returned by [FlumeConnection::open_bi]
 pub struct OpenBiFuture<'a, In: RpcMessage, Out: RpcMessage> {
     inner: flume::r#async::SendFut<'a, Socket<Out, In>>,
     res: Option<Socket<In, Out>>,
@@ -146,7 +148,7 @@ impl<'a, In: RpcMessage, Out: RpcMessage> Future for OpenBiFuture<'a, In, Out> {
     }
 }
 
-/// Future returned by [MemServerChannel::accept_bi]
+/// Future returned by [FlumeServerEndpoint::accept_bi]
 pub struct AcceptBiFuture<'a, In: RpcMessage, Out: RpcMessage> {
     wrapped: flume::r#async::RecvFut<'a, (SendSink<Out>, RecvStream<In>)>,
     _p: PhantomData<(In, Out)>,
@@ -164,7 +166,7 @@ impl<'a, In: RpcMessage, Out: RpcMessage> Future for AcceptBiFuture<'a, In, Out>
     }
 }
 
-impl<In: RpcMessage, Out: RpcMessage> ServerEndpoint<In, Out> for MemServerChannel<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> ServerEndpoint<In, Out> for FlumeServerEndpoint<In, Out> {
     type SendSink = SendSink<Out>;
     type RecvStream = RecvStream<In>;
 
@@ -182,7 +184,7 @@ impl<In: RpcMessage, Out: RpcMessage> ServerEndpoint<In, Out> for MemServerChann
     }
 }
 
-impl<In: RpcMessage, Out: RpcMessage> ConnectionErrors for MemClientChannel<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> ConnectionErrors for FlumeConnection<In, Out> {
     type SendError = self::SendError;
 
     type RecvError = self::RecvError;
@@ -190,7 +192,7 @@ impl<In: RpcMessage, Out: RpcMessage> ConnectionErrors for MemClientChannel<In, 
     type OpenError = self::OpenBiError;
 }
 
-impl<In: RpcMessage, Out: RpcMessage> Connection<In, Out> for MemClientChannel<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> Connection<In, Out> for FlumeConnection<In, Out> {
     type SendSink = SendSink<Out>;
     type RecvStream = RecvStream<In>;
 
@@ -211,12 +213,14 @@ impl<In: RpcMessage, Out: RpcMessage> Connection<In, Out> for MemClientChannel<I
     }
 }
 
-/// A mem channel
-pub struct MemClientChannel<In: RpcMessage, Out: RpcMessage> {
+/// A flume based connection to a server endpoint.
+///
+/// Created using [connection].
+pub struct FlumeConnection<In: RpcMessage, Out: RpcMessage> {
     sink: flume::Sender<(SendSink<In>, RecvStream<Out>)>,
 }
 
-impl<In: RpcMessage, Out: RpcMessage> Clone for MemClientChannel<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> Clone for FlumeConnection<In, Out> {
     fn clone(&self) -> Self {
         Self {
             sink: self.sink.clone(),
@@ -224,9 +228,9 @@ impl<In: RpcMessage, Out: RpcMessage> Clone for MemClientChannel<In, Out> {
     }
 }
 
-impl<In: RpcMessage, Out: RpcMessage> fmt::Debug for MemClientChannel<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> fmt::Debug for FlumeConnection<In, Out> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("ClientChannel")
+        f.debug_struct("FlumeClientChannel")
             .field("sink", &self.sink)
             .finish()
     }
@@ -296,12 +300,12 @@ impl Display for CreateChannelError {
 
 impl std::error::Error for CreateChannelError {}
 
-/// Create a channel pair (server, client) for mem channels
+/// Create a flume server endpoint and a connected flume client channel.
 ///
 /// `buffer` the size of the buffer for each channel. Keep this at a low value to get backpressure
 pub fn connection<Req: RpcMessage, Res: RpcMessage>(
     buffer: usize,
-) -> (MemServerChannel<Req, Res>, MemClientChannel<Res, Req>) {
+) -> (FlumeServerEndpoint<Req, Res>, FlumeConnection<Res, Req>) {
     let (sink, stream) = flume::bounded(buffer);
-    (MemServerChannel { stream }, MemClientChannel { sink })
+    (FlumeServerEndpoint { stream }, FlumeConnection { sink })
 }

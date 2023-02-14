@@ -69,7 +69,10 @@ impl<S: Service, C: ServiceConnection<S>, M: Msg<S>> Sink<M::Update> for UpdateS
 }
 
 impl<S: Service, C: ServiceConnection<S>> RpcClient<S, C> {
-    /// Create a new rpc client from a channel
+    /// Create a new rpc client for a specific [Service] given a compatible
+    /// [ServiceConnection].
+    ///
+    /// This is where a generic typed connection is converted into a client for a specific service.
     pub fn new(source: C) -> Self {
         Self {
             source,

@@ -1,4 +1,4 @@
-//! Channel that combines two other channels
+//! Transport that combines two other transports
 use super::{Connection, ConnectionErrors, LocalAddr, ServerEndpoint};
 use crate::RpcMessage;
 use futures::{
@@ -15,7 +15,7 @@ use std::{
     task::{Context, Poll},
 };
 
-/// A channel that combines two other channels
+/// A connection that combines two other connections
 pub struct CombinedConnection<A, B, In: RpcMessage, Out: RpcMessage> {
     /// First connection
     pub a: Option<A>,
@@ -62,7 +62,7 @@ impl<A: Debug, B: Debug, In: RpcMessage, Out: RpcMessage> Debug
     }
 }
 
-/// A channel that combines two other channels
+/// An endpoint that combines two other endpoints
 pub struct CombinedServerEndpoint<A, B, In: RpcMessage, Out: RpcMessage> {
     /// First endpoint
     pub a: Option<A>,
@@ -383,8 +383,8 @@ mod tests {
     #[tokio::test]
     async fn open_empty_channel() {
         let channel = combined::CombinedConnection::<
-            flume::MemClientChannel<(), ()>,
-            flume::MemClientChannel<(), ()>,
+            flume::FlumeConnection<(), ()>,
+            flume::FlumeConnection<(), ()>,
             (),
             (),
         >::new(None, None);
