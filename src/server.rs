@@ -53,6 +53,7 @@ impl<S: Service, C: ServiceEndpoint<S>> RpcServer<S, C> {
 ///
 /// Sink and stream are independent, so you can take the channel apart and use
 /// them independently.
+#[derive(Debug)]
 pub struct RpcChannel<S: Service, C: ServiceEndpoint<S>> {
     /// Sink to send responses to the client.
     pub send: C::SendSink,
@@ -297,6 +298,7 @@ impl<S: Service, C: ServiceEndpoint<S>> RpcServer<S, C> {
 /// If there is any error with receiving or with decoding the updates, the stream will stall and the error will
 /// cause a termination of the RPC call.
 #[pin_project]
+#[derive(Debug)]
 pub struct UpdateStream<S: Service, C: ServiceEndpoint<S>, M: Msg<S>>(
     #[pin] C::RecvStream,
     Option<oneshot::Sender<RpcServerError<C>>>,

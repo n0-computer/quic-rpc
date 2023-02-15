@@ -14,6 +14,8 @@ pub mod hyper;
 #[cfg(feature = "quinn-transport")]
 pub mod quinn;
 
+pub mod misc;
+
 mod util;
 
 /// Errors that can happen when creating and using a connection or a server endpoint.
