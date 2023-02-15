@@ -40,7 +40,7 @@ tracing-subscriber = "0.3.16"
 
 [features]
 hyper-transport = ["flume", "hyper", "bincode", "bytes"]
-quinn-transport = ["quinn", "bincode", "tokio-serde", "tokio-util"]
+quinn-transport = ["flume", "quinn", "bincode", "tokio-serde", "tokio-util"]
 flume-transport = ["flume"]
 combined-transport = []
 default = ["quinn-transport", "combined-transport", "flume-transport", "hyper-transport"]
