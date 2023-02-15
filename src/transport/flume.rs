@@ -24,6 +24,12 @@ impl fmt::Display for RecvError {
 /// Sink for memory channels
 pub struct SendSink<T: RpcMessage>(flume::r#async::SendSink<'static, T>);
 
+impl<T: RpcMessage> fmt::Debug for SendSink<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SendSink").finish()
+    }
+}
+
 impl<T: RpcMessage> Sink<T> for SendSink<T> {
     type Error = self::SendError;
 
@@ -63,6 +69,12 @@ impl<T: RpcMessage> Sink<T> for SendSink<T> {
 
 /// Stream for memory channels
 pub struct RecvStream<T: RpcMessage>(flume::r#async::RecvStream<'static, T>);
+
+impl<T: RpcMessage> fmt::Debug for RecvStream<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RecvStream").finish()
+    }
+}
 
 impl<T: RpcMessage> Stream for RecvStream<T> {
     type Item = result::Result<T, self::RecvError>;
@@ -120,6 +132,12 @@ pub struct OpenBiFuture<'a, In: RpcMessage, Out: RpcMessage> {
     res: Option<Socket<In, Out>>,
 }
 
+impl<'a, In: RpcMessage, Out: RpcMessage> fmt::Debug for OpenBiFuture<'a, In, Out> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("OpenBiFuture").finish()
+    }
+}
+
 impl<'a, In: RpcMessage, Out: RpcMessage> OpenBiFuture<'a, In, Out> {
     fn new(inner: flume::r#async::SendFut<'a, Socket<Out, In>>, res: Socket<In, Out>) -> Self {
         Self {
@@ -152,6 +170,12 @@ impl<'a, In: RpcMessage, Out: RpcMessage> Future for OpenBiFuture<'a, In, Out> {
 pub struct AcceptBiFuture<'a, In: RpcMessage, Out: RpcMessage> {
     wrapped: flume::r#async::RecvFut<'a, (SendSink<Out>, RecvStream<In>)>,
     _p: PhantomData<(In, Out)>,
+}
+
+impl<'a, In: RpcMessage, Out: RpcMessage> fmt::Debug for AcceptBiFuture<'a, In, Out> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("AcceptBiFuture").finish()
+    }
 }
 
 impl<'a, In: RpcMessage, Out: RpcMessage> Future for AcceptBiFuture<'a, In, Out> {

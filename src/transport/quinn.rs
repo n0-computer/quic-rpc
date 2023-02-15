@@ -359,6 +359,12 @@ impl<In: RpcMessage, Out: RpcMessage> Connection<In, Out> for QuinnConnection<In
 #[pin_project]
 pub struct SendSink<Out>(#[pin] FramedBincodeWrite<quinn::SendStream, Out>);
 
+impl<Out> fmt::Debug for SendSink<Out> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SendSink").finish()
+    }
+}
+
 impl<Out: Serialize> SendSink<Out> {
     fn new(inner: quinn::SendStream) -> Self {
         let inner = FramedBincodeWrite::new(inner, MAX_FRAME_LENGTH);
@@ -409,6 +415,12 @@ impl<Out: Serialize> Sink<Out> for SendSink<Out> {
 /// the underlying [quinn::RecvStream].
 #[pin_project]
 pub struct RecvStream<In>(#[pin] FramedBincodeRead<quinn::RecvStream, In>);
+
+impl<In> fmt::Debug for RecvStream<In> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RecvStream").finish()
+    }
+}
 
 impl<In: DeserializeOwned> RecvStream<In> {
     fn new(inner: quinn::RecvStream) -> Self {
@@ -464,6 +476,12 @@ impl<'a> OpenBiFutureState<'a> {
 #[pin_project]
 pub struct OpenBiFuture<'a, In, Out>(OpenBiFutureState<'a>, PhantomData<&'a (In, Out)>);
 
+impl<'a, In: RpcMessage, Out: RpcMessage> fmt::Debug for OpenBiFuture<'a, In, Out> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("OpenBiFuture").finish()
+    }
+}
+
 impl<'a, In: RpcMessage, Out: RpcMessage> Future for OpenBiFuture<'a, In, Out> {
     type Output = result::Result<self::Socket<In, Out>, self::OpenBiError>;
 
@@ -503,6 +521,12 @@ pub struct AcceptBiFuture<'a, In, Out>(
     #[pin] flume::r#async::RecvFut<'a, SocketInner>,
     PhantomData<(In, Out)>,
 );
+
+impl<'a, In: RpcMessage, Out: RpcMessage> fmt::Debug for AcceptBiFuture<'a, In, Out> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("AcceptBiFuture").finish()
+    }
+}
 
 impl<'a, In: RpcMessage, Out: RpcMessage> Future for AcceptBiFuture<'a, In, Out> {
     type Output = result::Result<self::Socket<In, Out>, self::OpenBiError>;
