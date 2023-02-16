@@ -13,7 +13,7 @@
 //! # Example
 //! ```
 //! # async fn example() -> anyhow::Result<()> {
-//! use quic_rpc::{message::RpcMsg, Service, RpcClient, RpcServer};
+//! use quic_rpc::{message::Rpc, Service, RpcClient, RpcServer};
 //! use serde::{Serialize, Deserialize};
 //! use derive_more::{From, TryInto};
 //!
@@ -44,7 +44,7 @@
 //! }
 //!
 //! // Define interaction patterns for each request type
-//! impl RpcMsg<PingService> for Ping {
+//! impl Rpc<PingService> for Ping {
 //!   type Response = Pong;
 //! }
 //!

@@ -5,9 +5,8 @@ use async_stream::stream;
 use futures::{Stream, StreamExt};
 use math::*;
 use quic_rpc::{
-    message::{BidiStreaming, ClientStreaming, Msg, RpcMsg, ServerStreaming},
-    server::RpcServerError,
-    RpcServer, Service, ServiceEndpoint,
+    bidi_streaming, client_streaming, rpc, server::RpcServerError, server_streaming, RpcServer,
+    Service, ServiceEndpoint,
 };
 
 #[derive(Debug, Clone)]
@@ -18,27 +17,10 @@ impl Service for ComputeService {
     type Res = ComputeResponse;
 }
 
-impl RpcMsg<ComputeService> for Sqr {
-    type Response = SqrResponse;
-}
-
-impl Msg<ComputeService> for Sum {
-    type Response = SumResponse;
-    type Update = SumUpdate;
-    type Pattern = ClientStreaming;
-}
-
-impl Msg<ComputeService> for Fibonacci {
-    type Response = FibonacciResponse;
-    type Update = Self;
-    type Pattern = ServerStreaming;
-}
-
-impl Msg<ComputeService> for Multiply {
-    type Response = MultiplyResponse;
-    type Update = MultiplyUpdate;
-    type Pattern = BidiStreaming;
-}
+rpc!(ComputeService, Sqr, SqrResponse);
+client_streaming!(ComputeService, Sum, SumUpdate, SumResponse);
+server_streaming!(ComputeService, Fibonacci, FibonacciResponse);
+bidi_streaming!(ComputeService, Multiply, MultiplyUpdate, MultiplyResponse);
 
 async fn sleep_ms(ms: u64) {
     tokio::time::sleep(std::time::Duration::from_millis(ms)).await;

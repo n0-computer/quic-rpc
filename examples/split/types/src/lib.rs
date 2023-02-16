@@ -36,7 +36,6 @@ pub mod compute {
         Response = ComputeResponse;
         Service = ComputeService;
         CreateDispatch = create_compute_dispatch;
-        CreateClient = create_compute_client;
 
         Rpc square = Sqr, _ -> SqrResponse;
         ClientStreaming sum = Sum, SumUpdate -> SumResponse;

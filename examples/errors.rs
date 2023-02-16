@@ -1,5 +1,5 @@
 use derive_more::{Display, From, TryInto};
-use quic_rpc::{message::RpcMsg, RpcClient, RpcServer, Service};
+use quic_rpc::{message::Rpc, RpcClient, RpcServer, Service};
 use serde::{Deserialize, Serialize};
 use std::result;
 
@@ -38,7 +38,7 @@ impl Service for IoService {
     type Res = IoResponse;
 }
 
-impl RpcMsg<IoService> for WriteRequest {
+impl Rpc<IoService> for WriteRequest {
     type Response = result::Result<(), WriteError>;
 }
 

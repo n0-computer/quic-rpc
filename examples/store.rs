@@ -2,12 +2,10 @@
 use async_stream::stream;
 use derive_more::{From, TryInto};
 use futures::{SinkExt, Stream, StreamExt};
-use message::RpcMsg;
 use quic_rpc::{
-    message::{BidiStreaming, ClientStreaming, Msg, ServerStreaming},
     server::RpcServerError,
     transport::{flume, Connection, ServerEndpoint},
-    ServiceEndpoint, *,
+    Service, ServiceEndpoint, *,
 };
 use serde::{Deserialize, Serialize};
 use std::{fmt::Debug, result};
@@ -107,31 +105,16 @@ impl Service for StoreService {
     type Res = StoreResponse;
 }
 
-impl RpcMsg<StoreService> for Put {
-    type Response = PutResponse;
-}
-
-impl RpcMsg<StoreService> for Get {
-    type Response = GetResponse;
-}
-
-impl Msg<StoreService> for PutFile {
-    type Response = PutFileResponse;
-    type Update = PutFileUpdate;
-    type Pattern = ClientStreaming;
-}
-
-impl Msg<StoreService> for GetFile {
-    type Response = GetFileResponse;
-    type Update = GetFile;
-    type Pattern = ServerStreaming;
-}
-
-impl Msg<StoreService> for ConvertFile {
-    type Response = ConvertFileResponse;
-    type Update = ConvertFileUpdate;
-    type Pattern = BidiStreaming;
-}
+rpc!(StoreService, Get, GetResponse);
+rpc!(StoreService, Put, PutResponse);
+client_streaming!(StoreService, PutFile, PutFileUpdate, PutFileResponse);
+server_streaming!(StoreService, GetFile, GetFileResponse);
+bidi_streaming!(
+    StoreService,
+    ConvertFile,
+    ConvertFileUpdate,
+    ConvertFileResponse
+);
 
 #[derive(Clone)]
 struct Store;
