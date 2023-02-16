@@ -37,13 +37,10 @@ pub trait Connection<In, Out>: ConnectionErrors {
     /// Send side of a bidirectional typed channel
     type SendSink: Sink<Out, Error = Self::SendError> + Send + Unpin + 'static;
     /// The future that will resolve to a substream or an error
-    type OpenBiFut<'a>: Future<Output = Result<(Self::SendSink, Self::RecvStream), Self::OpenError>>
-        + Send
-        + 'a
-    where
-        Self: 'a;
+    type OpenBiFut: Future<Output = Result<(Self::SendSink, Self::RecvStream), Self::OpenError>>
+        + Send;
     /// Open a channel to the remote
-    fn open_bi(&self) -> Self::OpenBiFut<'_>;
+    fn open_bi(&self) -> Self::OpenBiFut;
 }
 
 /// A server endpoint that listens for connections
@@ -56,15 +53,12 @@ pub trait ServerEndpoint<In, Out>: ConnectionErrors {
     /// Send side of a bidirectional typed channel
     type SendSink: Sink<Out, Error = Self::SendError> + Send + Unpin + 'static;
     /// The future that will resolve to a substream or an error
-    type AcceptBiFut<'a>: Future<Output = Result<(Self::SendSink, Self::RecvStream), Self::OpenError>>
-        + Send
-        + 'a
-    where
-        Self: 'a;
+    type AcceptBiFut: Future<Output = Result<(Self::SendSink, Self::RecvStream), Self::OpenError>>
+        + Send;
 
     /// Accept a new typed bidirectional channel on any of the connections we
     /// have currently opened.
-    fn accept_bi(&self) -> Self::AcceptBiFut<'_>;
+    fn accept_bi(&self) -> Self::AcceptBiFut;
 
     /// The local addresses this endpoint is bound to.
     fn local_addr(&self) -> &[LocalAddr];

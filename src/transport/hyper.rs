@@ -562,7 +562,7 @@ impl std::error::Error for OpenBiError {}
 /// Future returned by [open_bi](crate::transport::Connection::open_bi).
 #[allow(clippy::type_complexity)]
 #[pin_project]
-pub struct OpenBiFuture<'a, In, Out> {
+pub struct OpenBiFuture<In, Out> {
     chan: Option<
         Result<
             (
@@ -573,11 +573,11 @@ pub struct OpenBiFuture<'a, In, Out> {
             OpenBiError,
         >,
     >,
-    _p: PhantomData<&'a (In, Out)>,
+    _p: PhantomData<(In, Out)>,
 }
 
 #[allow(clippy::type_complexity)]
-impl<'a, In: RpcMessage, Out: RpcMessage> OpenBiFuture<'a, In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> OpenBiFuture<In, Out> {
     fn new(
         value: Result<
             (
@@ -595,7 +595,7 @@ impl<'a, In: RpcMessage, Out: RpcMessage> OpenBiFuture<'a, In, Out> {
     }
 }
 
-impl<'a, In: RpcMessage, Out: RpcMessage> Future for OpenBiFuture<'a, In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> Future for OpenBiFuture<In, Out> {
     type Output = result::Result<self::Socket<In, Out>, OpenBiError>;
 
     fn poll(
@@ -658,10 +658,10 @@ impl error::Error for AcceptBiError {}
 /// Future returned by [accept_bi](crate::transport::ServerEndpoint::accept_bi).
 #[allow(clippy::type_complexity)]
 #[pin_project]
-pub struct AcceptBiFuture<'a, In, Out> {
+pub struct AcceptBiFuture<In: RpcMessage, Out: RpcMessage> {
     chan: Option<(
         RecvFut<
-            'a,
+            'static,
             (
                 Receiver<result::Result<In, RecvError>>,
                 Sender<io::Result<Bytes>>,
@@ -672,11 +672,11 @@ pub struct AcceptBiFuture<'a, In, Out> {
     _p: PhantomData<(In, Out)>,
 }
 
-impl<'a, In: RpcMessage, Out: RpcMessage> AcceptBiFuture<'a, In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> AcceptBiFuture<In, Out> {
     #[allow(clippy::type_complexity)]
     fn new(
         fut: RecvFut<
-            'a,
+            'static,
             (
                 Receiver<result::Result<In, RecvError>>,
                 Sender<io::Result<Bytes>>,
@@ -691,7 +691,7 @@ impl<'a, In: RpcMessage, Out: RpcMessage> AcceptBiFuture<'a, In, Out> {
     }
 }
 
-impl<'a, In: RpcMessage, Out: RpcMessage> Future for AcceptBiFuture<'a, In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> Future for AcceptBiFuture<In, Out> {
     type Output = result::Result<self::Socket<In, Out>, AcceptBiError>;
 
     fn poll(
@@ -723,7 +723,7 @@ impl<'a, In: RpcMessage, Out: RpcMessage> Future for AcceptBiFuture<'a, In, Out>
     }
 }
 
-impl<'a, In, Out> FusedFuture for AcceptBiFuture<'a, In, Out>
+impl<In, Out> FusedFuture for AcceptBiFuture<In, Out>
 where
     In: RpcMessage,
     Out: RpcMessage,
@@ -737,7 +737,7 @@ where
 }
 
 impl<In: RpcMessage, Out: RpcMessage> HyperConnection<In, Out> {
-    fn open_bi(&self) -> OpenBiFuture<'_, In, Out> {
+    fn open_bi(&self) -> OpenBiFuture<In, Out> {
         event!(Level::TRACE, "open_bi {}", self.inner.uri);
         let (out_tx, out_rx) = flume::bounded::<io::Result<Bytes>>(32);
         let req: Result<Request<Body>, OpenBiError> = Request::post(&self.inner.uri)
@@ -767,9 +767,9 @@ impl<In: RpcMessage, Out: RpcMessage> Connection<In, Out> for HyperConnection<In
 
     type SendSink = self::SendSink<Out>;
 
-    type OpenBiFut<'a> = OpenBiFuture<'a, In, Out>;
+    type OpenBiFut = OpenBiFuture<In, Out>;
 
-    fn open_bi(&self) -> Self::OpenBiFut<'_> {
+    fn open_bi(&self) -> Self::OpenBiFut {
         self.open_bi()
     }
 }
@@ -787,13 +787,13 @@ impl<In: RpcMessage, Out: RpcMessage> ServerEndpoint<In, Out> for HyperServerEnd
 
     type SendSink = self::SendSink<Out>;
 
-    type AcceptBiFut<'a> = AcceptBiFuture<'a, In, Out>;
+    type AcceptBiFut = AcceptBiFuture<In, Out>;
 
     fn local_addr(&self) -> &[LocalAddr] {
         &self.local_addr
     }
 
-    fn accept_bi(&self) -> Self::AcceptBiFut<'_> {
-        AcceptBiFuture::new(self.channel.recv_async(), self.config.clone())
+    fn accept_bi(&self) -> Self::AcceptBiFut {
+        AcceptBiFuture::new(self.channel.clone().into_recv_async(), self.config.clone())
     }
 }

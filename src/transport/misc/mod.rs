@@ -25,10 +25,9 @@ impl<In: RpcMessage, Out: RpcMessage> ServerEndpoint<In, Out> for DummyServerEnd
 
     type SendSink = Box<dyn Sink<Out, Error = Self::SendError> + Unpin + Send>;
 
-    type AcceptBiFut<'a> =
-        future::Pending<Result<(Self::SendSink, Self::RecvStream), Self::OpenError>>;
+    type AcceptBiFut = future::Pending<Result<(Self::SendSink, Self::RecvStream), Self::OpenError>>;
 
-    fn accept_bi(&self) -> Self::AcceptBiFut<'_> {
+    fn accept_bi(&self) -> Self::AcceptBiFut {
         futures::future::pending()
     }
 

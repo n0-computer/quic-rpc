@@ -3,7 +3,7 @@ use super::{Connection, ConnectionErrors, LocalAddr, ServerEndpoint};
 use crate::RpcMessage;
 use futures::{
     future::{self, BoxFuture},
-    FutureExt, Sink, Stream, TryFutureExt,
+    FutureExt, Sink, Stream, TryFutureExt, TryStream,
 };
 use pin_project::pin_project;
 use std::{
@@ -174,23 +174,23 @@ impl<A: Connection<In, Out>, B: Connection<In, Out>, In: RpcMessage, Out: RpcMes
 
 /// RecvStream for combined channels
 #[pin_project(project = ResStreamProj)]
-pub enum RecvStream<A: Connection<In, Out>, B: Connection<In, Out>, In: RpcMessage, Out: RpcMessage>
-{
+pub enum RecvStream<A, B> {
     /// A variant
-    A(#[pin] A::RecvStream),
+    A(#[pin] A),
     /// B variant
-    B(#[pin] B::RecvStream),
+    B(#[pin] B),
 }
 
-impl<A: Connection<In, Out>, B: Connection<In, Out>, In: RpcMessage, Out: RpcMessage> Stream
-    for RecvStream<A, B, In, Out>
+impl<T, E, A: TryStream<Item = T>, B: TryStream<Item = T>> Stream for RecvStream<A, B>
+where
+    E: From<A::Error> + From<B::Error>,
 {
-    type Item = Result<In, RecvError<A, B>>;
+    type Item = Result<T, E>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         match self.project() {
-            ResStreamProj::A(stream) => stream.poll_next(cx).map_err(RecvError::<A, B>::A),
-            ResStreamProj::B(stream) => stream.poll_next(cx).map_err(RecvError::<A, B>::B),
+            ResStreamProj::A(stream) => stream.poll_next(cx).map_err(E::from),
+            ResStreamProj::B(stream) => stream.poll_next(cx).map_err(E::from),
         }
     }
 }
@@ -270,8 +270,8 @@ pub type OpenBiFuture<'a, A, B, In, Out> =
     BoxFuture<'a, result::Result<Socket<A, B, In, Out>, self::OpenBiError<A, B>>>;
 
 /// Future returned by accept_bi
-pub type AcceptBiFuture<'a, A, B, In, Out> =
-    BoxFuture<'a, result::Result<self::Socket<A, B, In, Out>, self::AcceptBiError<A, B>>>;
+pub type AcceptBiFuture<A, B, In, Out> =
+    BoxFuture<'static, result::Result<self::Socket<A, B, In, Out>, self::AcceptBiError<A, B>>>;
 
 type Socket<A, B, In, Out> = (
     self::SendSink<A, B, In, Out>,
@@ -320,10 +320,10 @@ impl<A: ConnectionErrors, B: ConnectionErrors, In: RpcMessage, Out: RpcMessage> 
     type OpenError = self::AcceptBiError<A, B>;
 }
 
-impl<A: Connection<In, Out>, B: Connection<In, Out>, In: RpcMessage, Out: RpcMessage>
+impl<A: ServerEndpoint<In, Out>, B: ServerEndpoint<In, Out>, In: RpcMessage, Out: RpcMessage>
     ServerEndpoint<In, Out> for CombinedServerEndpoint<A, B, In, Out>
 {
-    fn accept_bi(&self) -> AcceptBiFuture<'_, A, B, In, Out> {
+    fn accept_bi(&self) -> AcceptBiFuture<A, B, In, Out> {
         let a_fut = if let Some(a) = &self.a {
             a.open_bi()
                 .map_ok(|(send, recv)| {
@@ -363,7 +363,7 @@ impl<A: Connection<In, Out>, B: Connection<In, Out>, In: RpcMessage, Out: RpcMes
 
     type SendSink = self::SendSink<A, B, In, Out>;
 
-    type AcceptBiFut<'a> = AcceptBiFuture<'a, A, B, In, Out>;
+    type AcceptBiFut = AcceptBiFuture<A, B, In, Out>;
 
     fn local_addr(&self) -> &[LocalAddr] {
         &self.local_addr

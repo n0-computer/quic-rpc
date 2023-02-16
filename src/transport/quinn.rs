@@ -183,10 +183,10 @@ impl<In: RpcMessage, Out: RpcMessage> ServerEndpoint<In, Out> for QuinnServerEnd
     type RecvStream = self::RecvStream<In>;
     type SendSink = self::SendSink<Out>;
 
-    type AcceptBiFut<'a> = AcceptBiFuture<'a, In, Out>;
+    type AcceptBiFut = AcceptBiFuture<In, Out>;
 
-    fn accept_bi(&self) -> Self::AcceptBiFut<'_> {
-        AcceptBiFuture(self.inner.receiver.recv_async(), PhantomData)
+    fn accept_bi(&self) -> Self::AcceptBiFut {
+        AcceptBiFuture(self.inner.receiver.clone().into_recv_async(), PhantomData)
     }
 
     fn local_addr(&self) -> &[LocalAddr] {
@@ -339,14 +339,12 @@ impl<In: RpcMessage, Out: RpcMessage> ConnectionErrors for QuinnConnection<In, O
 impl<In: RpcMessage, Out: RpcMessage> Connection<In, Out> for QuinnConnection<In, Out> {
     type SendSink = self::SendSink<Out>;
     type RecvStream = self::RecvStream<In>;
+    type OpenBiFut = OpenBiFuture<In, Out>;
 
-    // type NextFut<'a> = BoxFuture<'a, result::Result<(Self::SendSink, Self::RecvStream), quinn::ConnectionError>>;
-    type OpenBiFut<'a> = OpenBiFuture<'a, In, Out>;
-
-    fn open_bi(&self) -> Self::OpenBiFut<'_> {
+    fn open_bi(&self) -> Self::OpenBiFut {
         let (sender, receiver) = oneshot::channel();
         OpenBiFuture(
-            OpenBiFutureState::Sending(self.inner.sender.send_async(sender), receiver),
+            OpenBiFutureState::Sending(self.inner.sender.clone().into_send_async(sender), receiver),
             PhantomData,
         )
     }
@@ -454,10 +452,10 @@ pub type OpenBiError = quinn::ConnectionError;
 /// Error for accept_bi. Currently just a quinn::ConnectionError
 pub type AcceptBiError = quinn::ConnectionError;
 
-enum OpenBiFutureState<'a> {
+enum OpenBiFutureState {
     /// Sending the oneshot sender to the server
     Sending(
-        flume::r#async::SendFut<'a, oneshot::Sender<(quinn::SendStream, quinn::RecvStream)>>,
+        flume::r#async::SendFut<'static, oneshot::Sender<(quinn::SendStream, quinn::RecvStream)>>,
         oneshot::Receiver<(quinn::SendStream, quinn::RecvStream)>,
     ),
     /// Receiving the channel from the server
@@ -466,7 +464,7 @@ enum OpenBiFutureState<'a> {
     Taken,
 }
 
-impl<'a> OpenBiFutureState<'a> {
+impl OpenBiFutureState {
     fn take(&mut self) -> Self {
         std::mem::replace(self, Self::Taken)
     }
@@ -474,15 +472,15 @@ impl<'a> OpenBiFutureState<'a> {
 
 /// Future returned by open_bi
 #[pin_project]
-pub struct OpenBiFuture<'a, In, Out>(OpenBiFutureState<'a>, PhantomData<&'a (In, Out)>);
+pub struct OpenBiFuture<In, Out>(OpenBiFutureState, PhantomData<(In, Out)>);
 
-impl<'a, In: RpcMessage, Out: RpcMessage> fmt::Debug for OpenBiFuture<'a, In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> fmt::Debug for OpenBiFuture<In, Out> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("OpenBiFuture").finish()
     }
 }
 
-impl<'a, In: RpcMessage, Out: RpcMessage> Future for OpenBiFuture<'a, In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> Future for OpenBiFuture<In, Out> {
     type Output = result::Result<self::Socket<In, Out>, self::OpenBiError>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
@@ -517,18 +515,18 @@ impl<'a, In: RpcMessage, Out: RpcMessage> Future for OpenBiFuture<'a, In, Out> {
 
 /// Future returned by accept_bi
 #[pin_project]
-pub struct AcceptBiFuture<'a, In, Out>(
-    #[pin] flume::r#async::RecvFut<'a, SocketInner>,
+pub struct AcceptBiFuture<In, Out>(
+    #[pin] flume::r#async::RecvFut<'static, SocketInner>,
     PhantomData<(In, Out)>,
 );
 
-impl<'a, In: RpcMessage, Out: RpcMessage> fmt::Debug for AcceptBiFuture<'a, In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> fmt::Debug for AcceptBiFuture<In, Out> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("AcceptBiFuture").finish()
     }
 }
 
-impl<'a, In: RpcMessage, Out: RpcMessage> Future for AcceptBiFuture<'a, In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> Future for AcceptBiFuture<In, Out> {
     type Output = result::Result<self::Socket<In, Out>, self::OpenBiError>;
 
     fn poll(
