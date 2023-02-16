@@ -1,33 +1,36 @@
+//! Service definition
+//!
 //! Traits to define the behaviour of messages for services
 use crate::Service;
 use std::fmt::Debug;
 
-/// Defines interaction pattern for a message and a service.
+/// Declares the interaction pattern for a message and a service.
 ///
 /// For each server and each message, only one interaction pattern can be defined.
-pub trait Pattern<S: Service>: Into<S::Req> + TryFrom<S::Req> + Send + 'static {
+pub trait Msg<S: Service>: Into<S::Req> + TryFrom<S::Req> + Send + 'static {
     /// The interaction pattern for this message with this service.
     type Pattern: InteractionPattern;
 }
 
 /// Defines the response type for a rpc message.
 ///
-/// Since this is the most common interaction pattern, this also implements [Pattern] for you
-/// automatically, with the interaction pattern set to [RpcPattern]. This is to reduce boilerplate
+/// Since this is the most common interaction pattern, this also implements [Msg] for you
+/// automatically, with the interaction pattern set to [Rpc]. This is to reduce boilerplate
 /// when defining rpc messages.
-pub trait Rpc<S: Service>: Pattern<S, Pattern = RpcPattern> {
+pub trait RpcMsg<S: Service>: Msg<S, Pattern = Rpc> {
     /// The type for the response
     ///
     /// For requests that can produce errors, this can be set to [Result<T, E>](std::result::Result).
     type Response: Into<S::Res> + TryFrom<S::Res> + Send + 'static;
 }
 
-impl<T: Rpc<S>, S: Service> Pattern<S> for T {
-    type Pattern = RpcPattern;
+/// We can only do this for one trait, so we do it for RpcMsg since it is the most common
+impl<T: RpcMsg<S>, S: Service> Msg<S> for T {
+    type Pattern = Rpc;
 }
 
 /// Defines update type and response type for a client streaming message.
-pub trait ClientStreaming<S: Service>: Pattern<S, Pattern = ClientStreamingPattern> {
+pub trait ClientStreamingMsg<S: Service>: Msg<S, Pattern = ClientStreaming> {
     /// The type for request updates
     ///
     /// For a request that does not support updates, this can be safely set to any type, including
@@ -41,7 +44,7 @@ pub trait ClientStreaming<S: Service>: Pattern<S, Pattern = ClientStreamingPatte
 }
 
 /// Defines response type for a server streaming message.
-pub trait ServerStreaming<S: Service>: Pattern<S, Pattern = ServerStreamingPattern> {
+pub trait ServerStreamingMsg<S: Service>: Msg<S, Pattern = ServerStreaming> {
     /// The type for the response
     ///
     /// For requests that can produce errors, this can be set to [Result<T, E>](std::result::Result).
@@ -49,7 +52,7 @@ pub trait ServerStreaming<S: Service>: Pattern<S, Pattern = ServerStreamingPatte
 }
 
 /// Defines update type and response type for a bidi streaming message.
-pub trait BidiStreaming<S: Service>: Pattern<S, Pattern = BidiStreamingPattern> {
+pub trait BidiStreamingMsg<S: Service>: Msg<S, Pattern = BidiStreaming> {
     /// The type for request updates
     ///
     /// For a request that does not support updates, this can be safely set to any type, including
@@ -77,28 +80,28 @@ pub trait InteractionPattern: Debug + Clone + Send + Sync + 'static {}
 ///
 /// There is only one request and one response.
 #[derive(Debug, Clone, Copy)]
-pub struct RpcPattern;
-impl InteractionPattern for RpcPattern {}
+pub struct Rpc;
+impl InteractionPattern for Rpc {}
 
 /// Client streaming interaction pattern
 ///
 /// After the initial request, the client can send updates, but there is only
 /// one response.
 #[derive(Debug, Clone, Copy)]
-pub struct ClientStreamingPattern;
-impl InteractionPattern for ClientStreamingPattern {}
+pub struct ClientStreaming;
+impl InteractionPattern for ClientStreaming {}
 
 /// Server streaming interaction pattern
 ///
 /// After the initial request, the server can send a stream of responses.
 #[derive(Debug, Clone, Copy)]
-pub struct ServerStreamingPattern;
-impl InteractionPattern for ServerStreamingPattern {}
+pub struct ServerStreaming;
+impl InteractionPattern for ServerStreaming {}
 
 /// Bidirectional streaming interaction pattern
 ///
 /// After the initial request, the client can send updates and the server can
 /// send responses.
 #[derive(Debug, Clone, Copy)]
-pub struct BidiStreamingPattern;
-impl InteractionPattern for BidiStreamingPattern {}
+pub struct BidiStreaming;
+impl InteractionPattern for BidiStreaming {}

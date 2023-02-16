@@ -1,8 +1,8 @@
-//! [RpcClient] and support types
+//! Client side api
 //!
-//! This defines the RPC client DSL
+//! The main entry point is [RpcClient].
 use crate::{
-    message::{BidiStreaming, ClientStreaming, Rpc, ServerStreaming},
+    message::{BidiStreamingMsg, ClientStreamingMsg, RpcMsg, ServerStreamingMsg},
     transport::ConnectionErrors,
     Service, ServiceConnection,
 };
@@ -39,7 +39,7 @@ impl<S, C: Clone> Clone for RpcClient<S, C> {
 }
 
 /// Sink that can be used to send updates to the server for the two interaction patterns
-/// that support it, [ClientStreaming] and [BidiStreaming].
+/// that support it, [crate::message::ClientStreaming] and [crate::message::BidiStreaming].
 #[pin_project]
 #[derive(Debug)]
 pub struct UpdateSink<S: Service, C: ServiceConnection<S>, T: Into<S::Req>>(
@@ -83,7 +83,7 @@ impl<S: Service, C: ServiceConnection<S>> RpcClient<S, C> {
     /// RPC call to the server, single request, single response
     pub async fn rpc<M>(&self, msg: M) -> result::Result<M::Response, RpcClientError<C>>
     where
-        M: Rpc<S>,
+        M: RpcMsg<S>,
     {
         let msg = msg.into();
         let (mut send, mut recv) = self.source.open_bi().await.map_err(RpcClientError::Open)?;
@@ -107,7 +107,7 @@ impl<S: Service, C: ServiceConnection<S>> RpcClient<S, C> {
         StreamingResponseError<C>,
     >
     where
-        M: ServerStreaming<S>,
+        M: ServerStreamingMsg<S>,
     {
         let msg = msg.into();
         let (mut send, recv) = self
@@ -141,7 +141,7 @@ impl<S: Service, C: ServiceConnection<S>> RpcClient<S, C> {
         ClientStreamingError<C>,
     >
     where
-        M: ClientStreaming<S>,
+        M: ClientStreamingMsg<S>,
     {
         let msg = msg.into();
         let (mut send, mut recv) = self
@@ -180,7 +180,7 @@ impl<S: Service, C: ServiceConnection<S>> RpcClient<S, C> {
         BidiError<C>,
     >
     where
-        M: BidiStreaming<S>,
+        M: BidiStreamingMsg<S>,
     {
         let msg = msg.into();
         let (mut send, recv) = self.source.open_bi().await.map_err(BidiError::Open)?;

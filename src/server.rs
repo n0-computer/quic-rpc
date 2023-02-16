@@ -1,8 +1,8 @@
-//! [RpcServer] and support types
+//! Server side api
 //!
-//! This defines the RPC server DSL
+//! The main entry point is [RpcServer]
 use crate::{
-    message::{BidiStreaming, ClientStreaming, Rpc, ServerStreaming},
+    message::{BidiStreamingMsg, ClientStreamingMsg, RpcMsg, ServerStreamingMsg},
     transport::ConnectionErrors,
     Service, ServiceEndpoint,
 };
@@ -83,7 +83,7 @@ impl<S: Service, C: ServiceEndpoint<S>> RpcChannel<S, C> {
         f: F,
     ) -> result::Result<(), RpcServerError<C>>
     where
-        M: Rpc<S>,
+        M: RpcMsg<S>,
         F: FnOnce(T, M) -> Fut,
         Fut: Future<Output = M::Response>,
         T: Send + 'static,
@@ -117,7 +117,7 @@ impl<S: Service, C: ServiceEndpoint<S>> RpcChannel<S, C> {
         f: F,
     ) -> result::Result<(), RpcServerError<C>>
     where
-        M: ClientStreaming<S>,
+        M: ClientStreamingMsg<S>,
         F: FnOnce(T, M, UpdateStream<S, C, M::Update>) -> Fut + Send + 'static,
         Fut: Future<Output = M::Response> + Send + 'static,
         T: Send + 'static,
@@ -145,7 +145,7 @@ impl<S: Service, C: ServiceEndpoint<S>> RpcChannel<S, C> {
         f: F,
     ) -> result::Result<(), RpcServerError<C>>
     where
-        M: BidiStreaming<S>,
+        M: BidiStreamingMsg<S>,
         F: FnOnce(T, M, UpdateStream<S, C, M::Update>) -> Str + Send + 'static,
         Str: Stream<Item = M::Response> + Send + 'static,
         T: Send + 'static,
@@ -180,7 +180,7 @@ impl<S: Service, C: ServiceEndpoint<S>> RpcChannel<S, C> {
         f: F,
     ) -> result::Result<(), RpcServerError<C>>
     where
-        M: ServerStreaming<S>,
+        M: ServerStreamingMsg<S>,
         F: FnOnce(T, M) -> Str + Send + 'static,
         Str: Stream<Item = M::Response> + Send + 'static,
         T: Send + 'static,
@@ -221,7 +221,7 @@ impl<S: Service, C: ServiceEndpoint<S>> RpcChannel<S, C> {
         f: F,
     ) -> result::Result<(), RpcServerError<C>>
     where
-        M: Rpc<S, Response = result::Result<R, E2>>,
+        M: RpcMsg<S, Response = result::Result<R, E2>>,
         F: FnOnce(T, M) -> Fut,
         Fut: Future<Output = result::Result<R, E1>>,
         E2: From<E1>,

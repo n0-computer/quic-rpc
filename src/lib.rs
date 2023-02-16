@@ -13,7 +13,7 @@
 //! # Example
 //! ```
 //! # async fn example() -> anyhow::Result<()> {
-//! use quic_rpc::{message::Rpc, Service, RpcClient, RpcServer};
+//! use quic_rpc::{message::RpcMsg, Service, RpcClient, RpcServer};
 //! use serde::{Serialize, Deserialize};
 //! use derive_more::{From, TryInto};
 //!
@@ -44,7 +44,7 @@
 //! }
 //!
 //! // Define interaction patterns for each request type
-//! impl Rpc<PingService> for Ping {
+//! impl RpcMsg<PingService> for Ping {
 //!   type Response = Pong;
 //! }
 //!
@@ -100,6 +100,7 @@ pub mod server;
 pub mod transport;
 pub use client::RpcClient;
 pub use server::RpcServer;
+#[cfg(feature = "macros")]
 mod macros;
 
 /// Requirements for a RPC message
@@ -137,7 +138,7 @@ impl<T> RpcError for T where T: Debug + Display + Send + Sync + Unpin + 'static 
 /// type, and use the [derive_more](https://crates.io/crates/derive_more) crate to
 /// define the conversions between the enum and the actual request and response types.
 ///
-/// To make a message type usable as a request for a service, implement [message::Pattern]
+/// To make a message type usable as a request for a service, implement [message::Msg]
 /// for it. This is how you define the interaction patterns for each request type.
 ///
 /// Depending on the interaction type, you might need to implement traits that further

@@ -255,14 +255,14 @@ macro_rules! __request_enum {
 ///
 /// This is equivalent to:
 /// ```ignore
-/// impl Rpc<TestService> for TestRequest {
+/// impl RpcMsg<TestService> for TestRequest {
 ///    type Response = TestResponse;
 /// }
 /// ```
 #[macro_export]
 macro_rules! declare_rpc {
     ($service:ty, $m_input:ty, $m_output:ty) => {
-        impl $crate::message::Rpc<$service> for $m_input {
+        impl $crate::message::RpcMsg<$service> for $m_input {
             type Response = $m_output;
         }
     };
@@ -277,20 +277,20 @@ macro_rules! declare_rpc {
 ///
 /// This is equivalent to:
 /// ```ignore
-/// impl Pattern<TestService> for TestRequest {
+/// impl Msg<TestService> for TestRequest {
 ///     type Pattern = ServerStreamingPattern;
 /// }
 ///
-/// impl ServerStreaming<TestService> for TestRequest {
+/// impl ServerStreamingMsg<TestService> for TestRequest {
 ///     type Response = TestResponse;
 /// }
 #[macro_export]
 macro_rules! declare_server_streaming {
     ($service:ident, $m_input:ident, $m_output:ident) => {
-        impl $crate::message::Pattern<$service> for $m_input {
-            type Pattern = $crate::message::ServerStreamingPattern;
+        impl $crate::message::Msg<$service> for $m_input {
+            type Pattern = $crate::message::ServerStreaming;
         }
-        impl $crate::message::ServerStreaming<$service> for $m_input {
+        impl $crate::message::ServerStreamingMsg<$service> for $m_input {
             type Response = $m_output;
         }
     };
@@ -305,11 +305,11 @@ macro_rules! declare_server_streaming {
 ///
 /// This is equivalent to:
 /// ```ignore
-/// impl Pattern<TestService> for TestRequest {
+/// impl Msg<TestService> for TestRequest {
 ///     type Pattern = ClientStreamingPattern;
 /// }
 ///
-/// impl ClientStreaming<TestService> for TestRequest {
+/// impl ClientStreamingMsg<TestService> for TestRequest {
 ///     type Update = TestUpdate;
 ///     type Response = TestResponse;
 /// }
@@ -317,10 +317,10 @@ macro_rules! declare_server_streaming {
 #[macro_export]
 macro_rules! declare_client_streaming {
     ($service:ident, $m_input:ident, $m_update:ident, $m_output:ident) => {
-        impl $crate::message::Pattern<$service> for $m_input {
-            type Pattern = $crate::message::ClientStreamingPattern;
+        impl $crate::message::Msg<$service> for $m_input {
+            type Pattern = $crate::message::ClientStreaming;
         }
-        impl $crate::message::ClientStreaming<$service> for $m_input {
+        impl $crate::message::ClientStreamingMsg<$service> for $m_input {
             type Update = $m_update;
             type Response = $m_output;
         }
@@ -336,11 +336,11 @@ macro_rules! declare_client_streaming {
 ///
 /// This is equivalent to:
 /// ```ignore
-/// impl Pattern<TestService> for TestRequest {
+/// impl Msg<TestService> for TestRequest {
 ///     type Pattern = BidiStreamingPattern;
 /// }
 ///
-/// impl BidiStreaming<TestService> for TestRequest {
+/// impl BidiStreamingMsg<TestService> for TestRequest {
 ///     type Update = TestUpdate;
 ///     type Response = TestResponse;
 /// }
@@ -348,10 +348,10 @@ macro_rules! declare_client_streaming {
 #[macro_export]
 macro_rules! declare_bidi_streaming {
     ($service:ident, $m_input:ident, $m_update:ident, $m_output:ident) => {
-        impl $crate::message::Pattern<$service> for $m_input {
-            type Pattern = $crate::message::BidiStreamingPattern;
+        impl $crate::message::Msg<$service> for $m_input {
+            type Pattern = $crate::message::BidiStreaming;
         }
-        impl $crate::message::BidiStreaming<$service> for $m_input {
+        impl $crate::message::BidiStreamingMsg<$service> for $m_input {
             type Update = $m_update;
             type Response = $m_output;
         }
@@ -362,32 +362,32 @@ macro_rules! declare_bidi_streaming {
 #[macro_export]
 macro_rules! __rpc_message {
     ($service:ident, Rpc, $m_input:ident, _, $m_output:ident) => {
-        impl $crate::message::Rpc<$service> for $m_input {
+        impl $crate::message::RpcMsg<$service> for $m_input {
             type Response = $m_output;
         }
     };
     ($service:ident, ServerStreaming, $m_input:ident, _, $m_output:ident) => {
-        impl $crate::message::Pattern<$service> for $m_input {
-            type Pattern = $crate::message::ServerStreamingPattern;
+        impl $crate::message::Msg<$service> for $m_input {
+            type Pattern = $crate::message::ServerStreaming;
         }
-        impl $crate::message::ServerStreaming<$service> for $m_input {
+        impl $crate::message::ServerStreamingMsg<$service> for $m_input {
             type Response = $m_output;
         }
     };
     ($service:ident, ClientStreaming, $m_input:ident, $m_update:ident, $m_output:ident) => {
-        impl $crate::message::Pattern<$service> for $m_input {
-            type Pattern = $crate::message::ClientStreamingPattern;
+        impl $crate::message::Msg<$service> for $m_input {
+            type Pattern = $crate::message::ClientStreaming;
         }
-        impl $crate::message::ClientStreaming<$service> for $m_input {
+        impl $crate::message::ClientStreamingMsg<$service> for $m_input {
             type Response = $m_output;
             type Update = $m_update;
         }
     };
     ($service:ident, BidiStreaming, $m_input:ident, $m_update:ident, $m_output:ident) => {
-        impl $crate::message::Pattern<$service> for $m_input {
-            type Pattern = $crate::message::BidiStreamingPattern;
+        impl $crate::message::Msg<$service> for $m_input {
+            type Pattern = $crate::message::BidiStreaming;
         }
-        impl $crate::message::BidiStreaming<$service> for $m_input {
+        impl $crate::message::BidiStreamingMsg<$service> for $m_input {
             type Response = $m_output;
             type Update = $m_update;
         }
