@@ -250,7 +250,7 @@ macro_rules! __request_enum {
 ///
 /// Example:
 /// ```ignore
-/// rpc!(TestService, TestRequest, TestResponse);
+/// declare_rpc!(TestService, TestRequest, TestResponse);
 /// ```
 ///
 /// This is equivalent to:
@@ -260,7 +260,7 @@ macro_rules! __request_enum {
 /// }
 /// ```
 #[macro_export]
-macro_rules! rpc {
+macro_rules! declare_rpc {
     ($service:ty, $m_input:ty, $m_output:ty) => {
         impl $crate::message::Rpc<$service> for $m_input {
             type Response = $m_output;
@@ -272,7 +272,7 @@ macro_rules! rpc {
 ///
 /// Example:
 /// ```ignore
-/// server_streaming!(TestService, TestRequest, TestResponse);
+/// declare_server_streaming!(TestService, TestRequest, TestResponse);
 /// ```
 ///
 /// This is equivalent to:
@@ -285,7 +285,7 @@ macro_rules! rpc {
 ///     type Response = TestResponse;
 /// }
 #[macro_export]
-macro_rules! server_streaming {
+macro_rules! declare_server_streaming {
     ($service:ident, $m_input:ident, $m_output:ident) => {
         impl $crate::message::Pattern<$service> for $m_input {
             type Pattern = $crate::message::ServerStreamingPattern;
@@ -300,7 +300,7 @@ macro_rules! server_streaming {
 ///
 /// Example:
 /// ```ignore
-/// client_streaming!(TestService, TestRequest, TestUpdate, TestResponse);
+/// declare_client_streaming!(TestService, TestRequest, TestUpdate, TestResponse);
 /// ```
 ///
 /// This is equivalent to:
@@ -315,7 +315,7 @@ macro_rules! server_streaming {
 /// }
 /// ```
 #[macro_export]
-macro_rules! client_streaming {
+macro_rules! declare_client_streaming {
     ($service:ident, $m_input:ident, $m_update:ident, $m_output:ident) => {
         impl $crate::message::Pattern<$service> for $m_input {
             type Pattern = $crate::message::ClientStreamingPattern;
@@ -331,7 +331,7 @@ macro_rules! client_streaming {
 ///
 /// Example:
 /// ```ignore
-/// bidi_streaming!(TestService, TestRequest, TestUpdate, TestResponse);
+/// declare_bidi_streaming!(TestService, TestRequest, TestUpdate, TestResponse);
 /// ```
 ///
 /// This is equivalent to:
@@ -346,7 +346,7 @@ macro_rules! client_streaming {
 /// }
 /// ```
 #[macro_export]
-macro_rules! bidi_streaming {
+macro_rules! declare_bidi_streaming {
     ($service:ident, $m_input:ident, $m_update:ident, $m_output:ident) => {
         impl $crate::message::Pattern<$service> for $m_input {
             type Pattern = $crate::message::BidiStreamingPattern;

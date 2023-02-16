@@ -137,8 +137,11 @@ impl<T> RpcError for T where T: Debug + Display + Send + Sync + Unpin + 'static 
 /// type, and use the [derive_more](https://crates.io/crates/derive_more) crate to
 /// define the conversions between the enum and the actual request and response types.
 ///
-/// To make a message type usable as a request for a service, implement [message::Msg]
+/// To make a message type usable as a request for a service, implement [message::Pattern]
 /// for it. This is how you define the interaction patterns for each request type.
+///
+/// Depending on the interaction type, you might need to implement traits that further
+/// define details of the interaction.
 ///
 /// A message type can be used for multiple services. E.g. you might have a
 /// Status request that is understood by multiple services and returns a

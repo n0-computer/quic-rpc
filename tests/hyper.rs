@@ -6,7 +6,7 @@ use derive_more::{From, TryInto};
 use flume::Receiver;
 use quic_rpc::{
     client::RpcClientError,
-    rpc,
+    declare_rpc,
     server::RpcServerError,
     transport::hyper::{self, HyperConnection, HyperServerEndpoint, RecvError},
     RpcClient, RpcServer, Service,
@@ -32,7 +32,7 @@ fn run_server(addr: &SocketAddr) -> JoinHandle<anyhow::Result<()>> {
 }
 
 #[tokio::test]
-async fn http2_channel_bench() -> anyhow::Result<()> {
+async fn hyper_channel_bench() -> anyhow::Result<()> {
     let addr: SocketAddr = "127.0.0.1:3000".parse()?;
     let uri: Uri = "http://127.0.0.1:3000".parse()?;
     let server_handle = run_server(&addr);
@@ -46,7 +46,7 @@ async fn http2_channel_bench() -> anyhow::Result<()> {
 }
 
 #[tokio::test]
-async fn http2_channel_smoke() -> anyhow::Result<()> {
+async fn hyper_channel_smoke() -> anyhow::Result<()> {
     let addr: SocketAddr = "127.0.0.1:3001".parse()?;
     let uri: Uri = "http://127.0.0.1:3001".parse()?;
     let server_handle = run_server(&addr);
@@ -58,7 +58,7 @@ async fn http2_channel_smoke() -> anyhow::Result<()> {
 }
 
 #[tokio::test]
-async fn http2_channel_errors() -> anyhow::Result<()> {
+async fn hyper_channel_errors() -> anyhow::Result<()> {
     type CC = HyperConnection<TestRequest, TestResponse>;
     type SC = HyperServerEndpoint<TestRequest, TestResponse>;
 
@@ -159,12 +159,12 @@ async fn http2_channel_errors() -> anyhow::Result<()> {
         }
     }
 
-    rpc!(TestService, BigRequest, ());
-    rpc!(TestService, NoSerRequest, ());
-    rpc!(TestService, NoDeserRequest, ());
-    rpc!(TestService, NoSerResponseRequest, NoSer);
-    rpc!(TestService, NoDeserResponseRequest, NoDeser);
-    rpc!(TestService, BigResponseRequest, Vec<u8>);
+    declare_rpc!(TestService, BigRequest, ());
+    declare_rpc!(TestService, NoSerRequest, ());
+    declare_rpc!(TestService, NoDeserRequest, ());
+    declare_rpc!(TestService, NoSerResponseRequest, NoSer);
+    declare_rpc!(TestService, NoDeserResponseRequest, NoDeser);
+    declare_rpc!(TestService, BigResponseRequest, Vec<u8>);
 
     #[allow(clippy::type_complexity)]
     fn run_test_server(

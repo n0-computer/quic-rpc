@@ -105,11 +105,11 @@ impl Service for StoreService {
     type Res = StoreResponse;
 }
 
-rpc!(StoreService, Get, GetResponse);
-rpc!(StoreService, Put, PutResponse);
-client_streaming!(StoreService, PutFile, PutFileUpdate, PutFileResponse);
-server_streaming!(StoreService, GetFile, GetFileResponse);
-bidi_streaming!(
+declare_rpc!(StoreService, Get, GetResponse);
+declare_rpc!(StoreService, Put, PutResponse);
+declare_client_streaming!(StoreService, PutFile, PutFileUpdate, PutFileResponse);
+declare_server_streaming!(StoreService, GetFile, GetFileResponse);
+declare_bidi_streaming!(
     StoreService,
     ConvertFile,
     ConvertFileUpdate,

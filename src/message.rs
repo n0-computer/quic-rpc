@@ -12,8 +12,9 @@ pub trait Pattern<S: Service>: Into<S::Req> + TryFrom<S::Req> + Send + 'static {
 
 /// Defines the response type for a rpc message.
 ///
-/// Since this is the most common interaction pattern, this also implements Msg<S> for you
-/// automatically, with the interaction pattern set to [Rpc].
+/// Since this is the most common interaction pattern, this also implements [Pattern] for you
+/// automatically, with the interaction pattern set to [RpcPattern]. This is to reduce boilerplate
+/// when defining rpc messages.
 pub trait Rpc<S: Service>: Pattern<S, Pattern = RpcPattern> {
     /// The type for the response
     ///
