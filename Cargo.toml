@@ -43,7 +43,7 @@ hyper-transport = ["flume", "hyper", "bincode", "bytes"]
 quinn-transport = ["flume", "quinn", "bincode", "tokio-serde", "tokio-util"]
 flume-transport = ["flume"]
 combined-transport = []
-default = ["quinn-transport", "flume-transport", "hyper-transport"]
+default = ["quinn-transport", "combined-transport", "flume-transport", "hyper-transport"]
 
 [workspace]
 members = ["examples/split/types", "examples/split/server", "examples/split/client"]

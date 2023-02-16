@@ -18,7 +18,7 @@ pub mod misc;
 
 mod util;
 
-/// Errors that can happen when creating and using a connection or a server endpoint.
+/// Errors that can happen when creating and using a [`Connection`] or [`ServerEndpoint`].
 pub trait ConnectionErrors: Debug + Clone + Send + Sync + 'static {
     /// Error when opening or accepting a channel
     type OpenError: RpcError;
@@ -28,14 +28,18 @@ pub trait ConnectionErrors: Debug + Clone + Send + Sync + 'static {
     type RecvError: RpcError;
 }
 
-/// A connection to a specific remote machine
-///
-/// A connection can be used to open bidirectional typed channels using [`Connection::open_bi`].
-pub trait Connection<In, Out>: ConnectionErrors {
+/// Types that are common to both [`Connection`] and [`ServerEndpoint`].
+pub trait ConnectionCommon<In, Out>: ConnectionErrors {
     /// Receive side of a bidirectional typed channel
     type RecvStream: Stream<Item = Result<In, Self::RecvError>> + Send + Unpin + 'static;
     /// Send side of a bidirectional typed channel
     type SendSink: Sink<Out, Error = Self::SendError> + Send + Unpin + 'static;
+}
+
+/// A connection to a specific remote machine
+///
+/// A connection can be used to open bidirectional typed channels using [`Connection::open_bi`].
+pub trait Connection<In, Out>: ConnectionCommon<In, Out> {
     /// The future that will resolve to a substream or an error
     type OpenBiFut: Future<Output = Result<(Self::SendSink, Self::RecvStream), Self::OpenError>>
         + Send;
@@ -47,11 +51,7 @@ pub trait Connection<In, Out>: ConnectionErrors {
 ///
 /// A server endpoint can be used to accept bidirectional typed channels from any of the
 /// currently opened connections to clients, using [`ServerEndpoint::accept_bi`].
-pub trait ServerEndpoint<In, Out>: ConnectionErrors {
-    /// Receive side of a bidirectional typed channel
-    type RecvStream: Stream<Item = Result<In, Self::RecvError>> + Send + Unpin + 'static;
-    /// Send side of a bidirectional typed channel
-    type SendSink: Sink<Out, Error = Self::SendError> + Send + Unpin + 'static;
+pub trait ServerEndpoint<In, Out>: ConnectionCommon<In, Out> {
     /// The future that will resolve to a substream or an error
     type AcceptBiFut: Future<Output = Result<(Self::SendSink, Self::RecvStream), Self::OpenError>>
         + Send;

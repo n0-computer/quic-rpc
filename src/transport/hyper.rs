@@ -22,6 +22,8 @@ use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use tracing::{debug, event, trace, Level};
 
+use super::ConnectionCommon;
+
 struct HyperConnectionInner {
     client: Box<dyn Requester>,
     config: Arc<ChannelConfig>,
@@ -762,11 +764,13 @@ impl<In: RpcMessage, Out: RpcMessage> ConnectionErrors for HyperConnection<In, O
     type OpenError = OpenBiError;
 }
 
-impl<In: RpcMessage, Out: RpcMessage> Connection<In, Out> for HyperConnection<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> ConnectionCommon<In, Out> for HyperConnection<In, Out> {
     type RecvStream = self::RecvStream<In>;
 
     type SendSink = self::SendSink<Out>;
+}
 
+impl<In: RpcMessage, Out: RpcMessage> Connection<In, Out> for HyperConnection<In, Out> {
     type OpenBiFut = OpenBiFuture<In, Out>;
 
     fn open_bi(&self) -> Self::OpenBiFut {
@@ -782,11 +786,12 @@ impl<In: RpcMessage, Out: RpcMessage> ConnectionErrors for HyperServerEndpoint<I
     type OpenError = AcceptBiError;
 }
 
-impl<In: RpcMessage, Out: RpcMessage> ServerEndpoint<In, Out> for HyperServerEndpoint<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> ConnectionCommon<In, Out> for HyperServerEndpoint<In, Out> {
     type RecvStream = self::RecvStream<In>;
-
     type SendSink = self::SendSink<Out>;
+}
 
+impl<In: RpcMessage, Out: RpcMessage> ServerEndpoint<In, Out> for HyperServerEndpoint<In, Out> {
     type AcceptBiFut = AcceptBiFuture<In, Out>;
 
     fn local_addr(&self) -> &[LocalAddr] {

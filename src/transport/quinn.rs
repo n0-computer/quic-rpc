@@ -13,7 +13,10 @@ use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::{fmt, io, marker::PhantomData, pin::Pin, result};
 
-use super::util::{FramedBincodeRead, FramedBincodeWrite};
+use super::{
+    util::{FramedBincodeRead, FramedBincodeWrite},
+    ConnectionCommon,
+};
 
 type Socket<In, Out> = (SendSink<Out>, RecvStream<In>);
 
@@ -179,10 +182,12 @@ impl<In: RpcMessage, Out: RpcMessage> ConnectionErrors for QuinnServerEndpoint<I
     type OpenError = quinn::ConnectionError;
 }
 
-impl<In: RpcMessage, Out: RpcMessage> ServerEndpoint<In, Out> for QuinnServerEndpoint<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> ConnectionCommon<In, Out> for QuinnServerEndpoint<In, Out> {
     type RecvStream = self::RecvStream<In>;
     type SendSink = self::SendSink<Out>;
+}
 
+impl<In: RpcMessage, Out: RpcMessage> ServerEndpoint<In, Out> for QuinnServerEndpoint<In, Out> {
     type AcceptBiFut = AcceptBiFuture<In, Out>;
 
     fn accept_bi(&self) -> Self::AcceptBiFut {
@@ -336,9 +341,12 @@ impl<In: RpcMessage, Out: RpcMessage> ConnectionErrors for QuinnConnection<In, O
     type OpenError = quinn::ConnectionError;
 }
 
-impl<In: RpcMessage, Out: RpcMessage> Connection<In, Out> for QuinnConnection<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> ConnectionCommon<In, Out> for QuinnConnection<In, Out> {
     type SendSink = self::SendSink<Out>;
     type RecvStream = self::RecvStream<In>;
+}
+
+impl<In: RpcMessage, Out: RpcMessage> Connection<In, Out> for QuinnConnection<In, Out> {
     type OpenBiFut = OpenBiFuture<In, Out>;
 
     fn open_bi(&self) -> Self::OpenBiFut {

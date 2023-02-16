@@ -9,6 +9,8 @@ use core::fmt;
 use futures::{Future, FutureExt, Sink, SinkExt, Stream, StreamExt};
 use std::{error, fmt::Display, marker::PhantomData, pin::Pin, result, task::Poll};
 
+use super::ConnectionCommon;
+
 /// Error when receiving from a channel
 ///
 /// This type has zero inhabitants, so it is always safe to unwrap a result with this error type.
@@ -190,10 +192,12 @@ impl<In: RpcMessage, Out: RpcMessage> Future for AcceptBiFuture<In, Out> {
     }
 }
 
-impl<In: RpcMessage, Out: RpcMessage> ServerEndpoint<In, Out> for FlumeServerEndpoint<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> ConnectionCommon<In, Out> for FlumeServerEndpoint<In, Out> {
     type SendSink = SendSink<Out>;
     type RecvStream = RecvStream<In>;
+}
 
+impl<In: RpcMessage, Out: RpcMessage> ServerEndpoint<In, Out> for FlumeServerEndpoint<In, Out> {
     type AcceptBiFut = AcceptBiFuture<In, Out>;
 
     fn accept_bi(&self) -> Self::AcceptBiFut {
@@ -216,10 +220,12 @@ impl<In: RpcMessage, Out: RpcMessage> ConnectionErrors for FlumeConnection<In, O
     type OpenError = self::OpenBiError;
 }
 
-impl<In: RpcMessage, Out: RpcMessage> Connection<In, Out> for FlumeConnection<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> ConnectionCommon<In, Out> for FlumeConnection<In, Out> {
     type SendSink = SendSink<Out>;
     type RecvStream = RecvStream<In>;
+}
 
+impl<In: RpcMessage, Out: RpcMessage> Connection<In, Out> for FlumeConnection<In, Out> {
     type OpenBiFut = OpenBiFuture<In, Out>;
 
     fn open_bi(&self) -> Self::OpenBiFut {
