@@ -208,7 +208,7 @@ struct ClientChannelInner {
     /// The task that handles creating new connections
     task: Option<tokio::task::JoinHandle<()>>,
     /// The channel to receive new connections
-    sender: flume::Sender<oneshot::Sender<SocketInner>>,
+    sender: flume::Sender<oneshot::Sender<Result<SocketInner, quinn::ConnectionError>>>,
 }
 
 impl Drop for ClientChannelInner {
@@ -232,16 +232,55 @@ pub struct QuinnConnection<In: RpcMessage, Out: RpcMessage> {
 }
 
 impl<In: RpcMessage, Out: RpcMessage> QuinnConnection<In, Out> {
+    async fn single_connection_handler_inner(
+        connection: quinn::Connection,
+        requests: flume::Receiver<oneshot::Sender<Result<SocketInner, quinn::ConnectionError>>>,
+    ) -> result::Result<(), flume::RecvError> {
+        loop {
+            tracing::debug!("Awaiting request for new bidi substream...");
+            let request = requests.recv_async().await?;
+            tracing::debug!("Got request for new bidi substream");
+            match connection.open_bi().await {
+                Ok(pair) => {
+                    tracing::debug!("Bidi substream opened");
+                    if request.send(Ok(pair)).is_err() {
+                        tracing::debug!("requester dropped");
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!("error opening bidi substream: {}", e);
+                    if request.send(Err(e)).is_err() {
+                        tracing::debug!("requester dropped");
+                    }
+                }
+            }
+        }
+    }
+
+    async fn single_connection_handler(
+        connection: quinn::Connection,
+        requests: flume::Receiver<oneshot::Sender<Result<SocketInner, quinn::ConnectionError>>>,
+    ) {
+        if Self::single_connection_handler_inner(connection, requests)
+            .await
+            .is_err()
+        {
+            tracing::info!("Single connection handler finished");
+        } else {
+            unreachable!()
+        }
+    }
+
     /// Client connection handler.
     ///
     /// It will run until the send side of the channel is dropped.
     /// All other errors are logged and handled internally.
     /// It will try to keep a connection open at all times.
-    async fn connection_handler_inner(
+    async fn reconnect_handler_inner(
         endpoint: quinn::Endpoint,
         addr: SocketAddr,
         name: String,
-        requests: flume::Receiver<oneshot::Sender<SocketInner>>,
+        requests: flume::Receiver<oneshot::Sender<Result<SocketInner, quinn::ConnectionError>>>,
     ) -> result::Result<(), flume::RecvError> {
         'outer: loop {
             tracing::debug!("Connecting to {} as {}", addr, name);
@@ -268,7 +307,7 @@ impl<In: RpcMessage, Out: RpcMessage> QuinnConnection<In, Out> {
                 match connection.open_bi().await {
                     Ok(pair) => {
                         tracing::debug!("Bidi substream opened");
-                        if request.send(pair).is_err() {
+                        if request.send(Ok(pair)).is_err() {
                             tracing::debug!("requester dropped");
                         }
                     }
@@ -283,23 +322,40 @@ impl<In: RpcMessage, Out: RpcMessage> QuinnConnection<In, Out> {
         }
     }
 
-    async fn connection_handler(
+    async fn reconnect_handler(
         endpoint: quinn::Endpoint,
         addr: SocketAddr,
         name: String,
-        requests: flume::Receiver<oneshot::Sender<SocketInner>>,
+        requests: flume::Receiver<oneshot::Sender<Result<SocketInner, quinn::ConnectionError>>>,
     ) {
-        if let Err(res) = Self::connection_handler_inner(endpoint, addr, name, requests).await {
-            tracing::info!("Connection handler finished: {:?}", res);
+        if Self::reconnect_handler_inner(endpoint, addr, name, requests)
+            .await
+            .is_err()
+        {
+            tracing::info!("Reconnect handler finished");
         } else {
             unreachable!()
         }
     }
 
     /// Create a new channel
+    pub fn from_connection(connection: quinn::Connection) -> Self {
+        let (sender, receiver) = flume::bounded(16);
+        let task = tokio::spawn(Self::single_connection_handler(connection, receiver));
+        Self {
+            inner: Arc::new(ClientChannelInner {
+                endpoint: None,
+                task: Some(task),
+                sender,
+            }),
+            _phantom: PhantomData,
+        }
+    }
+
+    /// Create a new channel
     pub fn new(endpoint: quinn::Endpoint, addr: SocketAddr, name: String) -> Self {
         let (sender, receiver) = flume::bounded(16);
-        let task = tokio::spawn(Self::connection_handler(
+        let task = tokio::spawn(Self::reconnect_handler(
             endpoint.clone(),
             addr,
             name,
@@ -463,11 +519,16 @@ pub type AcceptBiError = quinn::ConnectionError;
 enum OpenBiFutureState {
     /// Sending the oneshot sender to the server
     Sending(
-        flume::r#async::SendFut<'static, oneshot::Sender<(quinn::SendStream, quinn::RecvStream)>>,
-        oneshot::Receiver<(quinn::SendStream, quinn::RecvStream)>,
+        flume::r#async::SendFut<
+            'static,
+            oneshot::Sender<Result<(quinn::SendStream, quinn::RecvStream), quinn::ConnectionError>>,
+        >,
+        oneshot::Receiver<Result<(quinn::SendStream, quinn::RecvStream), quinn::ConnectionError>>,
     ),
     /// Receiving the channel from the server
-    Receiving(oneshot::Receiver<(quinn::SendStream, quinn::RecvStream)>),
+    Receiving(
+        oneshot::Receiver<Result<(quinn::SendStream, quinn::RecvStream), quinn::ConnectionError>>,
+    ),
     /// Taken or done
     Taken,
 }
@@ -505,11 +566,12 @@ impl<In: RpcMessage, Out: RpcMessage> Future for OpenBiFuture<In, Out> {
                 Poll::Ready(Err(_)) => Poll::Ready(Err(quinn::ConnectionError::LocallyClosed)),
             },
             OpenBiFutureState::Receiving(mut fut) => match fut.poll_unpin(cx) {
-                Poll::Ready(Ok((send, recv))) => {
+                Poll::Ready(Ok(Ok((send, recv)))) => {
                     let send = SendSink::new(send);
                     let recv = RecvStream::new(recv);
                     Poll::Ready(Ok((send, recv)))
                 }
+                Poll::Ready(Ok(Err(cause))) => Poll::Ready(Err(cause)),
                 Poll::Pending => {
                     self.0 = OpenBiFutureState::Receiving(fut);
                     Poll::Pending
