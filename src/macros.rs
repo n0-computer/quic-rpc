@@ -252,6 +252,13 @@ macro_rules! __request_enum {
 /// ```ignore
 /// rpc!(TestService, TestRequest, TestResponse);
 /// ```
+///
+/// This is equivalent to:
+/// ```ignore
+/// impl Rpc<TestService> for TestRequest {
+///    type Response = TestResponse;
+/// }
+/// ```
 #[macro_export]
 macro_rules! rpc {
     ($service:ty, $m_input:ty, $m_output:ty) => {
@@ -267,6 +274,16 @@ macro_rules! rpc {
 /// ```ignore
 /// server_streaming!(TestService, TestRequest, TestResponse);
 /// ```
+///
+/// This is equivalent to:
+/// ```ignore
+/// impl Pattern<TestService> for TestRequest {
+///     type Pattern = ServerStreamingPattern;
+/// }
+///
+/// impl ServerStreaming<TestService> for TestRequest {
+///     type Response = TestResponse;
+/// }
 #[macro_export]
 macro_rules! server_streaming {
     ($service:ident, $m_input:ident, $m_output:ident) => {
@@ -284,6 +301,18 @@ macro_rules! server_streaming {
 /// Example:
 /// ```ignore
 /// client_streaming!(TestService, TestRequest, TestUpdate, TestResponse);
+/// ```
+///
+/// This is equivalent to:
+/// ```ignore
+/// impl Pattern<TestService> for TestRequest {
+///     type Pattern = ClientStreamingPattern;
+/// }
+///
+/// impl ClientStreaming<TestService> for TestRequest {
+///     type Update = TestUpdate;
+///     type Response = TestResponse;
+/// }
 /// ```
 #[macro_export]
 macro_rules! client_streaming {
@@ -303,6 +332,18 @@ macro_rules! client_streaming {
 /// Example:
 /// ```ignore
 /// bidi_streaming!(TestService, TestRequest, TestUpdate, TestResponse);
+/// ```
+///
+/// This is equivalent to:
+/// ```ignore
+/// impl Pattern<TestService> for TestRequest {
+///     type Pattern = BidiStreamingPattern;
+/// }
+///
+/// impl BidiStreaming<TestService> for TestRequest {
+///     type Update = TestUpdate;
+///     type Response = TestResponse;
+/// }
 /// ```
 #[macro_export]
 macro_rules! bidi_streaming {
