@@ -7,6 +7,8 @@ use crate::{
 use futures::{future, stream, Sink};
 use std::convert::Infallible;
 
+use super::ConnectionCommon;
+
 /// A dummy server endpoint that does nothing
 ///
 /// This can be useful as a default if you want to configure
@@ -20,15 +22,15 @@ impl ConnectionErrors for DummyServerEndpoint {
     type SendError = Infallible;
 }
 
-impl<In: RpcMessage, Out: RpcMessage> ServerEndpoint<In, Out> for DummyServerEndpoint {
+impl<In: RpcMessage, Out: RpcMessage> ConnectionCommon<In, Out> for DummyServerEndpoint {
     type RecvStream = stream::Pending<Result<In, Self::RecvError>>;
-
     type SendSink = Box<dyn Sink<Out, Error = Self::SendError> + Unpin + Send>;
+}
 
-    type AcceptBiFut<'a> =
-        future::Pending<Result<(Self::SendSink, Self::RecvStream), Self::OpenError>>;
+impl<In: RpcMessage, Out: RpcMessage> ServerEndpoint<In, Out> for DummyServerEndpoint {
+    type AcceptBiFut = future::Pending<Result<(Self::SendSink, Self::RecvStream), Self::OpenError>>;
 
-    fn accept_bi(&self) -> Self::AcceptBiFut<'_> {
+    fn accept_bi(&self) -> Self::AcceptBiFut {
         futures::future::pending()
     }
 

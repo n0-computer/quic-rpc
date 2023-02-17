@@ -1,6 +1,6 @@
 [package]
 name = "quic-rpc"
-version = "0.4.2"
+version = "0.5.0"
 edition = "2021"
 authors = ["Rüdiger Klaehn <rklaehn@protonmail.com>"]
 keywords = ["api", "protocol", "network", "rpc"]
@@ -9,6 +9,8 @@ license = "Apache-2.0/MIT"
 repository = "https://github.com/n0-computer/quic-rpc"
 description = "A streaming rpc system based on quic"
 
+# Sadly this also needs to be updated in .github/workflows/ci.yml
+rust-version = "1.63"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -43,7 +45,20 @@ hyper-transport = ["flume", "hyper", "bincode", "bytes"]
 quinn-transport = ["flume", "quinn", "bincode", "tokio-serde", "tokio-util"]
 flume-transport = ["flume"]
 combined-transport = []
-default = ["quinn-transport", "combined-transport", "flume-transport", "hyper-transport"]
+macros = []
+default = []
+
+[[example]]
+name = "errors"
+required-features = ["flume-transport"]
+
+[[example]]
+name = "macro"
+required-features = ["flume-transport", "macros"]
+
+[[example]]
+name = "store"
+required-features = ["flume-transport"]
 
 [workspace]
 members = ["examples/split/types", "examples/split/server", "examples/split/client"]

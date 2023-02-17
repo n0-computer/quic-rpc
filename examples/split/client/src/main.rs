@@ -7,7 +7,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use types::compute::*;
 
-types::create_compute_client!(ComputeClient);
+// types::create_compute_client!(ComputeClient);
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -20,21 +20,21 @@ async fn main() -> anyhow::Result<()> {
         "localhost".to_string(),
     );
     let client = RpcClient::<ComputeService, _>::new(client);
-    let mut client = ComputeClient(client);
+    // let mut client = ComputeClient(client);
 
     // a rpc call
     for i in 0..3 {
-        let mut client = client.clone();
+        let client = client.clone();
         tokio::task::spawn(async move {
             println!("rpc call: square([{i}])");
-            let res = client.square(Sqr(i)).await;
+            let res = client.rpc(Sqr(i)).await;
             println!("rpc res: square({i}) = {:?}", res.unwrap());
         });
     }
 
     // client streaming call
     println!("client streaming call: sum()");
-    let (mut send, recv) = client.sum(Sum).await?;
+    let (mut send, recv) = client.client_streaming(Sum).await?;
     tokio::task::spawn(async move {
         for i in 2..4 {
             println!("client streaming update: {i}");
@@ -46,14 +46,14 @@ async fn main() -> anyhow::Result<()> {
 
     // server streaming call
     println!("server streaming call: fibonacci(10)");
-    let mut s = client.fibonacci(Fibonacci(10)).await?;
+    let mut s = client.server_streaming(Fibonacci(10)).await?;
     while let Some(res) = s.next().await {
         println!("server streaming res: {:?}", res?);
     }
 
     // bidi streaming call
     println!("bidi streaming call: multiply(2)");
-    let (mut send, mut recv) = client.multiply(Multiply(2)).await?;
+    let (mut send, mut recv) = client.bidi(Multiply(2)).await?;
     tokio::task::spawn(async move {
         for i in 1..3 {
             println!("bidi streaming update: {i}");

@@ -1,11 +1,15 @@
+#![cfg(any(
+    feature = "flume-transport",
+    feature = "hyper-transport",
+    feature = "quinn-transport"
+))]
 #![allow(dead_code)]
 use async_stream::stream;
 use derive_more::{From, TryInto};
 use futures::{SinkExt, Stream, StreamExt, TryStreamExt};
 use quic_rpc::{
-    message::{BidiStreaming, ClientStreaming, Msg, RpcMsg, ServerStreaming},
-    server::RpcServerError,
-    RpcClient, RpcServer, Service, ServiceConnection, ServiceEndpoint,
+    declare_bidi_streaming, declare_client_streaming, declare_rpc, declare_server_streaming,
+    server::RpcServerError, RpcClient, RpcServer, Service, ServiceConnection, ServiceEndpoint,
 };
 use serde::{Deserialize, Serialize};
 use std::{
@@ -77,27 +81,10 @@ impl Service for ComputeService {
     type Res = ComputeResponse;
 }
 
-impl RpcMsg<ComputeService> for Sqr {
-    type Response = SqrResponse;
-}
-
-impl Msg<ComputeService> for Sum {
-    type Response = SumResponse;
-    type Update = SumUpdate;
-    type Pattern = ClientStreaming;
-}
-
-impl Msg<ComputeService> for Fibonacci {
-    type Response = FibonacciResponse;
-    type Update = Self;
-    type Pattern = ServerStreaming;
-}
-
-impl Msg<ComputeService> for Multiply {
-    type Response = MultiplyResponse;
-    type Update = MultiplyUpdate;
-    type Pattern = BidiStreaming;
-}
+declare_rpc!(ComputeService, Sqr, SqrResponse);
+declare_client_streaming!(ComputeService, Sum, SumUpdate, SumResponse);
+declare_server_streaming!(ComputeService, Fibonacci, FibonacciResponse);
+declare_bidi_streaming!(ComputeService, Multiply, MultiplyUpdate, MultiplyResponse);
 
 impl ComputeService {
     async fn sqr(self, req: Sqr) -> SqrResponse {

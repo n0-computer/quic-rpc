@@ -1,14 +1,14 @@
-#![cfg(feature = "http2")]
+#![cfg(feature = "hyper-transport")]
 use std::{net::SocketAddr, result};
 
+use ::hyper::Uri;
 use derive_more::{From, TryInto};
 use flume::Receiver;
-use hyper::Uri;
 use quic_rpc::{
     client::RpcClientError,
-    message::{Msg, Rpc},
+    declare_rpc,
     server::RpcServerError,
-    transport::http2::{self, Http2ClientChannel, Http2ServerChannel, RecvError},
+    transport::hyper::{self, HyperConnection, HyperServerEndpoint, RecvError},
     RpcClient, RpcServer, Service,
 };
 use serde::{Deserialize, Serialize};
@@ -19,7 +19,7 @@ use math::*;
 mod util;
 
 fn run_server(addr: &SocketAddr) -> JoinHandle<anyhow::Result<()>> {
-    let channel = Http2ServerChannel::<ComputeRequest, ComputeResponse>::serve(addr).unwrap();
+    let channel = HyperServerEndpoint::<ComputeRequest, ComputeResponse>::serve(addr).unwrap();
     let server = RpcServer::<ComputeService, _>::new(channel);
     tokio::spawn(async move {
         loop {
@@ -32,11 +32,11 @@ fn run_server(addr: &SocketAddr) -> JoinHandle<anyhow::Result<()>> {
 }
 
 #[tokio::test]
-async fn http2_channel_bench() -> anyhow::Result<()> {
+async fn hyper_channel_bench() -> anyhow::Result<()> {
     let addr: SocketAddr = "127.0.0.1:3000".parse()?;
     let uri: Uri = "http://127.0.0.1:3000".parse()?;
     let server_handle = run_server(&addr);
-    let client = Http2ClientChannel::new(uri);
+    let client = HyperConnection::new(uri);
     let client = RpcClient::<ComputeService, _>::new(client);
     bench(client, 50000).await?;
     println!("terminating server");
@@ -46,11 +46,11 @@ async fn http2_channel_bench() -> anyhow::Result<()> {
 }
 
 #[tokio::test]
-async fn http2_channel_smoke() -> anyhow::Result<()> {
+async fn hyper_channel_smoke() -> anyhow::Result<()> {
     let addr: SocketAddr = "127.0.0.1:3001".parse()?;
     let uri: Uri = "http://127.0.0.1:3001".parse()?;
     let server_handle = run_server(&addr);
-    let client = Http2ClientChannel::new(uri);
+    let client = HyperConnection::new(uri);
     smoke_test(client).await?;
     server_handle.abort();
     let _ = server_handle.await;
@@ -58,9 +58,8 @@ async fn http2_channel_smoke() -> anyhow::Result<()> {
 }
 
 #[tokio::test]
-async fn http2_channel_errors() -> anyhow::Result<()> {
-    type CC = Http2ClientChannel<TestRequest, TestResponse>;
-    type SC = Http2ServerChannel<TestRequest, TestResponse>;
+async fn hyper_channel_errors() -> anyhow::Result<()> {
+    type SC = HyperServerEndpoint<TestRequest, TestResponse>;
 
     /// request that can be too big
     #[derive(Debug, Serialize, Deserialize)]
@@ -159,41 +158,12 @@ async fn http2_channel_errors() -> anyhow::Result<()> {
         }
     }
 
-    impl Msg<TestService> for BigRequest {
-        type Response = ();
-        type Update = Self;
-        type Pattern = Rpc;
-    }
-
-    impl Msg<TestService> for NoSerRequest {
-        type Response = ();
-        type Update = Self;
-        type Pattern = Rpc;
-    }
-
-    impl Msg<TestService> for NoDeserRequest {
-        type Response = ();
-        type Update = Self;
-        type Pattern = Rpc;
-    }
-
-    impl Msg<TestService> for NoSerResponseRequest {
-        type Response = NoSer;
-        type Update = Self;
-        type Pattern = Rpc;
-    }
-
-    impl Msg<TestService> for NoDeserResponseRequest {
-        type Response = NoDeser;
-        type Update = Self;
-        type Pattern = Rpc;
-    }
-
-    impl Msg<TestService> for BigResponseRequest {
-        type Response = Vec<u8>;
-        type Update = Self;
-        type Pattern = Rpc;
-    }
+    declare_rpc!(TestService, BigRequest, ());
+    declare_rpc!(TestService, NoSerRequest, ());
+    declare_rpc!(TestService, NoDeserRequest, ());
+    declare_rpc!(TestService, NoSerResponseRequest, NoSer);
+    declare_rpc!(TestService, NoDeserResponseRequest, NoDeser);
+    declare_rpc!(TestService, BigResponseRequest, Vec<u8>);
 
     #[allow(clippy::type_complexity)]
     fn run_test_server(
@@ -202,7 +172,7 @@ async fn http2_channel_errors() -> anyhow::Result<()> {
         JoinHandle<anyhow::Result<()>>,
         Receiver<result::Result<(), RpcServerError<SC>>>,
     ) {
-        let channel = Http2ServerChannel::serve(addr).unwrap();
+        let channel = HyperServerEndpoint::serve(addr).unwrap();
         let server = RpcServer::<TestService, _>::new(channel);
         let (res_tx, res_rx) = flume::unbounded();
         let handle = tokio::spawn(async move {
@@ -243,7 +213,7 @@ async fn http2_channel_errors() -> anyhow::Result<()> {
     let addr: SocketAddr = "127.0.0.1:3002".parse()?;
     let uri: Uri = "http://127.0.0.1:3002".parse()?;
     let (server_handle, server_results) = run_test_server(&addr);
-    let client = Http2ClientChannel::new(uri);
+    let client = HyperConnection::new(uri);
     let client = RpcClient::<TestService, _>::new(client);
 
     macro_rules! assert_matches {
@@ -277,7 +247,7 @@ async fn http2_channel_errors() -> anyhow::Result<()> {
     let res = client.rpc(BigRequest(vec![0; 20_000_000])).await;
     assert_matches!(
         res,
-        Err(RpcClientError::Send(http2::SendError::SizeError(_)))
+        Err(RpcClientError::Send(hyper::SendError::SizeError(_)))
     );
     assert_server_result!(Err(RpcServerError::EarlyClose));
 
@@ -285,7 +255,7 @@ async fn http2_channel_errors() -> anyhow::Result<()> {
     let res = client.rpc(NoSerRequest(NoSer)).await;
     assert_matches!(
         res,
-        Err(RpcClientError::Send(http2::SendError::SerializeError(_)))
+        Err(RpcClientError::Send(hyper::SendError::SerializeError(_)))
     );
     assert_server_result!(Err(RpcServerError::EarlyClose));
 
@@ -293,14 +263,14 @@ async fn http2_channel_errors() -> anyhow::Result<()> {
     let res = client.rpc(NoDeserRequest(NoDeser)).await;
     assert_matches!(res, Err(RpcClientError::EarlyClose));
     assert_server_result!(Err(RpcServerError::RecvError(
-        http2::RecvError::DeserializeError(_)
+        hyper::RecvError::DeserializeError(_)
     )));
 
     // response not serializable - should fail on the server side
     let res = client.rpc(NoSerResponseRequest).await;
     assert_matches!(res, Err(RpcClientError::EarlyClose));
     assert_server_result!(Err(RpcServerError::SendError(
-        http2::SendError::SerializeError(_)
+        hyper::SendError::SerializeError(_)
     )));
 
     // response not deserializable - should succeed on the server side fail on the client side
@@ -319,7 +289,7 @@ async fn http2_channel_errors() -> anyhow::Result<()> {
     // response big - should fail
     let res = client.rpc(BigResponseRequest(20_000_000)).await;
     assert_matches!(res, Err(RpcClientError::EarlyClose));
-    assert_server_result!(Err(RpcServerError::SendError(http2::SendError::SizeError(
+    assert_server_result!(Err(RpcServerError::SendError(hyper::SendError::SizeError(
         _
     ))));
 

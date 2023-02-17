@@ -1,8 +1,8 @@
-//! [RpcServer] and support types
+//! Server side api
 //!
-//! This defines the RPC server DSL
+//! The main entry point is [RpcServer]
 use crate::{
-    message::{BidiStreaming, ClientStreaming, Msg, Rpc, ServerStreaming},
+    message::{BidiStreamingMsg, ClientStreamingMsg, RpcMsg, ServerStreamingMsg},
     transport::ConnectionErrors,
     Service, ServiceEndpoint,
 };
@@ -83,7 +83,7 @@ impl<S: Service, C: ServiceEndpoint<S>> RpcChannel<S, C> {
         f: F,
     ) -> result::Result<(), RpcServerError<C>>
     where
-        M: Msg<S, Pattern = Rpc>,
+        M: RpcMsg<S>,
         F: FnOnce(T, M) -> Fut,
         Fut: Future<Output = M::Response>,
         T: Send + 'static,
@@ -110,32 +110,6 @@ impl<S: Service, C: ServiceEndpoint<S>> RpcChannel<S, C> {
     /// handle the message M using the given function on the target object
     ///
     /// If you want to support concurrent requests, you need to spawn this on a tokio task yourself.
-    pub async fn client_streaming2<M, F, Fut>(
-        self,
-        req: M,
-        f: F,
-    ) -> result::Result<(), RpcServerError<C>>
-    where
-        M: Msg<S, Pattern = ClientStreaming>,
-        F: FnOnce(M, UpdateStream<S, C, M>) -> Fut + Send + 'static,
-        Fut: Future<Output = M::Response> + Send + 'static,
-    {
-        let Self { mut send, recv, .. } = self;
-        let (updates, read_error) = UpdateStream::new(recv);
-        race2(read_error.map(Err), async move {
-            // get the response
-            let res = f(req, updates).await;
-            // turn into a S::Res so we can send it
-            let res: S::Res = res.into();
-            // send it and return the error if any
-            send.send(res).await.map_err(RpcServerError::SendError)
-        })
-        .await
-    }
-
-    /// handle the message M using the given function on the target object
-    ///
-    /// If you want to support concurrent requests, you need to spawn this on a tokio task yourself.
     pub async fn client_streaming<M, F, Fut, T>(
         self,
         req: M,
@@ -143,8 +117,8 @@ impl<S: Service, C: ServiceEndpoint<S>> RpcChannel<S, C> {
         f: F,
     ) -> result::Result<(), RpcServerError<C>>
     where
-        M: Msg<S, Pattern = ClientStreaming>,
-        F: FnOnce(T, M, UpdateStream<S, C, M>) -> Fut + Send + 'static,
+        M: ClientStreamingMsg<S>,
+        F: FnOnce(T, M, UpdateStream<S, C, M::Update>) -> Fut + Send + 'static,
         Fut: Future<Output = M::Response> + Send + 'static,
         T: Send + 'static,
     {
@@ -171,8 +145,8 @@ impl<S: Service, C: ServiceEndpoint<S>> RpcChannel<S, C> {
         f: F,
     ) -> result::Result<(), RpcServerError<C>>
     where
-        M: Msg<S, Pattern = BidiStreaming>,
-        F: FnOnce(T, M, UpdateStream<S, C, M>) -> Str + Send + 'static,
+        M: BidiStreamingMsg<S>,
+        F: FnOnce(T, M, UpdateStream<S, C, M::Update>) -> Str + Send + 'static,
         Str: Stream<Item = M::Response> + Send + 'static,
         T: Send + 'static,
     {
@@ -206,7 +180,7 @@ impl<S: Service, C: ServiceEndpoint<S>> RpcChannel<S, C> {
         f: F,
     ) -> result::Result<(), RpcServerError<C>>
     where
-        M: Msg<S, Pattern = ServerStreaming>,
+        M: ServerStreamingMsg<S>,
         F: FnOnce(T, M) -> Str + Send + 'static,
         Str: Stream<Item = M::Response> + Send + 'static,
         T: Send + 'static,
@@ -247,7 +221,7 @@ impl<S: Service, C: ServiceEndpoint<S>> RpcChannel<S, C> {
         f: F,
     ) -> result::Result<(), RpcServerError<C>>
     where
-        M: Msg<S, Pattern = Rpc, Response = result::Result<R, E2>>,
+        M: RpcMsg<S, Response = result::Result<R, E2>>,
         F: FnOnce(T, M) -> Fut,
         Fut: Future<Output = result::Result<R, E1>>,
         E2: From<E1>,
@@ -299,13 +273,13 @@ impl<S: Service, C: ServiceEndpoint<S>> RpcServer<S, C> {
 /// cause a termination of the RPC call.
 #[pin_project]
 #[derive(Debug)]
-pub struct UpdateStream<S: Service, C: ServiceEndpoint<S>, M: Msg<S>>(
+pub struct UpdateStream<S: Service, C: ServiceEndpoint<S>, T>(
     #[pin] C::RecvStream,
     Option<oneshot::Sender<RpcServerError<C>>>,
-    PhantomData<M>,
+    PhantomData<T>,
 );
 
-impl<S: Service, C: ServiceEndpoint<S>, M: Msg<S>> UpdateStream<S, C, M> {
+impl<S: Service, C: ServiceEndpoint<S>, T> UpdateStream<S, C, T> {
     fn new(recv: C::RecvStream) -> (Self, UnwrapToPending<RpcServerError<C>>) {
         let (error_send, error_recv) = oneshot::channel();
         let error_recv = UnwrapToPending(error_recv);
@@ -313,14 +287,17 @@ impl<S: Service, C: ServiceEndpoint<S>, M: Msg<S>> UpdateStream<S, C, M> {
     }
 }
 
-impl<S: Service, C: ServiceEndpoint<S>, M: Msg<S>> Stream for UpdateStream<S, C, M> {
-    type Item = M::Update;
+impl<S: Service, C: ServiceEndpoint<S>, T> Stream for UpdateStream<S, C, T>
+where
+    T: TryFrom<S::Req>,
+{
+    type Item = T;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut task::Context<'_>) -> Poll<Option<Self::Item>> {
         let mut this = self.project();
         match this.0.poll_next_unpin(cx) {
             Poll::Ready(Some(msg)) => match msg {
-                Ok(msg) => match M::Update::try_from(msg) {
+                Ok(msg) => match T::try_from(msg) {
                     Ok(msg) => Poll::Ready(Some(msg)),
                     Err(_cause) => {
                         // we were unable to downcast, so we need to send an error

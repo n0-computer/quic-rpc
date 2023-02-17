@@ -16,9 +16,10 @@ pub mod quinn;
 
 pub mod misc;
 
+#[cfg(any(feature = "quinn-transport", feature = "hyper-transport"))]
 mod util;
 
-/// Errors that can happen when creating and using a connection or a server endpoint.
+/// Errors that can happen when creating and using a [`Connection`] or [`ServerEndpoint`].
 pub trait ConnectionErrors: Debug + Clone + Send + Sync + 'static {
     /// Error when opening or accepting a channel
     type OpenError: RpcError;
@@ -28,43 +29,39 @@ pub trait ConnectionErrors: Debug + Clone + Send + Sync + 'static {
     type RecvError: RpcError;
 }
 
-/// A connection to a specific remote machine
+/// Types that are common to both [`Connection`] and [`ServerEndpoint`].
 ///
-/// A connection can be used to open bidirectional typed channels using [`Connection::open_bi`].
-pub trait Connection<In, Out>: ConnectionErrors {
+/// Having this as a separate trait is useful when writing generic code that works with both.
+pub trait ConnectionCommon<In, Out>: ConnectionErrors {
     /// Receive side of a bidirectional typed channel
     type RecvStream: Stream<Item = Result<In, Self::RecvError>> + Send + Unpin + 'static;
     /// Send side of a bidirectional typed channel
     type SendSink: Sink<Out, Error = Self::SendError> + Send + Unpin + 'static;
+}
+
+/// A connection to a specific remote machine
+///
+/// A connection can be used to open bidirectional typed channels using [`Connection::open_bi`].
+pub trait Connection<In, Out>: ConnectionCommon<In, Out> {
     /// The future that will resolve to a substream or an error
-    type OpenBiFut<'a>: Future<Output = Result<(Self::SendSink, Self::RecvStream), Self::OpenError>>
-        + Send
-        + 'a
-    where
-        Self: 'a;
+    type OpenBiFut: Future<Output = Result<(Self::SendSink, Self::RecvStream), Self::OpenError>>
+        + Send;
     /// Open a channel to the remote
-    fn open_bi(&self) -> Self::OpenBiFut<'_>;
+    fn open_bi(&self) -> Self::OpenBiFut;
 }
 
 /// A server endpoint that listens for connections
 ///
 /// A server endpoint can be used to accept bidirectional typed channels from any of the
 /// currently opened connections to clients, using [`ServerEndpoint::accept_bi`].
-pub trait ServerEndpoint<In, Out>: ConnectionErrors {
-    /// Receive side of a bidirectional typed channel
-    type RecvStream: Stream<Item = Result<In, Self::RecvError>> + Send + Unpin + 'static;
-    /// Send side of a bidirectional typed channel
-    type SendSink: Sink<Out, Error = Self::SendError> + Send + Unpin + 'static;
+pub trait ServerEndpoint<In, Out>: ConnectionCommon<In, Out> {
     /// The future that will resolve to a substream or an error
-    type AcceptBiFut<'a>: Future<Output = Result<(Self::SendSink, Self::RecvStream), Self::OpenError>>
-        + Send
-        + 'a
-    where
-        Self: 'a;
+    type AcceptBiFut: Future<Output = Result<(Self::SendSink, Self::RecvStream), Self::OpenError>>
+        + Send;
 
     /// Accept a new typed bidirectional channel on any of the connections we
     /// have currently opened.
-    fn accept_bi(&self) -> Self::AcceptBiFut<'_>;
+    fn accept_bi(&self) -> Self::AcceptBiFut;
 
     /// The local addresses this endpoint is bound to.
     fn local_addr(&self) -> &[LocalAddr];

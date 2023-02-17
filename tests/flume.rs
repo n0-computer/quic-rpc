@@ -1,9 +1,10 @@
+#![cfg(feature = "flume-transport")]
 mod math;
 use math::*;
 use quic_rpc::{server::RpcServerError, transport::flume, RpcClient, RpcServer};
 
 #[tokio::test]
-async fn mem_channel_bench() -> anyhow::Result<()> {
+async fn flume_channel_bench() -> anyhow::Result<()> {
     tracing_subscriber::fmt::try_init().ok();
     let (server, client) = flume::connection::<ComputeRequest, ComputeResponse>(1);
 
@@ -21,7 +22,7 @@ async fn mem_channel_bench() -> anyhow::Result<()> {
 
 /// simple happy path test for all 4 patterns
 #[tokio::test]
-async fn mem_channel_smoke() -> anyhow::Result<()> {
+async fn flume_channel_smoke() -> anyhow::Result<()> {
     tracing_subscriber::fmt::try_init().ok();
     let (server, client) = flume::connection::<ComputeRequest, ComputeResponse>(1);
 

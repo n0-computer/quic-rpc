@@ -8,7 +8,7 @@ edition = "2021"
 [dependencies]
 anyhow = "1"
 futures = "0.3.26"
-quic-rpc = { path = "../../..", features = ["quinn-transport"] }
+quic-rpc = { path = "../../..", features = ["quinn-transport", "macros"] }
 quinn = "0.9.3"
 rustls = { version = "0.20.8", features = ["dangerous_configuration"] }
 tracing-subscriber = "0.3.16"

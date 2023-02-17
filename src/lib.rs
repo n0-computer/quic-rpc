@@ -100,6 +100,7 @@ pub mod server;
 pub mod transport;
 pub use client::RpcClient;
 pub use server::RpcServer;
+#[cfg(feature = "macros")]
 mod macros;
 
 /// Requirements for a RPC message
@@ -139,6 +140,9 @@ impl<T> RpcError for T where T: Debug + Display + Send + Sync + Unpin + 'static 
 ///
 /// To make a message type usable as a request for a service, implement [message::Msg]
 /// for it. This is how you define the interaction patterns for each request type.
+///
+/// Depending on the interaction type, you might need to implement traits that further
+/// define details of the interaction.
 ///
 /// A message type can be used for multiple services. E.g. you might have a
 /// Status request that is understood by multiple services and returns a

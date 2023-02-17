@@ -1,11 +1,36 @@
+//! Service definition
+//!
 //! Traits to define the behaviour of messages for services
 use crate::Service;
 use std::fmt::Debug;
 
-/// Defines interaction pattern, update type and return type for a RPC message
+/// Declares the interaction pattern for a message and a service.
 ///
 /// For each server and each message, only one interaction pattern can be defined.
 pub trait Msg<S: Service>: Into<S::Req> + TryFrom<S::Req> + Send + 'static {
+    /// The interaction pattern for this message with this service.
+    type Pattern: InteractionPattern;
+}
+
+/// Defines the response type for a rpc message.
+///
+/// Since this is the most common interaction pattern, this also implements [Msg] for you
+/// automatically, with the interaction pattern set to [Rpc]. This is to reduce boilerplate
+/// when defining rpc messages.
+pub trait RpcMsg<S: Service>: Msg<S, Pattern = Rpc> {
+    /// The type for the response
+    ///
+    /// For requests that can produce errors, this can be set to [Result<T, E>](std::result::Result).
+    type Response: Into<S::Res> + TryFrom<S::Res> + Send + 'static;
+}
+
+/// We can only do this for one trait, so we do it for RpcMsg since it is the most common
+impl<T: RpcMsg<S>, S: Service> Msg<S> for T {
+    type Pattern = Rpc;
+}
+
+/// Defines update type and response type for a client streaming message.
+pub trait ClientStreamingMsg<S: Service>: Msg<S, Pattern = ClientStreaming> {
     /// The type for request updates
     ///
     /// For a request that does not support updates, this can be safely set to any type, including
@@ -14,27 +39,30 @@ pub trait Msg<S: Service>: Into<S::Req> + TryFrom<S::Req> + Send + 'static {
 
     /// The type for the response
     ///
-    /// For requests that can produce errors, this can be set to [Result<T, E>][std::result::Result].
+    /// For requests that can produce errors, this can be set to [Result<T, E>](std::result::Result).
     type Response: Into<S::Res> + TryFrom<S::Res> + Send + 'static;
-
-    /// The interaction pattern for this message with this service.
-    type Pattern: InteractionPattern;
 }
 
-/// Shortcut to define just the return type for the very common [Rpc] interaction pattern
-pub trait RpcMsg<S: Service>: Into<S::Req> + TryFrom<S::Req> + Send + 'static {
+/// Defines response type for a server streaming message.
+pub trait ServerStreamingMsg<S: Service>: Msg<S, Pattern = ServerStreaming> {
     /// The type for the response
     ///
-    /// This is the only type that is required for the [Rpc] interaction pattern.
+    /// For requests that can produce errors, this can be set to [Result<T, E>](std::result::Result).
     type Response: Into<S::Res> + TryFrom<S::Res> + Send + 'static;
 }
 
-impl<S: Service, T: RpcMsg<S>> Msg<S> for T {
-    type Update = Self;
+/// Defines update type and response type for a bidi streaming message.
+pub trait BidiStreamingMsg<S: Service>: Msg<S, Pattern = BidiStreaming> {
+    /// The type for request updates
+    ///
+    /// For a request that does not support updates, this can be safely set to any type, including
+    /// the message type itself. Any update for such a request will result in an error.
+    type Update: Into<S::Req> + TryFrom<S::Req> + Send + 'static;
 
-    type Response = T::Response;
-
-    type Pattern = Rpc;
+    /// The type for the response
+    ///
+    /// For requests that can produce errors, this can be set to [Result<T, E>](std::result::Result).
+    type Response: Into<S::Res> + TryFrom<S::Res> + Send + 'static;
 }
 
 /// Trait defining interaction pattern.
