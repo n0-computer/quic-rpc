@@ -265,6 +265,17 @@ impl<S: Service, C: ServiceEndpoint<S>> RpcServer<S, C> {
             .map_err(RpcServerError::RecvError)?;
         Ok((request, RpcChannel::new(send, recv)))
     }
+
+    /// Get the underlying service endpoint
+    pub fn into_inner(self) -> C {
+        self.source
+    }
+}
+
+impl<S: Service, C: ServiceEndpoint<S>> AsRef<C> for RpcServer<S, C> {
+    fn as_ref(&self) -> &C {
+        &self.source
+    }
 }
 
 /// A stream of updates
