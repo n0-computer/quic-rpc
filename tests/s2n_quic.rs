@@ -87,7 +87,7 @@ async fn s2n_quic_channel_bench() -> anyhow::Result<()> {
     let server_handle = run_server(server);
     let client = quic_rpc::transport::s2n_quic::S2nQuicConnection::new(client, connect);
     let client = RpcClient::<ComputeService, _>::new(client);
-    bench(client, 5).await?;
+    bench(client, 50).await?;
     server_handle.abort();
     let _ = server_handle.await;
     Ok(())

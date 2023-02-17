@@ -1,13 +1,13 @@
 //! QUIC channel implementation based on quinn
 use crate::RpcMessage;
 use futures::channel::oneshot;
-use futures::{Future, FutureExt, Sink, SinkExt, Stream, StreamExt};
+use futures::{ready, Future, FutureExt, Sink, SinkExt, Stream, StreamExt};
 use pin_project::pin_project;
 use s2n_quic::stream::BidirectionalStream;
 use serde::{de::DeserializeOwned, Serialize};
 use std::net::SocketAddr;
 use std::sync::Arc;
-use std::task::{ready, Poll};
+use std::task::Poll;
 use std::{fmt, io, marker::PhantomData, pin::Pin, result};
 use tokio_serde::{formats::SymmetricalBincode, SymmetricallyFramed};
 use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
