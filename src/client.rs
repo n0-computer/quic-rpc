@@ -80,6 +80,11 @@ impl<S: Service, C: ServiceConnection<S>> RpcClient<S, C> {
         }
     }
 
+    /// Get the underlying connection
+    pub fn into_inner(self) -> C {
+        self.source
+    }
+
     /// RPC call to the server, single request, single response
     pub async fn rpc<M>(&self, msg: M) -> result::Result<M::Response, RpcClientError<C>>
     where
@@ -193,6 +198,12 @@ impl<S: Service, C: ServiceConnection<S>> RpcClient<S, C> {
             })
             .boxed();
         Ok((send, recv))
+    }
+}
+
+impl<S: Service, C: ServiceConnection<S>> AsRef<C> for RpcClient<S, C> {
+    fn as_ref(&self) -> &C {
+        &self.source
     }
 }
 
