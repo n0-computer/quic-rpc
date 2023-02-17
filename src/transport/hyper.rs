@@ -1,13 +1,13 @@
-//! http2 transport
+//! http2 transport using [hyper]
 //!
-//! Note that we are using the framing from http2, so we have to make sure that
-//! the parameters on both client and server side are big enough.
+//! [hyper]: https://crates.io/crates/hyper/
 use std::{
     convert::Infallible, error, fmt, io, marker::PhantomData, net::SocketAddr, pin::Pin, result,
     sync::Arc, task::Poll,
 };
 
-use crate::{ClientChannel, LocalAddr, RpcMessage, ServerChannel};
+use crate::transport::{Connection, ConnectionErrors, LocalAddr, ServerEndpoint};
+use crate::RpcMessage;
 use bytes::Bytes;
 use flume::{r#async::RecvFut, Receiver, Sender};
 use futures::{future::FusedFuture, Future, FutureExt, Sink, SinkExt, StreamExt};
@@ -22,15 +22,17 @@ use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use tracing::{debug, event, trace, Level};
 
-struct ClientChannelInner {
+use super::ConnectionCommon;
+
+struct HyperConnectionInner {
     client: Box<dyn Requester>,
     config: Arc<ChannelConfig>,
     uri: Uri,
 }
 
-/// Client channel
-pub struct Http2ClientChannel<In: RpcMessage, Out: RpcMessage> {
-    inner: Arc<ClientChannelInner>,
+/// Hyper based connection to a server
+pub struct HyperConnection<In: RpcMessage, Out: RpcMessage> {
+    inner: Arc<HyperConnectionInner>,
     _p: PhantomData<(In, Out)>,
 }
 
@@ -45,7 +47,7 @@ impl<C: Connect + Clone + Send + Sync + 'static> Requester for Client<C, Body> {
     }
 }
 
-impl<In: RpcMessage, Out: RpcMessage> Http2ClientChannel<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> HyperConnection<In, Out> {
     /// create a client given an uri and the default configuration
     pub fn new(uri: Uri) -> Self {
         Self::with_config(uri, ChannelConfig::default())
@@ -72,7 +74,7 @@ impl<In: RpcMessage, Out: RpcMessage> Http2ClientChannel<In, Out> {
             .http2_max_send_buf_size(config.max_frame_size.try_into().unwrap())
             .build(connector);
         Self {
-            inner: Arc::new(ClientChannelInner {
+            inner: Arc::new(HyperConnectionInner {
                 client: Box::new(client),
                 uri,
                 config,
@@ -82,7 +84,7 @@ impl<In: RpcMessage, Out: RpcMessage> Http2ClientChannel<In, Out> {
     }
 }
 
-impl<In: RpcMessage, Out: RpcMessage> fmt::Debug for Http2ClientChannel<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> fmt::Debug for HyperConnection<In, Out> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ClientChannel")
             .field("uri", &self.inner.uri)
@@ -91,7 +93,7 @@ impl<In: RpcMessage, Out: RpcMessage> fmt::Debug for Http2ClientChannel<In, Out>
     }
 }
 
-impl<In: RpcMessage, Out: RpcMessage> Clone for Http2ClientChannel<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> Clone for HyperConnection<In, Out> {
     fn clone(&self) -> Self {
         Self {
             inner: self.inner.clone(),
@@ -168,7 +170,7 @@ impl Default for ChannelConfig {
     }
 }
 
-/// A server-side channel using a hyper connection
+/// A server endpoint using a hyper server
 ///
 /// Each request made by the any client connection this channel will yield a `(recv, send)`
 /// pair which allows receiving the request and sending the response.  Both these are
@@ -177,7 +179,7 @@ impl Default for ChannelConfig {
 /// Creating this spawns a tokio task which runs the server, once dropped this task is shut
 /// down: no new connections will be accepted and existing channels will stop.
 #[derive(Debug)]
-pub struct Http2ServerChannel<In: RpcMessage, Out: RpcMessage> {
+pub struct HyperServerEndpoint<In: RpcMessage, Out: RpcMessage> {
     /// The channel.
     channel: Receiver<InternalChannel<In>>,
     /// The configuration.
@@ -196,7 +198,7 @@ pub struct Http2ServerChannel<In: RpcMessage, Out: RpcMessage> {
     _p: PhantomData<(In, Out)>,
 }
 
-impl<In: RpcMessage, Out: RpcMessage> Http2ServerChannel<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> HyperServerEndpoint<In, Out> {
     /// Creates a server listening on the [`SocketAddr`], with the default configuration.
     pub fn serve(addr: &SocketAddr) -> hyper::Result<Self> {
         Self::serve_with_config(addr, Default::default())
@@ -369,7 +371,7 @@ fn spawn_recv_forwarder<In: RpcMessage>(
 // This does not want or need RpcMessage to be clone but still want to clone the
 // ServerChannel and it's containing channels itself.  The derive macro can't cope with this
 // so this needs to be written by hand.
-impl<In: RpcMessage, Out: RpcMessage> Clone for Http2ServerChannel<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> Clone for HyperServerEndpoint<In, Out> {
     fn clone(&self) -> Self {
         Self {
             channel: self.channel.clone(),
@@ -381,9 +383,9 @@ impl<In: RpcMessage, Out: RpcMessage> Clone for Http2ServerChannel<In, Out> {
     }
 }
 
-/// Receive stream for http2 channels.
+/// Receive stream for hyper channels.
 ///
-/// This is a newtype wrapper around a [`flume::r#async::RecvStream`] of deserialized
+/// This is a newtype wrapper around a [`flume::async::RecvStream`] of deserialized
 /// messages.
 pub struct RecvStream<Res: RpcMessage> {
     recv: flume::r#async::RecvStream<'static, result::Result<Res, RecvError>>,
@@ -396,6 +398,9 @@ impl<Res: RpcMessage> RecvStream<Res> {
             recv: recv.into_stream(),
         }
     }
+
+    // we can not write into_inner, since all we got is a stream of already
+    // framed and deserialize messages. Might want to change that...
 }
 
 impl<In: RpcMessage> Clone for RecvStream<In> {
@@ -417,7 +422,7 @@ impl<Res: RpcMessage> futures::Stream for RecvStream<Res> {
     }
 }
 
-/// SendSink for http2 channels
+/// Send sink for hyper channels
 pub struct SendSink<Out: RpcMessage> {
     sink: flume::r#async::SendSink<'static, io::Result<Bytes>>,
     config: Arc<ChannelConfig>,
@@ -443,6 +448,14 @@ impl<Out: RpcMessage> SendSink<Out> {
         let len: u32 = len.try_into().expect("max_payload_size fits into u32");
         data[0..4].copy_from_slice(&len.to_be_bytes());
         Ok(data.into())
+    }
+
+    /// Consumes the [`SendSink`] and returns the underlying [`flume::async::SendSink`].
+    ///
+    /// This is useful if you want to send raw [bytes::Bytes] without framing
+    /// directly to the channel.
+    pub fn into_inner(self) -> flume::r#async::SendSink<'static, io::Result<Bytes>> {
+        self.sink
     }
 }
 
@@ -493,7 +506,7 @@ impl<Out: RpcMessage> Sink<Out> for SendSink<Out> {
     }
 }
 
-/// Send error for http2 channels.
+/// Send error for hyper channels.
 #[derive(Debug)]
 pub enum SendError {
     /// Error when bincode serializing the message.
@@ -512,7 +525,7 @@ impl fmt::Display for SendError {
 
 impl error::Error for SendError {}
 
-/// Receive error for http2 channels.
+/// Receive error for hyper channels.
 #[derive(Debug)]
 pub enum RecvError {
     /// Error when bincode deserializing the message.
@@ -529,33 +542,7 @@ impl fmt::Display for RecvError {
 
 impl error::Error for RecvError {}
 
-/// Http2 channel types
-#[derive(Debug, Clone)]
-pub struct Http2ChannelTypes;
-
-impl crate::ChannelTypes for Http2ChannelTypes {
-    type SendSink<M: RpcMessage> = self::SendSink<M>;
-
-    type RecvStream<M: RpcMessage> = self::RecvStream<M>;
-
-    type SendError = self::SendError;
-
-    type RecvError = self::RecvError;
-
-    type OpenBiError = self::OpenBiError;
-
-    type OpenBiFuture<'a, In: RpcMessage, Out: RpcMessage> = self::OpenBiFuture<'a, In, Out>;
-
-    type AcceptBiError = self::AcceptBiError;
-
-    type AcceptBiFuture<'a, In: RpcMessage, Out: RpcMessage> = self::AcceptBiFuture<'a, In, Out>;
-
-    type ClientChannel<In: RpcMessage, Out: RpcMessage> = self::Http2ClientChannel<In, Out>;
-
-    type ServerChannel<In: RpcMessage, Out: RpcMessage> = self::Http2ServerChannel<In, Out>;
-}
-
-/// OpenBiError for mem channels.
+/// OpenBiError for hyper channels.
 #[derive(Debug)]
 pub enum OpenBiError {
     /// Hyper http error
@@ -574,10 +561,10 @@ impl fmt::Display for OpenBiError {
 
 impl std::error::Error for OpenBiError {}
 
-/// Future returned by `Channel::open_bi`.
+/// Future returned by [open_bi](crate::transport::Connection::open_bi).
 #[allow(clippy::type_complexity)]
 #[pin_project]
-pub struct OpenBiFuture<'a, In, Out> {
+pub struct OpenBiFuture<In, Out> {
     chan: Option<
         Result<
             (
@@ -588,11 +575,11 @@ pub struct OpenBiFuture<'a, In, Out> {
             OpenBiError,
         >,
     >,
-    _p: PhantomData<&'a (In, Out)>,
+    _p: PhantomData<(In, Out)>,
 }
 
 #[allow(clippy::type_complexity)]
-impl<'a, In: RpcMessage, Out: RpcMessage> OpenBiFuture<'a, In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> OpenBiFuture<In, Out> {
     fn new(
         value: Result<
             (
@@ -610,7 +597,7 @@ impl<'a, In: RpcMessage, Out: RpcMessage> OpenBiFuture<'a, In, Out> {
     }
 }
 
-impl<'a, In: RpcMessage, Out: RpcMessage> Future for OpenBiFuture<'a, In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> Future for OpenBiFuture<In, Out> {
     type Output = result::Result<self::Socket<In, Out>, OpenBiError>;
 
     fn poll(
@@ -651,9 +638,9 @@ impl<'a, In: RpcMessage, Out: RpcMessage> Future for OpenBiFuture<'a, In, Out> {
     }
 }
 
-/// AcceptBiError for mem channels.
+/// AcceptBiError for hyper channels.
 ///
-/// There is not much that can go wrong with mem channels.
+/// There is not much that can go wrong with hyper channels.
 #[derive(Debug)]
 pub enum AcceptBiError {
     /// Hyper error
@@ -670,13 +657,13 @@ impl fmt::Display for AcceptBiError {
 
 impl error::Error for AcceptBiError {}
 
-/// Future returned by `Channel::accept_bi`.
+/// Future returned by [accept_bi](crate::transport::ServerEndpoint::accept_bi).
 #[allow(clippy::type_complexity)]
 #[pin_project]
-pub struct AcceptBiFuture<'a, In, Out> {
+pub struct AcceptBiFuture<In: RpcMessage, Out: RpcMessage> {
     chan: Option<(
         RecvFut<
-            'a,
+            'static,
             (
                 Receiver<result::Result<In, RecvError>>,
                 Sender<io::Result<Bytes>>,
@@ -687,11 +674,11 @@ pub struct AcceptBiFuture<'a, In, Out> {
     _p: PhantomData<(In, Out)>,
 }
 
-impl<'a, In: RpcMessage, Out: RpcMessage> AcceptBiFuture<'a, In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> AcceptBiFuture<In, Out> {
     #[allow(clippy::type_complexity)]
     fn new(
         fut: RecvFut<
-            'a,
+            'static,
             (
                 Receiver<result::Result<In, RecvError>>,
                 Sender<io::Result<Bytes>>,
@@ -706,7 +693,7 @@ impl<'a, In: RpcMessage, Out: RpcMessage> AcceptBiFuture<'a, In, Out> {
     }
 }
 
-impl<'a, In: RpcMessage, Out: RpcMessage> Future for AcceptBiFuture<'a, In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> Future for AcceptBiFuture<In, Out> {
     type Output = result::Result<self::Socket<In, Out>, AcceptBiError>;
 
     fn poll(
@@ -738,7 +725,7 @@ impl<'a, In: RpcMessage, Out: RpcMessage> Future for AcceptBiFuture<'a, In, Out>
     }
 }
 
-impl<'a, In, Out> FusedFuture for AcceptBiFuture<'a, In, Out>
+impl<In, Out> FusedFuture for AcceptBiFuture<In, Out>
 where
     In: RpcMessage,
     Out: RpcMessage,
@@ -751,12 +738,8 @@ where
     }
 }
 
-impl<In, Out> ClientChannel<In, Out, Http2ChannelTypes> for Http2ClientChannel<In, Out>
-where
-    In: RpcMessage,
-    Out: RpcMessage,
-{
-    fn open_bi(&self) -> OpenBiFuture<'_, In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> HyperConnection<In, Out> {
+    fn open_bi(&self) -> OpenBiFuture<In, Out> {
         event!(Level::TRACE, "open_bi {}", self.inner.uri);
         let (out_tx, out_rx) = flume::bounded::<io::Result<Bytes>>(32);
         let req: Result<Request<Body>, OpenBiError> = Request::post(&self.inner.uri)
@@ -773,18 +756,49 @@ where
     }
 }
 
-impl<In: RpcMessage, Out: RpcMessage> ServerChannel<In, Out, Http2ChannelTypes>
-    for Http2ServerChannel<In, Out>
-{
-    /// Accept a bi-directional stream from a client.
-    ///
-    /// The [`AcceptBiFuture`] returns a `(sender, receiver)` pair which can be used as
-    /// channels.
-    fn accept_bi(&self) -> AcceptBiFuture<'_, In, Out> {
-        AcceptBiFuture::new(self.channel.recv_async(), self.config.clone())
+impl<In: RpcMessage, Out: RpcMessage> ConnectionErrors for HyperConnection<In, Out> {
+    type SendError = self::SendError;
+
+    type RecvError = self::RecvError;
+
+    type OpenError = OpenBiError;
+}
+
+impl<In: RpcMessage, Out: RpcMessage> ConnectionCommon<In, Out> for HyperConnection<In, Out> {
+    type RecvStream = self::RecvStream<In>;
+
+    type SendSink = self::SendSink<Out>;
+}
+
+impl<In: RpcMessage, Out: RpcMessage> Connection<In, Out> for HyperConnection<In, Out> {
+    type OpenBiFut = OpenBiFuture<In, Out>;
+
+    fn open_bi(&self) -> Self::OpenBiFut {
+        self.open_bi()
+    }
+}
+
+impl<In: RpcMessage, Out: RpcMessage> ConnectionErrors for HyperServerEndpoint<In, Out> {
+    type SendError = self::SendError;
+
+    type RecvError = self::RecvError;
+
+    type OpenError = AcceptBiError;
+}
+
+impl<In: RpcMessage, Out: RpcMessage> ConnectionCommon<In, Out> for HyperServerEndpoint<In, Out> {
+    type RecvStream = self::RecvStream<In>;
+    type SendSink = self::SendSink<Out>;
+}
+
+impl<In: RpcMessage, Out: RpcMessage> ServerEndpoint<In, Out> for HyperServerEndpoint<In, Out> {
+    type AcceptBiFut = AcceptBiFuture<In, Out>;
+
+    fn local_addr(&self) -> &[LocalAddr] {
+        &self.local_addr
     }
 
-    fn local_addr(&self) -> &[crate::LocalAddr] {
-        &self.local_addr
+    fn accept_bi(&self) -> Self::AcceptBiFut {
+        AcceptBiFuture::new(self.channel.clone().into_recv_async(), self.config.clone())
     }
 }

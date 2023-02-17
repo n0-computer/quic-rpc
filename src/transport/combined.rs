@@ -1,5 +1,6 @@
-//! Channel that combines two other channels
-use crate::{ChannelTypes as CT, LocalAddr, RpcMessage, ServerChannel as ServerChannelTrait};
+//! Transport that combines two other transports
+use super::{Connection, ConnectionCommon, ConnectionErrors, LocalAddr, ServerEndpoint};
+use crate::RpcMessage;
 use futures::{
     future::{self, BoxFuture},
     FutureExt, Sink, Stream, TryFutureExt,
@@ -14,102 +15,141 @@ use std::{
     task::{Context, Poll},
 };
 
-/// A channel that combines two other channels
-pub struct CombinedClientChannel<A: CT, B: CT, In: RpcMessage, Out: RpcMessage> {
-    a: Option<A::ClientChannel<In, Out>>,
-    b: Option<B::ClientChannel<In, Out>>,
+/// A connection that combines two other connections
+pub struct CombinedConnection<A, B, In: RpcMessage, Out: RpcMessage> {
+    /// First connection
+    pub a: Option<A>,
+    /// Second connection
+    pub b: Option<B>,
+    /// Phantom data so we can have `In` and `Out` as type parameters
+    _p: PhantomData<(In, Out)>,
 }
 
-impl<A: CT, B: CT, In: RpcMessage, Out: RpcMessage> CombinedClientChannel<A, B, In, Out> {
-    /// Create a combined channel from two other channels
+impl<A: Connection<In, Out>, B: Connection<In, Out>, In: RpcMessage, Out: RpcMessage>
+    CombinedConnection<A, B, In, Out>
+{
+    /// Create a combined connection from two other connections
     ///
-    /// When opening a channel with [`crate::ClientChannel::open_bi`], the first configured channel will be used,
-    /// and no attempt will be made to use the second channel in case of failure. If no channels are
-    /// configred, open_bi will immediately fail with [`OpenBiError::NoChannel`].
-    ///
-    /// When listening for incoming channels with [`crate::ServerChannel::accept_bi`], all configured channels will
-    /// be listened on, and the first to receive a connection will be used. If no channels are
-    /// configured, accept_bi will wait forever.
-    pub fn new(a: Option<A::ClientChannel<In, Out>>, b: Option<B::ClientChannel<In, Out>>) -> Self {
-        Self { a, b }
+    /// It will always use the first connection that is not `None`.
+    pub fn new(a: Option<A>, b: Option<B>) -> Self {
+        Self {
+            a,
+            b,
+            _p: PhantomData,
+        }
     }
 }
-impl<A: CT, B: CT, In: RpcMessage, Out: RpcMessage> Clone for CombinedClientChannel<A, B, In, Out> {
+impl<A: Clone, B: Clone, In: RpcMessage, Out: RpcMessage> Clone
+    for CombinedConnection<A, B, In, Out>
+{
     fn clone(&self) -> Self {
         Self {
             a: self.a.clone(),
             b: self.b.clone(),
+            _p: PhantomData,
         }
     }
 }
 
-impl<A: CT, B: CT, In: RpcMessage, Out: RpcMessage> Debug for CombinedClientChannel<A, B, In, Out> {
+impl<A: Debug, B: Debug, In: RpcMessage, Out: RpcMessage> Debug
+    for CombinedConnection<A, B, In, Out>
+{
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Channel")
+        f.debug_struct("CombinedConnection")
             .field("a", &self.a)
             .field("b", &self.b)
             .finish()
     }
 }
 
-/// A channel that combines two other channels
-pub struct CombinedServerChannel<A: CT, B: CT, In: RpcMessage, Out: RpcMessage> {
-    a: Option<A::ServerChannel<In, Out>>,
-    b: Option<B::ServerChannel<In, Out>>,
+/// An endpoint that combines two other endpoints
+pub struct CombinedServerEndpoint<A, B, In: RpcMessage, Out: RpcMessage> {
+    /// First endpoint
+    pub a: Option<A>,
+    /// Second endpoint
+    pub b: Option<B>,
+    /// Local addresses from all endpoints
     local_addr: Vec<LocalAddr>,
+    /// Phantom data so we can have `In` and `Out` as type parameters
+    _p: PhantomData<(In, Out)>,
 }
 
-impl<A: CT, B: CT, In: RpcMessage, Out: RpcMessage> CombinedServerChannel<A, B, In, Out> {
-    /// Create a combined channel from two other channels
+impl<A: ServerEndpoint<In, Out>, B: ServerEndpoint<In, Out>, In: RpcMessage, Out: RpcMessage>
+    CombinedServerEndpoint<A, B, In, Out>
+{
+    /// Create a combined server endpoint from two other server endpoints
     ///
-    /// When opening a channel with [`crate::ClientChannel::open_bi`], the first configured channel will be used,
-    /// and no attempt will be made to use the second channel in case of failure. If no channels are
-    /// configred, open_bi will immediately fail with [`OpenBiError::NoChannel`].
-    ///
-    /// When listening for incoming channels with [`crate::ServerChannel::accept_bi`], all configured channels will
-    /// be listened on, and the first to receive a connection will be used. If no channels are
-    /// configured, accept_bi will wait forever.
-    pub fn new(a: Option<A::ServerChannel<In, Out>>, b: Option<B::ServerChannel<In, Out>>) -> Self {
-        let mut local_addr = Vec::new();
-        if let Some(ref a) = a {
-            local_addr.extend_from_slice(a.local_addr());
+    /// When listening for incoming connections with
+    /// [crate::ServerEndpoint::accept_bi], all configured channels will be listened on,
+    /// and the first to receive a connection will be used. If no channels are configured,
+    /// accept_bi will not throw an error but wait forever.
+    pub fn new(a: Option<A>, b: Option<B>) -> Self {
+        let mut local_addr = Vec::with_capacity(2);
+        if let Some(a) = &a {
+            local_addr.extend(a.local_addr().iter().cloned())
+        };
+        if let Some(b) = &b {
+            local_addr.extend(b.local_addr().iter().cloned())
+        };
+        Self {
+            a,
+            b,
+            local_addr,
+            _p: PhantomData,
         }
-        if let Some(ref b) = b {
-            local_addr.extend_from_slice(b.local_addr());
-        }
-        Self { a, b, local_addr }
+    }
+
+    /// Get back the inner endpoints
+    pub fn into_inner(self) -> (Option<A>, Option<B>) {
+        (self.a, self.b)
     }
 }
 
-impl<A: CT, B: CT, In: RpcMessage, Out: RpcMessage> Clone for CombinedServerChannel<A, B, In, Out> {
+impl<A: Clone, B: Clone, In: RpcMessage, Out: RpcMessage> Clone
+    for CombinedServerEndpoint<A, B, In, Out>
+{
     fn clone(&self) -> Self {
         Self {
             a: self.a.clone(),
             b: self.b.clone(),
             local_addr: self.local_addr.clone(),
+            _p: PhantomData,
         }
     }
 }
 
-impl<A: CT, B: CT, In: RpcMessage, Out: RpcMessage> Debug for CombinedServerChannel<A, B, In, Out> {
+impl<A: Debug, B: Debug, In: RpcMessage, Out: RpcMessage> Debug
+    for CombinedServerEndpoint<A, B, In, Out>
+{
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Channel")
+        f.debug_struct("CombinedServerEndpoint")
             .field("a", &self.a)
             .field("b", &self.b)
             .finish()
     }
 }
 
-/// SendSink for combined channels
+/// Send sink for combined channels
 #[pin_project(project = SendSinkProj)]
-pub enum SendSink<A: CT, B: CT, Out: RpcMessage> {
+pub enum SendSink<
+    A: ConnectionCommon<In, Out>,
+    B: ConnectionCommon<In, Out>,
+    In: RpcMessage,
+    Out: RpcMessage,
+> {
     /// A variant
-    A(#[pin] A::SendSink<Out>),
+    A(#[pin] A::SendSink),
     /// B variant
-    B(#[pin] B::SendSink<Out>),
+    B(#[pin] B::SendSink),
 }
 
-impl<A: CT, B: CT, Out: RpcMessage> Sink<Out> for SendSink<A, B, Out> {
+impl<
+        A: ConnectionCommon<In, Out>,
+        B: ConnectionCommon<In, Out>,
+        In: RpcMessage,
+        Out: RpcMessage,
+    > Sink<Out> for SendSink<A, B, In, Out>
+{
     type Error = self::SendError<A, B>;
 
     fn poll_ready(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
@@ -143,14 +183,25 @@ impl<A: CT, B: CT, Out: RpcMessage> Sink<Out> for SendSink<A, B, Out> {
 
 /// RecvStream for combined channels
 #[pin_project(project = ResStreamProj)]
-pub enum RecvStream<A: CT, B: CT, In: RpcMessage> {
+pub enum RecvStream<
+    A: ConnectionCommon<In, Out>,
+    B: ConnectionCommon<In, Out>,
+    In: RpcMessage,
+    Out: RpcMessage,
+> {
     /// A variant
-    A(#[pin] A::RecvStream<In>),
+    A(#[pin] A::RecvStream),
     /// B variant
-    B(#[pin] B::RecvStream<In>),
+    B(#[pin] B::RecvStream),
 }
 
-impl<A: CT, B: CT, In: RpcMessage> Stream for RecvStream<A, B, In> {
+impl<
+        A: ConnectionCommon<In, Out>,
+        B: ConnectionCommon<In, Out>,
+        In: RpcMessage,
+        Out: RpcMessage,
+    > Stream for RecvStream<A, B, In, Out>
+{
     type Item = Result<In, RecvError<A, B>>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
@@ -163,127 +214,113 @@ impl<A: CT, B: CT, In: RpcMessage> Stream for RecvStream<A, B, In> {
 
 /// SendError for combined channels
 #[derive(Debug)]
-pub enum SendError<A: CT, B: CT> {
+pub enum SendError<A: ConnectionErrors, B: ConnectionErrors> {
     /// A variant
     A(A::SendError),
     /// B variant
     B(B::SendError),
 }
 
-impl<A: CT, B: CT> fmt::Display for SendError<A, B> {
+impl<A: ConnectionErrors, B: ConnectionErrors> fmt::Display for SendError<A, B> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Debug::fmt(self, f)
     }
 }
 
-impl<A: CT, B: CT> error::Error for SendError<A, B> {}
+impl<A: ConnectionErrors, B: ConnectionErrors> error::Error for SendError<A, B> {}
 
 /// RecvError for combined channels
 #[derive(Debug)]
-pub enum RecvError<A: CT, B: CT> {
+pub enum RecvError<A: ConnectionErrors, B: ConnectionErrors> {
     /// A variant
     A(A::RecvError),
     /// B variant
     B(B::RecvError),
 }
 
-impl<A: CT, B: CT> fmt::Display for RecvError<A, B> {
+impl<A: ConnectionErrors, B: ConnectionErrors> fmt::Display for RecvError<A, B> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Debug::fmt(self, f)
     }
 }
 
-impl<A: CT, B: CT> error::Error for RecvError<A, B> {}
+impl<A: ConnectionErrors, B: ConnectionErrors> error::Error for RecvError<A, B> {}
 
 /// OpenBiError for combined channels
 #[derive(Debug)]
-pub enum OpenBiError<A: CT, B: CT> {
+pub enum OpenBiError<A: ConnectionErrors, B: ConnectionErrors> {
     /// A variant
-    A(A::OpenBiError),
+    A(A::OpenError),
     /// B variant
-    B(B::OpenBiError),
+    B(B::OpenError),
     /// None of the two channels is configured
     NoChannel,
 }
 
-impl<A: CT, B: CT> fmt::Display for OpenBiError<A, B> {
+impl<A: ConnectionErrors, B: ConnectionErrors> fmt::Display for OpenBiError<A, B> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Debug::fmt(self, f)
     }
 }
 
-impl<A: CT, B: CT> error::Error for OpenBiError<A, B> {}
+impl<A: ConnectionErrors, B: ConnectionErrors> error::Error for OpenBiError<A, B> {}
 
 /// AcceptBiError for combined channels
 #[derive(Debug)]
-pub enum AcceptBiError<A: CT, B: CT> {
+pub enum AcceptBiError<A: ConnectionErrors, B: ConnectionErrors> {
     /// A variant
-    A(A::AcceptBiError),
+    A(A::OpenError),
     /// B variant
-    B(B::AcceptBiError),
+    B(B::OpenError),
 }
 
-impl<A: CT, B: CT> fmt::Display for AcceptBiError<A, B> {
+impl<A: ConnectionErrors, B: ConnectionErrors> fmt::Display for AcceptBiError<A, B> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Debug::fmt(self, f)
     }
 }
 
-impl<A: CT, B: CT> error::Error for AcceptBiError<A, B> {}
+impl<A: ConnectionErrors, B: ConnectionErrors> error::Error for AcceptBiError<A, B> {}
 
 /// Future returned by open_bi
-pub type OpenBiFuture<'a, A, B, In, Out> =
-    BoxFuture<'a, result::Result<Socket<A, B, In, Out>, self::OpenBiError<A, B>>>;
+pub type OpenBiFuture<A, B, In, Out> =
+    BoxFuture<'static, result::Result<Socket<A, B, In, Out>, self::OpenBiError<A, B>>>;
 
 /// Future returned by accept_bi
-pub type AcceptBiFuture<'a, A, B, In, Out> =
-    BoxFuture<'a, result::Result<self::Socket<A, B, In, Out>, self::AcceptBiError<A, B>>>;
+pub type AcceptBiFuture<A, B, In, Out> =
+    BoxFuture<'static, result::Result<self::Socket<A, B, In, Out>, self::AcceptBiError<A, B>>>;
 
-type Socket<A, B, In, Out> = (self::SendSink<A, B, Out>, self::RecvStream<A, B, In>);
+type Socket<A, B, In, Out> = (
+    self::SendSink<A, B, In, Out>,
+    self::RecvStream<A, B, In, Out>,
+);
 
-/// Channel types for combined channels
-///
-/// `A` and `B` are the channel types for the two channels.
-/// `In` and `Out` are the message types for the two channels.
-#[derive(Debug, Clone, Copy)]
-pub struct CombinedChannelTypes<A: CT, B: CT>(PhantomData<(A, B)>);
-
-impl<A: CT, B: CT> CT for CombinedChannelTypes<A, B> {
-    type SendSink<M: RpcMessage> = self::SendSink<A, B, M>;
-
-    type RecvStream<M: RpcMessage> = self::RecvStream<A, B, M>;
-
+impl<A: ConnectionErrors, B: ConnectionErrors, In: RpcMessage, Out: RpcMessage> ConnectionErrors
+    for CombinedConnection<A, B, In, Out>
+{
     type SendError = self::SendError<A, B>;
-
     type RecvError = self::RecvError<A, B>;
-
-    type OpenBiError = self::OpenBiError<A, B>;
-
-    type OpenBiFuture<'a, In: RpcMessage, Out: RpcMessage> = self::OpenBiFuture<'a, A, B, In, Out>;
-
-    type AcceptBiError = self::AcceptBiError<A, B>;
-
-    type AcceptBiFuture<'a, In: RpcMessage, Out: RpcMessage> =
-        self::AcceptBiFuture<'a, A, B, In, Out>;
-
-    type ClientChannel<In: RpcMessage, Out: RpcMessage> =
-        self::CombinedClientChannel<A, B, In, Out>;
-
-    type ServerChannel<In: RpcMessage, Out: RpcMessage> =
-        self::CombinedServerChannel<A, B, In, Out>;
+    type OpenError = self::OpenBiError<A, B>;
 }
 
-impl<A: CT, B: CT, In: RpcMessage, Out: RpcMessage>
-    crate::ClientChannel<In, Out, CombinedChannelTypes<A, B>>
-    for CombinedClientChannel<A, B, In, Out>
+impl<A: Connection<In, Out>, B: Connection<In, Out>, In: RpcMessage, Out: RpcMessage>
+    ConnectionCommon<In, Out> for CombinedConnection<A, B, In, Out>
 {
-    fn open_bi(&self) -> OpenBiFuture<'_, A, B, In, Out> {
+    type RecvStream = self::RecvStream<A, B, In, Out>;
+    type SendSink = self::SendSink<A, B, In, Out>;
+}
+
+impl<A: Connection<In, Out>, B: Connection<In, Out>, In: RpcMessage, Out: RpcMessage>
+    Connection<In, Out> for CombinedConnection<A, B, In, Out>
+{
+    fn open_bi(&self) -> OpenBiFuture<A, B, In, Out> {
+        let this = self.clone();
         async {
             // try a first, then b
-            if let Some(a) = &self.a {
+            if let Some(a) = this.a {
                 let (send, recv) = a.open_bi().await.map_err(OpenBiError::A)?;
                 Ok((SendSink::A(send), RecvStream::A(recv)))
-            } else if let Some(b) = &self.b {
+            } else if let Some(b) = this.b {
                 let (send, recv) = b.open_bi().await.map_err(OpenBiError::B)?;
                 Ok((SendSink::B(send), RecvStream::B(recv)))
             } else {
@@ -292,23 +329,35 @@ impl<A: CT, B: CT, In: RpcMessage, Out: RpcMessage>
         }
         .boxed()
     }
+
+    type OpenBiFut = OpenBiFuture<A, B, In, Out>;
 }
 
-impl<A: CT, B: CT, In: RpcMessage, Out: RpcMessage>
-    crate::ServerChannel<In, Out, CombinedChannelTypes<A, B>>
-    for CombinedServerChannel<A, B, In, Out>
+impl<A: ConnectionErrors, B: ConnectionErrors, In: RpcMessage, Out: RpcMessage> ConnectionErrors
+    for CombinedServerEndpoint<A, B, In, Out>
 {
-    fn local_addr(&self) -> &[crate::LocalAddr] {
-        &self.local_addr
-    }
+    type SendError = self::SendError<A, B>;
+    type RecvError = self::RecvError<A, B>;
+    type OpenError = self::AcceptBiError<A, B>;
+}
 
-    fn accept_bi(&self) -> AcceptBiFuture<'_, A, B, In, Out> {
+impl<A: ServerEndpoint<In, Out>, B: ServerEndpoint<In, Out>, In: RpcMessage, Out: RpcMessage>
+    ConnectionCommon<In, Out> for CombinedServerEndpoint<A, B, In, Out>
+{
+    type RecvStream = self::RecvStream<A, B, In, Out>;
+    type SendSink = self::SendSink<A, B, In, Out>;
+}
+
+impl<A: ServerEndpoint<In, Out>, B: ServerEndpoint<In, Out>, In: RpcMessage, Out: RpcMessage>
+    ServerEndpoint<In, Out> for CombinedServerEndpoint<A, B, In, Out>
+{
+    fn accept_bi(&self) -> AcceptBiFuture<A, B, In, Out> {
         let a_fut = if let Some(a) = &self.a {
             a.accept_bi()
                 .map_ok(|(send, recv)| {
                     (
-                        SendSink::<A, B, Out>::A(send),
-                        RecvStream::<A, B, In>::A(recv),
+                        SendSink::<A, B, In, Out>::A(send),
+                        RecvStream::<A, B, In, Out>::A(recv),
                     )
                 })
                 .map_err(AcceptBiError::A)
@@ -320,8 +369,8 @@ impl<A: CT, B: CT, In: RpcMessage, Out: RpcMessage>
             b.accept_bi()
                 .map_ok(|(send, recv)| {
                     (
-                        SendSink::<A, B, Out>::B(send),
-                        RecvStream::<A, B, In>::B(recv),
+                        SendSink::<A, B, In, Out>::B(send),
+                        RecvStream::<A, B, In, Out>::B(recv),
                     )
                 })
                 .map_err(AcceptBiError::B)
@@ -337,21 +386,29 @@ impl<A: CT, B: CT, In: RpcMessage, Out: RpcMessage>
         }
         .boxed()
     }
+
+    type AcceptBiFut = AcceptBiFuture<A, B, In, Out>;
+
+    fn local_addr(&self) -> &[LocalAddr] {
+        &self.local_addr
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::{
-        transport::{combined, mem},
-        ClientChannel,
+        transport::{
+            combined::{self, OpenBiError},
+            flume,
+        },
+        Connection,
     };
 
     #[tokio::test]
     async fn open_empty_channel() {
-        let channel = combined::CombinedClientChannel::<
-            mem::MemChannelTypes,
-            mem::MemChannelTypes,
+        let channel = combined::CombinedConnection::<
+            flume::FlumeConnection<(), ()>,
+            flume::FlumeConnection<(), ()>,
             (),
             (),
         >::new(None, None);

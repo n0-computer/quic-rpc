@@ -1,4 +1,10 @@
-//! A streaming rpc system based on quic
+//! A streaming rpc system for transports that support multiple bidirectional
+//! streams, such as QUIC and HTTP2.
+//!
+//! A lightweight memory transport is provided for cases where you want have
+//! multiple cleanly separated substreams in the same process.
+//!
+//! For supported transports, see the [transport] module.
 //!
 //! # Motivation
 //!
@@ -7,7 +13,7 @@
 //! # Example
 //! ```
 //! # async fn example() -> anyhow::Result<()> {
-//! use quic_rpc::{message::RpcMsg, Service, RpcClient, transport::MemChannelTypes};
+//! use quic_rpc::{message::RpcMsg, Service, RpcClient, RpcServer};
 //! use serde::{Serialize, Deserialize};
 //! use derive_more::{From, TryInto};
 //!
@@ -19,6 +25,8 @@
 //! struct Pong;
 //!
 //! // Define your RPC service and its request/response types
+//! #[derive(Debug, Clone)]
+//! struct PingService;
 //!
 //! #[derive(Debug, Serialize, Deserialize, From, TryInto)]
 //! enum PingRequest {
@@ -30,9 +38,6 @@
 //!     Pong(Pong),
 //! }
 //!
-//! #[derive(Debug, Clone)]
-//! struct PingService;
-//!
 //! impl Service for PingService {
 //!   type Req = PingRequest;
 //!   type Res = PingResponse;
@@ -43,32 +48,59 @@
 //!   type Response = Pong;
 //! }
 //!
-//! // create a transport channel
-//! let (server, client) = quic_rpc::transport::mem::connection::<PingRequest, PingResponse>(1);
+//! // create a transport channel, here a memory channel for testing
+//! let (server, client) = quic_rpc::transport::flume::connection::<PingRequest, PingResponse>(1);
 //!
+//! // client side
 //! // create the rpc client given the channel and the service type
-//! let mut client = RpcClient::<PingService, MemChannelTypes>::new(client);
+//! let mut client = RpcClient::<PingService, _>::new(client);
 //!
 //! // call the service
 //! let res = client.rpc(Ping).await?;
+//!
+//! // server side
+//! // create the rpc server given the channel and the service type
+//! let mut server = RpcServer::<PingService, _>::new(server);
+//!
+//! let handler = Handler;
+//! loop {
+//!   // accept connections
+//!   let (msg, chan) = server.accept().await?;
+//!   // dispatch the message to the appropriate handler
+//!   match msg {
+//!     PingRequest::Ping(ping) => chan.rpc(ping, handler, Handler::ping).await?,
+//!   }
+//! }
+//!
+//! // the handler. For a more complex example, this would contain any state
+//! // needed to handle the request.
+//! #[derive(Debug, Clone, Copy)]
+//! struct Handler;
+//!
+//! impl Handler {
+//!   // the handle fn for a Ping request.
+//!
+//!   // The return type is the response type for the service.
+//!   // Note that this must take self by value, not by reference.
+//!   async fn ping(self, _req: Ping) -> Pong {
+//!     Pong
+//!   }
+//! }
 //! # Ok(())
 //! # }
 //! ```
 #![deny(missing_docs)]
 #![deny(rustdoc::broken_intra_doc_links)]
-use futures::{Future, Sink, Stream};
 use serde::{de::DeserializeOwned, Serialize};
-use std::{
-    fmt::{self, Debug, Display},
-    net::SocketAddr,
-    result,
-};
+use std::fmt::{Debug, Display};
+use transport::{Connection, ServerEndpoint};
 pub mod client;
 pub mod message;
 pub mod server;
 pub mod transport;
 pub use client::RpcClient;
 pub use server::RpcServer;
+#[cfg(feature = "macros")]
 mod macros;
 
 /// Requirements for a RPC message
@@ -87,12 +119,34 @@ impl<T> RpcMessage for T where
 
 /// Requirements for an internal error
 ///
-/// All errors have to be Send and 'static so they can be sent across threads.
+/// All errors have to be Send, Sync and 'static so they can be sent across threads.
+/// They also have to be Debug and Display so they can be logged.
+///
+/// We don't require them to implement [std::error::Error] so we can use
+/// anyhow::Error as an error type.
 pub trait RpcError: Debug + Display + Send + Sync + Unpin + 'static {}
 
 impl<T> RpcError for T where T: Debug + Display + Send + Sync + Unpin + 'static {}
 
 /// A service
+///
+/// A service has request and response message types. These types have to be the
+/// union of all possible request and response types for all interactions with
+/// the service.
+///
+/// Usually you will define an enum for the request and response
+/// type, and use the [derive_more](https://crates.io/crates/derive_more) crate to
+/// define the conversions between the enum and the actual request and response types.
+///
+/// To make a message type usable as a request for a service, implement [message::Msg]
+/// for it. This is how you define the interaction patterns for each request type.
+///
+/// Depending on the interaction type, you might need to implement traits that further
+/// define details of the interaction.
+///
+/// A message type can be used for multiple services. E.g. you might have a
+/// Status request that is understood by multiple services and returns a
+/// standard status response.
 pub trait Service: Send + Sync + Debug + Clone + 'static {
     /// Type of request messages
     type Req: RpcMessage;
@@ -100,98 +154,21 @@ pub trait Service: Send + Sync + Debug + Clone + 'static {
     type Res: RpcMessage;
 }
 
-/// Defines a set of types for a kind of channel
+/// A connection to a specific service on a specific remote machine
 ///
-/// Every distinct kind of channel has its own ChannelType. See e.g.
-/// [crate::transport::MemChannelTypes].
-pub trait ChannelTypes: Debug + Sized + Send + Sync + Unpin + Clone + 'static {
-    /// The sink used for sending either requests or responses on this channel
-    type SendSink<M: RpcMessage>: Sink<M, Error = Self::SendError> + Send + Unpin + 'static;
-    /// The stream used for receiving either requests or responses on this channel
-    type RecvStream<M: RpcMessage>: Stream<Item = result::Result<M, Self::RecvError>>
-        + Send
-        + Unpin
-        + 'static;
-    /// Error you might get while sending messages to a sink
-    type SendError: RpcError;
-    /// Error you might get while receiving messages from a stream
-    type RecvError: RpcError;
-    /// Error you might get when opening a new connection to the server
-    type OpenBiError: RpcError;
-    /// Future returned by open_bi
-    type OpenBiFuture<'a, In: RpcMessage, Out: RpcMessage>: Future<
-            Output = result::Result<(Self::SendSink<Out>, Self::RecvStream<In>), Self::OpenBiError>,
-        > + Send
-        + 'a
-    where
-        Self: 'a;
-
-    /// Error you might get when waiting for new streams on the server side
-    type AcceptBiError: RpcError;
-    /// Future returned by accept_bi
-    type AcceptBiFuture<'a, In: RpcMessage, Out: RpcMessage>: Future<
-            Output = result::Result<
-                (Self::SendSink<Out>, Self::RecvStream<In>),
-                Self::AcceptBiError,
-            >,
-        > + Send
-        + 'a
-    where
-        Self: 'a;
-
-    /// Channel type
-    type ClientChannel<In: RpcMessage, Out: RpcMessage>: ClientChannel<In, Out, Self>;
-
-    /// Channel type
-    type ServerChannel<In: RpcMessage, Out: RpcMessage>: ServerChannel<In, Out, Self>;
-}
-
-/// An abstract client channel with typed input and output
-pub trait ClientChannel<In: RpcMessage, Out: RpcMessage, T: ChannelTypes>:
-    Debug + Clone + Send + Sync + 'static
-{
-    /// Open a bidirectional stream
-    fn open_bi(&self) -> T::OpenBiFuture<'_, In, Out>;
-}
-
-/// An abstract server with typed input and output
-pub trait ServerChannel<In: RpcMessage, Out: RpcMessage, T: ChannelTypes>:
-    Debug + Clone + Send + Sync + 'static
-{
-    /// Accepts a bidirectional stream.
-    ///
-    /// This returns a future who's `Output` is a tuple of a sender sink and receiver stream
-    /// to send and receive messages to and from the client respectively.  The sink and
-    /// stream `Item`s are the whole `In` and `Out` messages, an [`RpcMessage`].
-    fn accept_bi(&self) -> T::AcceptBiFuture<'_, In, Out>;
-
-    /// The local addresses this server is bound to.
-    ///
-    /// This is useful for publicly facing addresses when you start the server with a random
-    /// port, `:0` and let the kernel choose the real bind address.  This will return the
-    /// address with the actual port used.
-    fn local_addr(&self) -> &[LocalAddr];
-}
-
-/// The kinds of local addresses a [`ServerChannel`] can be bound to.
+/// This is just a trait alias for a [Connection] with the right types.
 ///
-/// Returned by [`ServerChannel::local_addr`].
-///
-/// [`Display`]: fmt::Display
-#[derive(Debug, Clone)]
-#[non_exhaustive]
-pub enum LocalAddr {
-    /// A local socket.
-    Socket(SocketAddr),
-    /// An in-memory address.
-    Mem,
-}
+/// This can be used to create a [RpcClient] that can be used to send requests.
+pub trait ServiceConnection<S: Service>: Connection<S::Res, S::Req> {}
 
-impl Display for LocalAddr {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            LocalAddr::Socket(sockaddr) => write!(f, "{sockaddr}"),
-            LocalAddr::Mem => write!(f, "mem"),
-        }
-    }
-}
+impl<T: Connection<S::Res, S::Req>, S: Service> ServiceConnection<S> for T {}
+
+/// A server endpoint for a specific service
+///
+/// This is just a trait alias for a [ServerEndpoint] with the right types.
+///
+/// This can be used to create a [RpcServer] that can be used to handle
+/// requests.
+pub trait ServiceEndpoint<S: Service>: ServerEndpoint<S::Req, S::Res> {}
+
+impl<T: ServerEndpoint<S::Req, S::Res>, S: Service> ServiceEndpoint<S> for T {}

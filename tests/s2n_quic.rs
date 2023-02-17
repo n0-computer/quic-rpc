@@ -1,17 +1,18 @@
+#![cfg(feature = "s2n-quic-transport")]
 mod math;
 use std::{net::SocketAddr, path::Path};
 
 use libp2p_core::identity::ed25519::Keypair;
 use math::*;
 mod util;
-use quic_rpc::{transport::S2nQuicChannelTypes, RpcClient, RpcServer};
+use quic_rpc::{RpcClient, RpcServer};
 use tokio::task::JoinHandle;
 
 fn run_server(server: s2n_quic::Server) -> JoinHandle<anyhow::Result<()>> {
     tokio::task::spawn(async move {
         let local_addr = server.local_addr()?;
-        let channel = quic_rpc::transport::s2n_quic::ServerChannel::new(server, local_addr);
-        let server = RpcServer::<ComputeService, S2nQuicChannelTypes>::new(channel);
+        let channel = quic_rpc::transport::s2n_quic::S2nQuicServerEndpoint::new(server, local_addr);
+        let server = RpcServer::<ComputeService, _>::new(channel);
         ComputeService::server(server).await?;
         anyhow::Ok(())
     })
@@ -72,11 +73,10 @@ async fn make_client_and_server_builtin() -> anyhow::Result<(
 #[tokio::test]
 #[ignore]
 async fn s2n_quic_channel_smoke() -> anyhow::Result<()> {
-    type C = quic_rpc::transport::s2n_quic::ChannelTypes;
     let (client, server, connect) = make_client_and_server_builtin().await?;
     let server_handle = run_server(server);
-    let client = quic_rpc::transport::s2n_quic::ClientChannel::new(client, connect);
-    smoke_test::<C>(client).await?;
+    let client = quic_rpc::transport::s2n_quic::S2nQuicConnection::new(client, connect);
+    smoke_test(client).await?;
     server_handle.abort();
     let _ = server_handle.await;
     Ok(())
@@ -84,11 +84,10 @@ async fn s2n_quic_channel_smoke() -> anyhow::Result<()> {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn s2n_quic_channel_bench() -> anyhow::Result<()> {
-    type C = quic_rpc::transport::s2n_quic::ChannelTypes;
     let (client, server, connect) = make_client_and_server_builtin().await?;
     let server_handle = run_server(server);
-    let client = quic_rpc::transport::s2n_quic::ClientChannel::new(client, connect);
-    let client = RpcClient::<ComputeService, C>::new(client);
+    let client = quic_rpc::transport::s2n_quic::S2nQuicConnection::new(client, connect);
+    let client = RpcClient::<ComputeService, _>::new(client);
     bench(client, 5).await?;
     server_handle.abort();
     let _ = server_handle.await;

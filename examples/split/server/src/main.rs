@@ -1,7 +1,6 @@
-use anyhow::Context;
 use async_stream::stream;
 use futures::stream::{Stream, StreamExt};
-use quic_rpc::{server::run_server_loop, transport::QuinnChannelTypes};
+use quic_rpc::server::run_server_loop;
 use quinn::{Endpoint, ServerConfig};
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -59,31 +58,19 @@ impl Compute {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    tracing_subscriber::fmt::init();
     let server_addr: SocketAddr = "127.0.0.1:12345".parse()?;
     let (server, _server_certs) = make_server_endpoint(server_addr)?;
-    let local_addr = server.local_addr()?;
-    loop {
-        let accept = server.accept().await.context("accept failed")?.await?;
-        tokio::task::spawn(async move {
-            let remote = accept.remote_address();
-            eprintln!("new connection from {remote}");
-            let connection =
-                quic_rpc::transport::quinn::QuinnServerChannel::new(accept, local_addr);
-            let target = Compute;
-            match run_server_loop(
-                ComputeService,
-                QuinnChannelTypes,
-                connection,
-                target,
-                dispatch_compute_request,
-            )
-            .await
-            {
-                Ok(_) => eprintln!("connection to {remote} closed"),
-                Err(err) => eprintln!("connection to {remote} closed: {err:?}"),
-            }
-        });
-    }
+    let channel = quic_rpc::transport::quinn::QuinnServerEndpoint::new(server)?;
+    let target = Compute;
+    run_server_loop(
+        ComputeService,
+        channel.clone(),
+        target,
+        dispatch_compute_request,
+    )
+    .await?;
+    Ok(())
 }
 
 fn make_server_endpoint(bind_addr: SocketAddr) -> anyhow::Result<(Endpoint, Vec<u8>)> {

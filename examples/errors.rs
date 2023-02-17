@@ -1,5 +1,5 @@
 use derive_more::{Display, From, TryInto};
-use quic_rpc::{message::RpcMsg, transport::mem::MemChannelTypes, RpcClient, RpcServer, Service};
+use quic_rpc::{message::RpcMsg, RpcClient, RpcServer, Service};
 use serde::{Deserialize, Serialize};
 use std::result;
 
@@ -21,7 +21,7 @@ impl std::error::Error for WriteError {}
 
 impl From<anyhow::Error> for WriteError {
     fn from(e: anyhow::Error) -> Self {
-        WriteError(format!("{:?}", e))
+        WriteError(format!("{e:?}"))
     }
 }
 
@@ -55,15 +55,14 @@ impl Fs {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let fs = Fs;
-    let (server, client) = quic_rpc::transport::mem::connection(1);
-    let client = RpcClient::<IoService, MemChannelTypes>::new(client);
-    let server = RpcServer::<IoService, MemChannelTypes>::new(server);
+    let (server, client) = quic_rpc::transport::flume::connection(1);
+    let client = RpcClient::<IoService, _>::new(client);
+    let server = RpcServer::<IoService, _>::new(server);
     let handle = tokio::task::spawn(async move {
         for _ in 0..1 {
-            let (req, chan) = server.accept_one().await?;
-            let s = server.clone();
+            let (req, chan) = server.accept().await?;
             match req {
-                IoRequest::Write(req) => s.rpc_map_err(req, chan, fs, Fs::write).await,
+                IoRequest::Write(req) => chan.rpc_map_err(req, fs, Fs::write).await,
             }?
         }
         anyhow::Ok(())

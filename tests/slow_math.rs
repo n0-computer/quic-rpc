@@ -1,3 +1,8 @@
+#![cfg(any(
+    feature = "flume-transport",
+    feature = "hyper-transport",
+    feature = "quinn-transport"
+))]
 mod math;
 use std::result;
 
@@ -5,9 +10,8 @@ use async_stream::stream;
 use futures::{Stream, StreamExt};
 use math::*;
 use quic_rpc::{
-    message::{BidiStreaming, ClientStreaming, Msg, RpcMsg, ServerStreaming},
-    server::RpcServerError,
-    ChannelTypes, RpcServer, Service,
+    declare_bidi_streaming, declare_client_streaming, declare_rpc, declare_server_streaming,
+    server::RpcServerError, RpcServer, Service, ServiceEndpoint,
 };
 
 #[derive(Debug, Clone)]
@@ -18,27 +22,10 @@ impl Service for ComputeService {
     type Res = ComputeResponse;
 }
 
-impl RpcMsg<ComputeService> for Sqr {
-    type Response = SqrResponse;
-}
-
-impl Msg<ComputeService> for Sum {
-    type Response = SumResponse;
-    type Update = SumUpdate;
-    type Pattern = ClientStreaming;
-}
-
-impl Msg<ComputeService> for Fibonacci {
-    type Response = FibonacciResponse;
-    type Update = Self;
-    type Pattern = ServerStreaming;
-}
-
-impl Msg<ComputeService> for Multiply {
-    type Response = MultiplyResponse;
-    type Update = MultiplyUpdate;
-    type Pattern = BidiStreaming;
-}
+declare_rpc!(ComputeService, Sqr, SqrResponse);
+declare_client_streaming!(ComputeService, Sum, SumUpdate, SumResponse);
+declare_server_streaming!(ComputeService, Fibonacci, FibonacciResponse);
+declare_bidi_streaming!(ComputeService, Multiply, MultiplyUpdate, MultiplyResponse);
 
 async fn sleep_ms(ms: u64) {
     tokio::time::sleep(std::time::Duration::from_millis(ms)).await;
@@ -91,21 +78,21 @@ impl ComputeService {
         }
     }
 
-    pub async fn server<C: ChannelTypes>(
+    pub async fn server<C: ServiceEndpoint<ComputeService>>(
         server: RpcServer<ComputeService, C>,
     ) -> result::Result<(), RpcServerError<C>> {
         let s = server;
         let service = ComputeService;
         loop {
-            let (req, chan) = s.accept_one().await?;
+            let (req, chan) = s.accept().await?;
             use ComputeRequest::*;
             let service = service.clone();
             #[rustfmt::skip]
             match req {
-                Sqr(msg) => s.rpc(msg, chan, service, ComputeService::sqr).await,
-                Sum(msg) => s.client_streaming(msg, chan, service, ComputeService::sum).await,
-                Fibonacci(msg) => s.server_streaming(msg, chan, service, ComputeService::fibonacci).await,
-                Multiply(msg) => s.bidi_streaming(msg, chan, service, ComputeService::multiply).await,
+                Sqr(msg) => chan.rpc(msg, service, ComputeService::sqr).await,
+                Sum(msg) => chan.client_streaming(msg, service, ComputeService::sum).await,
+                Fibonacci(msg) => chan.server_streaming(msg, service, ComputeService::fibonacci).await,
+                Multiply(msg) => chan.bidi_streaming(msg, service, ComputeService::multiply).await,
                 SumUpdate(_) => Err(RpcServerError::UnexpectedStartMessage)?,
                 MultiplyUpdate(_) => Err(RpcServerError::UnexpectedStartMessage)?,
             }?;
