@@ -1,3 +1,4 @@
+#![cfg(feature = "flume-transport")]
 mod math;
 use math::*;
 use quic_rpc::{server::RpcServerError, transport::flume, RpcClient, RpcServer};

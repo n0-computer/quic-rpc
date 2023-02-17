@@ -46,7 +46,19 @@ quinn-transport = ["flume", "quinn", "bincode", "tokio-serde", "tokio-util"]
 flume-transport = ["flume"]
 combined-transport = []
 macros = []
-default = ["quinn-transport", "combined-transport", "flume-transport", "hyper-transport", "macros"]
+default = []
+
+[[example]]
+name = "errors"
+required-features = ["flume-transport"]
+
+[[example]]
+name = "macro"
+required-features = ["flume-transport", "macros"]
+
+[[example]]
+name = "store"
+required-features = ["flume-transport"]
 
 [workspace]
 members = ["examples/split/types", "examples/split/server", "examples/split/client"]

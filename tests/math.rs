@@ -1,3 +1,8 @@
+#![cfg(any(
+    feature = "flume-transport",
+    feature = "hyper-transport",
+    feature = "quinn-transport"
+))]
 #![allow(dead_code)]
 use async_stream::stream;
 use derive_more::{From, TryInto};

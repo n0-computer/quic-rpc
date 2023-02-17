@@ -1,3 +1,8 @@
+#![cfg(any(
+    feature = "flume-transport",
+    feature = "hyper-transport",
+    feature = "quinn-transport"
+))]
 mod math;
 use std::result;
 

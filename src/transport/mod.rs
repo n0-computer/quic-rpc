@@ -16,6 +16,7 @@ pub mod quinn;
 
 pub mod misc;
 
+#[cfg(any(feature = "quinn-transport", feature = "hyper-transport"))]
 mod util;
 
 /// Errors that can happen when creating and using a [`Connection`] or [`ServerEndpoint`].
