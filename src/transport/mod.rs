@@ -29,6 +29,8 @@ pub trait ConnectionErrors: Debug + Clone + Send + Sync + 'static {
 }
 
 /// Types that are common to both [`Connection`] and [`ServerEndpoint`].
+///
+/// Having this as a separate trait is useful when writing generic code that works with both.
 pub trait ConnectionCommon<In, Out>: ConnectionErrors {
     /// Receive side of a bidirectional typed channel
     type RecvStream: Stream<Item = Result<In, Self::RecvError>> + Send + Unpin + 'static;

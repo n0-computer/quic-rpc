@@ -59,7 +59,6 @@ async fn hyper_channel_smoke() -> anyhow::Result<()> {
 
 #[tokio::test]
 async fn hyper_channel_errors() -> anyhow::Result<()> {
-    type CC = HyperConnection<TestRequest, TestResponse>;
     type SC = HyperServerEndpoint<TestRequest, TestResponse>;
 
     /// request that can be too big
