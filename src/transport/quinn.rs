@@ -12,6 +12,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::{fmt, io, marker::PhantomData, pin::Pin, result};
+use tracing::{debug_span, Instrument};
 
 use super::{
     util::{FramedBincodeRead, FramedBincodeWrite},
@@ -23,17 +24,26 @@ type Socket<In, Out> = (SendSink<Out>, RecvStream<In>);
 const MAX_FRAME_LENGTH: usize = 1024 * 1024 * 16;
 
 #[derive(Debug)]
-struct ServerChannelInner {
+struct ServerEndpointInner {
     endpoint: Option<quinn::Endpoint>,
     task: Option<tokio::task::JoinHandle<()>>,
     local_addr: [LocalAddr; 1],
     receiver: flume::Receiver<SocketInner>,
 }
 
-impl Drop for ServerChannelInner {
+impl Drop for ServerEndpointInner {
     fn drop(&mut self) {
+        tracing::debug!("Dropping server endpoint");
         if let Some(endpoint) = self.endpoint.take() {
-            endpoint.close(0u32.into(), b"server channel dropped");
+            let span = debug_span!("closing server endpoint");
+            endpoint.close(0u32.into(), b"server endpoint dropped");
+            // spawn a task to wait for the endpoint to notify peers that it is closing
+            tokio::spawn(
+                async move {
+                    endpoint.wait_idle().await;
+                }
+                .instrument(span),
+            );
         }
         if let Some(task) = self.task.take() {
             task.abort()
@@ -44,7 +54,7 @@ impl Drop for ServerChannelInner {
 /// A server endpoint using a quinn connection
 #[derive(Debug)]
 pub struct QuinnServerEndpoint<In: RpcMessage, Out: RpcMessage> {
-    inner: Arc<ServerChannelInner>,
+    inner: Arc<ServerEndpointInner>,
     _phantom: PhantomData<(In, Out)>,
 }
 
@@ -62,7 +72,7 @@ impl<In: RpcMessage, Out: RpcMessage> QuinnServerEndpoint<In, Out> {
                     break;
                 }
                 Err(e) => {
-                    tracing::debug!("Error opening stream: {}", e);
+                    tracing::debug!("Error accepting stream: {}", e);
                     break;
                 }
             };
@@ -109,7 +119,7 @@ impl<In: RpcMessage, Out: RpcMessage> QuinnServerEndpoint<In, Out> {
         let (sender, receiver) = flume::bounded(16);
         let task = tokio::spawn(Self::endpoint_handler(endpoint.clone(), sender));
         Ok(Self {
-            inner: Arc::new(ServerChannelInner {
+            inner: Arc::new(ServerEndpointInner {
                 endpoint: Some(endpoint),
                 task: Some(task),
                 local_addr: [LocalAddr::Socket(local_addr)],
@@ -135,7 +145,7 @@ impl<In: RpcMessage, Out: RpcMessage> QuinnServerEndpoint<In, Out> {
             }
         });
         Self {
-            inner: Arc::new(ServerChannelInner {
+            inner: Arc::new(ServerEndpointInner {
                 endpoint: None,
                 task: Some(task),
                 local_addr: [LocalAddr::Socket(local_addr)],
@@ -154,7 +164,7 @@ impl<In: RpcMessage, Out: RpcMessage> QuinnServerEndpoint<In, Out> {
         local_addr: SocketAddr,
     ) -> Self {
         Self {
-            inner: Arc::new(ServerChannelInner {
+            inner: Arc::new(ServerEndpointInner {
                 endpoint: None,
                 task: None,
                 local_addr: [LocalAddr::Socket(local_addr)],
@@ -202,7 +212,7 @@ impl<In: RpcMessage, Out: RpcMessage> ServerEndpoint<In, Out> for QuinnServerEnd
 type SocketInner = (quinn::SendStream, quinn::RecvStream);
 
 #[derive(Debug)]
-struct ClientChannelInner {
+struct ClientConnectionInner {
     /// The quinn endpoint, we just keep a clone of this for information
     endpoint: Option<quinn::Endpoint>,
     /// The task that handles creating new connections
@@ -211,15 +221,24 @@ struct ClientChannelInner {
     sender: flume::Sender<oneshot::Sender<Result<SocketInner, quinn::ConnectionError>>>,
 }
 
-impl Drop for ClientChannelInner {
+impl Drop for ClientConnectionInner {
     fn drop(&mut self) {
-        tracing::debug!("Dropping client channel");
+        tracing::debug!("Dropping client connection");
         if let Some(endpoint) = self.endpoint.take() {
-            endpoint.close(0u32.into(), b"client channel dropped");
+            endpoint.close(0u32.into(), b"client connection dropped");
+            // spawn a task to wait for the endpoint to notify peers that it is closing
+            let span = debug_span!("closing client endpoint");
+            tokio::spawn(
+                async move {
+                    endpoint.wait_idle().await;
+                }
+                .instrument(span),
+            );
         }
         // this should not be necessary, since the task would terminate when the receiver is dropped.
         // but just to be on the safe side.
         if let Some(task) = self.task.take() {
+            tracing::debug!("Aborting task");
             task.abort();
         }
     }
@@ -227,7 +246,7 @@ impl Drop for ClientChannelInner {
 
 /// A connection using a quinn connection
 pub struct QuinnConnection<In: RpcMessage, Out: RpcMessage> {
-    inner: Arc<ClientChannelInner>,
+    inner: Arc<ClientConnectionInner>,
     _phantom: PhantomData<(In, Out)>,
 }
 
@@ -343,7 +362,7 @@ impl<In: RpcMessage, Out: RpcMessage> QuinnConnection<In, Out> {
         let (sender, receiver) = flume::bounded(16);
         let task = tokio::spawn(Self::single_connection_handler(connection, receiver));
         Self {
-            inner: Arc::new(ClientChannelInner {
+            inner: Arc::new(ClientConnectionInner {
                 endpoint: None,
                 task: Some(task),
                 sender,
@@ -362,7 +381,7 @@ impl<In: RpcMessage, Out: RpcMessage> QuinnConnection<In, Out> {
             receiver,
         ));
         Self {
-            inner: Arc::new(ClientChannelInner {
+            inner: Arc::new(ClientConnectionInner {
                 endpoint: Some(endpoint),
                 task: Some(task),
                 sender,
