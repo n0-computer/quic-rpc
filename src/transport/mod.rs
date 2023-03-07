@@ -13,6 +13,8 @@ pub mod flume;
 pub mod hyper;
 #[cfg(feature = "quinn-transport")]
 pub mod quinn;
+#[cfg(feature = "s2n-quic-transport")]
+pub mod s2n_quic;
 
 pub mod misc;
 

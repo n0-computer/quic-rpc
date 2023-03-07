@@ -1,7 +1,8 @@
 #![cfg(any(
     feature = "flume-transport",
     feature = "hyper-transport",
-    feature = "quinn-transport"
+    feature = "quinn-transport",
+    feature = "s2n-quic-transport",
 ))]
 #![allow(dead_code)]
 use async_stream::stream;
