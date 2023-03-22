@@ -105,3 +105,51 @@ impl InteractionPattern for ServerStreaming {}
 #[derive(Debug, Clone, Copy)]
 pub struct BidiStreaming;
 impl InteractionPattern for BidiStreaming {}
+
+#[cfg(feature = "rpc-with-progress")]
+mod rpc_with_progress {
+
+    /// Interaction pattern for rpc messages that can report progress
+    #[derive(Debug, Clone, Copy)]
+    pub struct RpcWithProgress;
+
+    impl InteractionPattern for RpcWithProgress {}
+
+    /// A rpc message with progress updates
+    ///
+    /// This can be useful for long running operations where the client wants to
+    /// display progress to the user.
+    pub trait RpcWithProgressMsg<S: Service>: Msg<S> {
+        /// The final response
+        type Response: Into<S::Res> + TryFrom<S::Res> + Send + 'static;
+        /// The self contained progress updates
+        type Progress: Into<S::Res> + ConvertOrKeep<S::Res> + Send + 'static;
+    }
+
+    /// Helper trait to attempt a conversion and keep the original value if it fails
+    ///
+    /// To implement this you have to implement TryFrom for the type and the reference.
+    /// This can be done with derive_more using #[derive(TryInto)].
+    pub trait ConvertOrKeep<T>: TryFrom<T> + Sized {
+        /// Convert the value or keep it if it can't be converted
+        fn convert_or_keep(s: T) -> std::result::Result<Self, T>;
+    }
+
+    impl<T, U> ConvertOrKeep<U> for T
+    where
+        for<'a> &'a Self: TryFrom<&'a U>,
+        Self: TryFrom<U>,
+    {
+        fn convert_or_keep(x: U) -> std::result::Result<Self, U> {
+            let can_convert = (<&Self>::try_from(&x)).is_ok();
+            if can_convert {
+                Ok(Self::try_from(x)
+                    .unwrap_or_else(|_| panic!("TryFrom inconsistent for byref and byval")))
+            } else {
+                Err(x)
+            }
+        }
+    }
+}
+#[cfg(feature = "rpc-with-progress")]
+pub use rpc_with_progress::{RpcWithProgress, RpcWithProgressMsg};

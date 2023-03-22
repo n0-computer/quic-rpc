@@ -236,6 +236,71 @@ impl<S: Service, C: ServiceEndpoint<S>> RpcChannel<S, C> {
         };
         self.rpc(req, target, fut).await
     }
+
+    #[cfg(feature = "rpc_with_progress")]
+    fn rpc_with_progress<M, F, Fut>(
+        &self,
+        msg: M,
+        progress: F,
+    ) -> BoxFuture<'_, std::result::Result<M::Response, RpcClientError<C>>>
+    where
+        M: RpcWithProgressMsg<S>,
+        F: (Fn(M::Progress) -> Fut) + Send + 'static,
+        Fut: Future<Output = ()> + Send,
+    {
+        let (psend, mut precv) = tokio::sync::mpsc::channel(5);
+        // future that does the call and filters the results
+        let worker = async move {
+            let (mut send, mut recv) = self
+                .as_ref()
+                .open_bi()
+                .await
+                .map_err(RpcClientError::Open)?;
+            send.send(msg.into())
+                .await
+                .map_err(RpcClientError::<C>::Send)?;
+            // read the results
+            while let Some(msg) = recv.next().await {
+                // handle recv errors
+                let msg = msg.map_err(RpcClientError::RecvError)?;
+                // first check if it is a progress message
+                match M::Progress::convert_or_keep(msg) {
+                    Ok(p) => {
+                        // we got a progress message. Pass it on.
+                        if psend.try_send(p).is_err() {
+                            tracing::debug!("progress message dropped");
+                        }
+                    }
+                    Err(msg) => {
+                        // we got the response message.
+                        // Convert it to the response type and return it.
+                        // if the conversion fails, return an error.
+                        let res = M::Response::try_from(msg)
+                            .map_err(|_| RpcClientError::DowncastError)?;
+                        return Ok(res);
+                    }
+                }
+            }
+            // The server closed the connection before sending a response.
+            Err(RpcClientError::EarlyClose)
+        };
+        let forwarder = async move {
+            // forward progress messages to the client.
+            while let Some(msg) = precv.recv().await {
+                let f = progress(msg);
+                f.await;
+            }
+            // wait forever. we want the other future to complete first.
+            future::pending::<std::result::Result<M::Response, RpcClientError<C>>>().await
+        };
+        async move {
+            tokio::select! {
+                res = worker => res,
+                res = forwarder => res,
+            }
+        }
+        .boxed()
+    }
 }
 
 impl<S: Service, C: ServiceEndpoint<S>> RpcServer<S, C> {

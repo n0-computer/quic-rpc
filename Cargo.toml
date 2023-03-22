@@ -46,7 +46,8 @@ quinn-transport = ["flume", "quinn", "bincode", "tokio-serde", "tokio-util"]
 flume-transport = ["flume"]
 combined-transport = []
 macros = []
-default = []
+rpc_with_progress = []
+default = ["rpc_with_progress"]
 
 [[example]]
 name = "errors"
