@@ -49,7 +49,7 @@ jobs:
     steps:
       - uses: actions/checkout@v2
       - uses: dtolnay/rust-toolchain@nightly
-      - name: cache check
+      - name: cargo check
         run: |
           rm -f Cargo.lock
           cargo +nightly check -Z minimal-versions --workspace --all-features --all-targets
