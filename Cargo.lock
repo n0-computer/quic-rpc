@@ -614,6 +614,7 @@ dependencies = [
  "bincode",
  "bytes",
  "derive_more",
+ "educe",
  "flume",
  "futures",
  "hyper",
