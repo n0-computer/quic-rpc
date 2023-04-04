@@ -52,4 +52,4 @@ jobs:
       - name: cache check
         run: |
           rm -f Cargo.lock
-          cargo +nightly check -Z minimal-version --locked --workspace --features --all-targets
+          cargo +nightly check -Z minimal-version --locked --workspace --all-features --all-targets
