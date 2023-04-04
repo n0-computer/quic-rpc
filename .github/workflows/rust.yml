@@ -49,6 +49,7 @@ jobs:
     steps:
       - uses: actions/checkout@v2
       - uses: dtolnay/rust-toolchain@nightly
+      - uses: swatinem/rust-cache@v2
       - name: cargo check
         run: |
           rm -f Cargo.lock
