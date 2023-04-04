@@ -20,7 +20,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: swatinem/rust-cache@v2
       - name: cargo fmt
-        run: cargo fmt --locked --workspace --all-targets --all-features
+        run: cargo fmt --all -- --check
       - name: cargo clippy
         run: cargo clippy --locked --workspace --all-targets --all-features
 
