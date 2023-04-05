@@ -6,7 +6,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-anyhow = "1"
+anyhow = "1.0.14"
 futures = "0.3.26"
 quic-rpc = { path = "../../..", features = ["quinn-transport", "macros"] }
 quinn = "0.9.3"
