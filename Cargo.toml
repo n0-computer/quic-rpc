@@ -35,7 +35,7 @@ tracing = "0.1"
 version = "0.4.20"
 
 [dev-dependencies]
-anyhow = "1.0.69"
+anyhow = "1"
 async-stream = "0.3.3"
 derive_more = "0.99.17"
 serde = { version = "1", features = ["derive"] }
