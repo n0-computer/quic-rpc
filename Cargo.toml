@@ -21,7 +21,7 @@ flume = { version = "0.10", optional = true }
 futures = "0.3"
 hyper = { version = "0.14", features = ["full"], optional = true }
 pin-project = "1"
-quinn = { version = "0.9", optional = true }
+quinn = { git = "https://github.com/quinn-rs/quinn", rev = "32c80cca473be96577cab99db6404df7e08a31ed", optional = true }
 serde = { version = "1" }
 tokio = { version = "1", features = ["full"] }
 tokio-serde = { version = "0.8", features = ["bincode"], optional = true }
@@ -34,7 +34,7 @@ async-stream = "0.3.3"
 derive_more = "0.99.17"
 serde = { version = "1", features = ["derive"] }
 tokio = { version = "1", features = ["full"] }
-quinn = "0.9.3"
+quinn = { git = "https://github.com/quinn-rs/quinn", rev = "32c80cca473be96577cab99db6404df7e08a31ed" }
 rcgen = "0.10.0"
 rustls = "0.20.8"
 thousands = "0.2.0"
