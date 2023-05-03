@@ -39,7 +39,7 @@ It is still a RPC system in the sense that interactions get initiated by the cli
 ## Non-Goals
 
 - Cross language interop. This is for talking from rust to rust
-- Any kind of verisoning. You have to do this yourself
+- Any kind of versioning. You have to do this yourself
 - Making remote message passing look like local async function calls
 - Being runtime agnostic. This is for tokio
 
@@ -69,7 +69,7 @@ the details and allows you to specify a clean high level interaction protocol
 in the rust type system.
 
 Instead of having a message that explicitly contains some data and the send side
-of an oneshot or mpsc channel for the response, it creates a pair of flume
+of a oneshot or mpsc channel for the response, it creates a pair of flume
 channels internally and sends one end of them to the server. This has some slight
 overhead (2 flume channels vs. 1 oneshot channel) for a RPC interaction. But
 for streaming interactions the overhead is negligible.
