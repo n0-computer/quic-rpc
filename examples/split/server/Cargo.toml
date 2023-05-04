@@ -12,9 +12,9 @@ async-stream = "0.3.3"
 futures = "0.3.26"
 tracing-subscriber = "0.3.16"
 quic-rpc = { path = "../../..", features = ["quinn-transport", "macros"] }
-quinn = "0.9.3"
+quinn = "0.10"
 rcgen = "0.10.0"
-rustls = "0.20.8"
+rustls = "0.21"
 serde = { version = "1", features = ["derive"] }
 tokio = { version = "1", features = ["full"] }
 types = { path = "../types" }
