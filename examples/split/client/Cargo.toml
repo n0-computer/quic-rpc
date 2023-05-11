@@ -9,8 +9,8 @@ edition = "2021"
 anyhow = "1.0.14"
 futures = "0.3.26"
 quic-rpc = { path = "../../..", features = ["quinn-transport", "macros"] }
-quinn = "0.9.3"
-rustls = { version = "0.20.8", features = ["dangerous_configuration"] }
+quinn = "0.10"
+rustls = { version = "0.21", features = ["dangerous_configuration"] }
 tracing-subscriber = "0.3.16"
 serde = { version = "1", features = ["derive"] }
 tokio = { version = "1", features = ["full"] }
