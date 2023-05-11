@@ -11,6 +11,8 @@ pub mod combined;
 pub mod flume;
 #[cfg(feature = "hyper-transport")]
 pub mod hyper;
+#[cfg(feature = "interprocess-transport")]
+pub mod interprocess;
 #[cfg(feature = "quinn-transport")]
 pub mod quinn;
 
