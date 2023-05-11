@@ -63,5 +63,3 @@ required-features = ["flume-transport"]
 [workspace]
 members = ["examples/split/types", "examples/split/server", "examples/split/client"]
 
-[patch.crates-io]
-quinn = { git = "http://github.com/dignifiedquire/quinn", branch = "feat-bytes-transmit" }
