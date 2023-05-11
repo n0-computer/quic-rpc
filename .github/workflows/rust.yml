@@ -8,7 +8,7 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  MSRV: "1.63"
+  MSRV: "1.65"
   RUST_BACKTRACE: 1
 
 jobs:
