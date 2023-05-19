@@ -64,7 +64,10 @@ impl AsyncUdpSocket for FlumeSocket {
         cx: &mut task::Context,
         transmits: &[quinn_udp::Transmit],
     ) -> task::Poll<Result<usize, io::Error>> {
-        self.0.lock().unwrap().poll_send(state, cx, transmits)
+        tracing::debug!("poll_send");
+        let res = self.0.lock().unwrap().poll_send(state, cx, transmits);
+        tracing::debug!("end poll_send");
+        res
     }
 
     fn poll_recv(
@@ -73,7 +76,10 @@ impl AsyncUdpSocket for FlumeSocket {
         bufs: &mut [io::IoSliceMut<'_>],
         meta: &mut [RecvMeta],
     ) -> task::Poll<io::Result<usize>> {
-        self.0.lock().unwrap().poll_recv(cx, bufs, meta)
+        tracing::debug!("poll_recv");
+        let res = self.0.lock().unwrap().poll_recv(cx, bufs, meta);
+        tracing::debug!("end poll_recv");
+        res
     }
 
     fn local_addr(&self) -> io::Result<SocketAddr> {
@@ -84,8 +90,8 @@ impl AsyncUdpSocket for FlumeSocket {
 impl FlumeSocketInner {
     /// Create a pair of connected sockets.
     fn pair(local: SocketAddr, remote: SocketAddr) -> (Self, Self) {
-        let (tx1, rx1) = flume::unbounded();
-        let (tx2, rx2) = flume::unbounded();
+        let (tx1, rx1) = flume::bounded(16);
+        let (tx2, rx2) = flume::bounded(16);
 
         let a = Self {
             receiver: rx1.into_stream(),
@@ -110,13 +116,22 @@ impl FlumeSocketInner {
         cx: &mut task::Context,
         transmits: &[quinn_udp::Transmit],
     ) -> task::Poll<Result<usize, std::io::Error>> {
+        tracing::debug!("{} poll_send", self.local);
         if transmits.is_empty() {
             return task::Poll::Ready(Ok(0));
         }
-        tracing::debug!("sending {} packets", transmits.len());
+        for transmit in transmits.iter() {
+            tracing::debug!(
+                "{} sending packet to {} with ECN {:?}",
+                self.local,
+                transmit.destination,
+                transmit.ecn,
+            );
+        }
         let mut offset = 0;
         let mut pending = false;
         for transmit in transmits {
+            println!("{} send {}", self.local, hex::encode(&transmit.contents));
             let item = Packet {
                 from: self.local,
                 to: transmit.destination,
@@ -144,9 +159,11 @@ impl FlumeSocketInner {
         }
         if offset > 0 {
             // report how many transmits we sent
+            tracing::debug!("{} poll_send returned ready {}", self.local, offset);
             task::Poll::Ready(Ok(offset))
         } else if pending {
             // only return pending if we got a pending for the first slot
+            tracing::debug!("{} poll_send returned pending", self.local);
             task::Poll::Pending
         } else {
             task::Poll::Ready(Err(std::io::Error::new(
@@ -162,6 +179,7 @@ impl FlumeSocketInner {
         bufs: &mut [io::IoSliceMut<'_>],
         meta: &mut [quinn_udp::RecvMeta],
     ) -> task::Poll<io::Result<usize>> {
+        tracing::debug!("{} poll_recv", self.local);
         let n = bufs.len().min(meta.len());
         if n == 0 {
             return task::Poll::Ready(Ok(0));
@@ -180,6 +198,7 @@ impl FlumeSocketInner {
             };
             if packet.to == self.local {
                 let len = packet.data.len();
+                println!("{} recv {}", self.local, hex::encode(&packet.data));
                 bufs[offset][..len].copy_from_slice(&packet.data);
                 meta[offset] = quinn_udp::RecvMeta {
                     addr: packet.from,
@@ -196,10 +215,19 @@ impl FlumeSocketInner {
         }
         if offset > 0 {
             // report how many slots we filled
-            tracing::debug!("received {} packets", n);
+            for i in 0..offset {
+                tracing::debug!(
+                    "{} received packet to {:?} with ecn {:?}",
+                    self.local,
+                    meta[i].dst_ip,
+                    meta[i].ecn
+                );
+            }
+            tracing::debug!("{} poll_recv returned ready {}", self.local, offset);
             task::Poll::Ready(Ok(offset))
         } else if pending {
             // only return pending if we got a pending for the first slot
+            tracing::debug!("{} poll_recv returned pending", self.local);
             task::Poll::Pending
         } else {
             task::Poll::Ready(Err(std::io::Error::new(

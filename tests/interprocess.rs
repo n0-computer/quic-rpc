@@ -107,6 +107,40 @@ fn run_server(server: quinn::Endpoint) -> JoinHandle<anyhow::Result<()>> {
     })
 }
 
+#[tokio::test]
+async fn quinn_interprocess_raw() -> anyhow::Result<()> {
+    tracing_subscriber::fmt::try_init().ok();
+    let Endpoints {
+        client,
+        server,
+        server_addr,
+    } = make_endpoints()?;
+    tracing::debug!("Starting server");
+    let server = tokio::spawn(async move {
+        while let Some(connecting) = server.accept().await {
+            tracing::info!("server accepted connection");
+            let connection = connecting.await?;
+            loop {
+                let (mut send, mut recv) = connection.accept_bi().await?;
+                tracing::info!("server accepted bidi stream");
+                tokio::io::copy(&mut recv, &mut send).await?;
+            }
+        }
+        anyhow::Ok(())
+    });
+    let client = tokio::spawn(async move {
+        let conn = client.connect(server_addr, "localhost".into())?.await?;
+        let (mut send, mut recv) = conn.open_bi().await?;
+        tokio::spawn(async move { tokio::io::copy(&mut recv, &mut tokio::io::stdout()).await });
+        let test = vec![0u8; 1024];
+        send.write_all(&test).await?;
+        anyhow::Ok(())
+    });
+    server.await??;
+    client.await??;
+    Ok(())
+}
+
 // #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[tokio::test]
 async fn quinn_interprocess_channel_bench() -> anyhow::Result<()> {
