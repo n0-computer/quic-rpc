@@ -83,7 +83,7 @@ pub fn make_endpoints() -> anyhow::Result<Endpoints> {
     let client_addr: SocketAddr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 2));
     let (server_config, server_cert) = configure_server()?;
     let client_config = configure_client(&[&server_cert])?;
-    let (server, mut client) = quic_rpc::transport::interprocess::endpoint_pair(
+    let (server, mut client) = quic_rpc::transport::interprocess::endpoint_pair_conn(
         server_addr,
         Some(server_config),
         client_addr,

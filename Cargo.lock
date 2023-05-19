@@ -778,9 +778,9 @@ dependencies = [
 
 [[package]]
 name = "quinn"
-version = "0.10.0"
+version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7ea1a1124c5cf573f76bda8a1c25fd2c1689eb630cdc03fd2e9572f8b3bb1989"
+checksum = "21252f1c0fc131f1b69182db8f34837e8a69737b8251dff75636a9be0518c324"
 dependencies = [
  "bytes",
  "pin-project-lite",
@@ -791,7 +791,6 @@ dependencies = [
  "thiserror",
  "tokio",
  "tracing",
- "webpki",
 ]
 
 [[package]]
