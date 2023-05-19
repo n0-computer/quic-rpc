@@ -21,7 +21,7 @@ use tokio::{
     sync::mpsc,
     task::JoinHandle,
 };
-use tracing::{info, trace};
+use tracing::{debug, info, trace};
 
 #[derive(Debug)]
 pub(super) enum NetworkReadResult {
@@ -199,8 +199,8 @@ impl AsyncUdpSocket for Conn {
 
 struct FlumeSocketInner {
     local: SocketAddr,
-    receiver: flume::r#async::RecvStream<'static, Packet>,
-    sender: flume::r#async::SendSink<'static, Packet>,
+    receiver: Mutex<flume::r#async::RecvStream<'static, Packet>>,
+    sender: Mutex<flume::r#async::SendSink<'static, Packet>>,
 }
 
 impl fmt::Debug for FlumeSocketInner {
@@ -219,7 +219,7 @@ struct Packet {
 }
 
 #[derive(Debug)]
-pub(crate) struct FlumeSocket(Arc<Mutex<FlumeSocketInner>>);
+pub(crate) struct FlumeSocket(Arc<FlumeSocketInner>);
 
 #[derive(Debug)]
 pub(crate) struct LocalAddrHandle(Arc<Mutex<FlumeSocketInner>>);
@@ -242,7 +242,7 @@ impl AsyncUdpSocket for FlumeSocket {
         transmits: &[quinn_udp::Transmit],
     ) -> task::Poll<Result<usize, io::Error>> {
         tracing::debug!("poll_send");
-        let res = self.0.lock().unwrap().poll_send(state, cx, transmits);
+        let res = self.0.poll_send(state, cx, transmits);
         tracing::debug!("end poll_send");
         res
     }
@@ -254,13 +254,13 @@ impl AsyncUdpSocket for FlumeSocket {
         meta: &mut [RecvMeta],
     ) -> task::Poll<io::Result<usize>> {
         tracing::debug!("poll_recv");
-        let res = self.0.lock().unwrap().poll_recv(cx, bufs, meta);
+        let res = self.0.poll_recv(cx, bufs, meta);
         tracing::debug!("end poll_recv");
         res
     }
 
     fn local_addr(&self) -> io::Result<SocketAddr> {
-        self.0.lock().unwrap().local_addr()
+        self.0.local_addr()
     }
 }
 
@@ -271,14 +271,14 @@ impl FlumeSocketInner {
         let (tx2, rx2) = flume::bounded(16);
 
         let a = Self {
-            receiver: rx1.into_stream(),
-            sender: tx2.into_sink(),
+            receiver: Mutex::new(rx1.into_stream()),
+            sender: Mutex::new(tx2.into_sink()),
             local,
         };
 
         let b = Self {
-            receiver: rx2.into_stream(),
-            sender: tx1.into_sink(),
+            receiver: Mutex::new(rx2.into_stream()),
+            sender: Mutex::new(tx1.into_sink()),
             local: remote,
         };
 
@@ -288,12 +288,12 @@ impl FlumeSocketInner {
 
 impl FlumeSocketInner {
     fn poll_send(
-        &mut self,
+        &self,
         _state: &quinn_udp::UdpState,
         cx: &mut task::Context,
         transmits: &[quinn_udp::Transmit],
     ) -> task::Poll<Result<usize, std::io::Error>> {
-        tracing::debug!("{} poll_send", self.local);
+        tracing::debug!("{} poll_send {}", self.local, transmits.len());
         if transmits.is_empty() {
             return task::Poll::Ready(Ok(0));
         }
@@ -314,10 +314,12 @@ impl FlumeSocketInner {
                 to: transmit.destination,
                 data: transmit.contents.clone(),
             };
-            match self.sender.poll_ready_unpin(cx) {
+            debug!("calling poll_ready_unpin");
+            let res = self.sender.lock().unwrap().poll_ready_unpin(cx);
+            match res {
                 task::Poll::Ready(Ok(())) => {
                     // ready to send
-                    if self.sender.start_send_unpin(item).is_err() {
+                    if self.sender.lock().unwrap().start_send_unpin(item).is_err() {
                         // disconnected
                         break;
                     }
@@ -335,6 +337,14 @@ impl FlumeSocketInner {
             offset += 1;
         }
         if offset > 0 {
+            // call poll_flush_unpin only once.
+            if let task::Poll::Ready(Err(_)) = self.sender.lock().unwrap().poll_flush_unpin(cx) {
+                // disconnected
+                return task::Poll::Ready(Err(std::io::Error::new(
+                    std::io::ErrorKind::UnexpectedEof,
+                    "all receivers dropped",
+                )));
+            }
             // report how many transmits we sent
             tracing::debug!("{} poll_send returned ready {}", self.local, offset);
             task::Poll::Ready(Ok(offset))
@@ -351,13 +361,13 @@ impl FlumeSocketInner {
     }
 
     fn poll_recv(
-        &mut self,
+        &self,
         cx: &mut std::task::Context,
         bufs: &mut [io::IoSliceMut<'_>],
         meta: &mut [quinn_udp::RecvMeta],
     ) -> task::Poll<io::Result<usize>> {
-        tracing::debug!("{} poll_recv", self.local);
         let n = bufs.len().min(meta.len());
+        tracing::debug!("{} poll_recv {}", self.local, n);
         if n == 0 {
             return task::Poll::Ready(Ok(0));
         }
@@ -365,7 +375,7 @@ impl FlumeSocketInner {
         let mut pending = false;
         // try to fill as many slots as possible
         while offset < n {
-            let packet = match Pin::new(&mut self.receiver).poll_next(cx) {
+            let packet = match self.receiver.lock().unwrap().poll_next_unpin(cx) {
                 task::Poll::Ready(Some(recv)) => recv,
                 task::Poll::Ready(None) => break,
                 task::Poll::Pending => {
@@ -376,14 +386,15 @@ impl FlumeSocketInner {
             if packet.to == self.local {
                 let len = packet.data.len();
                 trace!("{} recv {}", self.local, hex::encode(&packet.data));
-                bufs[offset][..len].copy_from_slice(&packet.data);
-                meta[offset] = quinn_udp::RecvMeta {
+                let m = quinn_udp::RecvMeta {
                     addr: packet.from,
                     len,
                     stride: len,
                     ecn: None,
                     dst_ip: Some(self.local.ip()),
                 };
+                bufs[offset][..len].copy_from_slice(&packet.data);
+                meta[offset] = m;
                 offset += 1;
             } else {
                 // not for us, ignore
@@ -442,8 +453,8 @@ pub fn endpoint_pair(
     bc: Option<quinn::ServerConfig>,
 ) -> io::Result<(quinn::Endpoint, quinn::Endpoint)> {
     let (socket_a, socket_b) = FlumeSocketInner::pair(a, b);
-    let socket_a = FlumeSocket(Arc::new(Mutex::new(socket_a)));
-    let socket_b = FlumeSocket(Arc::new(Mutex::new(socket_b)));
+    let socket_a = FlumeSocket(Arc::new(socket_a));
+    let socket_b = FlumeSocket(Arc::new(socket_b));
     Ok((make_endpoint(socket_a, ac)?, make_endpoint(socket_b, bc)?))
 }
 
@@ -499,15 +510,18 @@ pub fn endpoint_pair_conn(
             for transmit in msg {
                 let len = transmit.contents.len();
                 trace!("a -> b {}", len);
+                assert!(transmit.destination == b);
+                let meta = RecvMeta {
+                    addr: a,
+                    len,
+                    stride: len,
+                    ecn: None,
+                    dst_ip: Some(b.ip()),
+                };
+                println!("a -> b {:?}", meta);
                 b_in_sender
                     .send(NetworkReadResult::Ok {
-                        meta: RecvMeta {
-                            addr: a,
-                            len,
-                            stride: len,
-                            ecn: None,
-                            dst_ip: Some(b.ip()),
-                        },
+                        meta,
                         bytes: transmit.contents,
                     })
                     .unwrap();
@@ -521,17 +535,20 @@ pub fn endpoint_pair_conn(
     tokio::spawn(async move {
         while let Some(msg) = b_out_receiver.recv().await {
             for transmit in msg {
-                trace!("b -> a {}", transmit.contents.len());
                 let len = transmit.contents.len();
+                trace!("b -> a {}", len);
+                assert!(transmit.destination == a);
+                let meta = RecvMeta {
+                    addr: b,
+                    len,
+                    stride: len,
+                    ecn: None,
+                    dst_ip: Some(a.ip()),
+                };
+                println!("b -> a {:?}", meta);
                 a_in_sender
                     .send(NetworkReadResult::Ok {
-                        meta: RecvMeta {
-                            addr: b,
-                            len,
-                            stride: len,
-                            ecn: None,
-                            dst_ip: Some(a.ip()),
-                        },
+                        meta,
                         bytes: transmit.contents,
                     })
                     .unwrap();
@@ -629,11 +646,11 @@ where
         }
         Ok(())
     });
-    let socket = FlumeSocket(Arc::new(Mutex::new(FlumeSocketInner {
-        receiver: in_recv.into_stream(),
-        sender: out_send.into_sink(),
+    let socket = FlumeSocket(Arc::new(FlumeSocketInner {
+        receiver: Mutex::new(in_recv.into_stream()),
+        sender: Mutex::new(out_send.into_sink()),
         local,
-    })));
+    }));
     let endpoint = make_endpoint(socket, server_config)?;
     Ok((endpoint, task))
 }
