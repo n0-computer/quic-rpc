@@ -5,22 +5,19 @@ use std::{
     fmt::{self, Debug},
     io,
     net::SocketAddr,
-    ops::Deref,
     sync::{Arc, Mutex},
-    task::{self, Context, Poll, Waker},
+    task,
 };
 
 use bytes::{Buf, Bytes, BytesMut};
 use futures::{SinkExt, StreamExt};
 use quinn::{AsyncUdpSocket, Endpoint};
-use quinn_udp::{RecvMeta, Transmit};
+use quinn_udp::RecvMeta;
 use tokio::{
     io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
     select,
-    sync::mpsc,
     task::JoinHandle,
 };
-use tracing::{debug, trace};
 
 struct FlumeSocketInner {
     local: SocketAddr,
@@ -112,28 +109,17 @@ impl FlumeSocketInner {
         cx: &mut task::Context,
         transmits: &[quinn_udp::Transmit],
     ) -> task::Poll<Result<usize, std::io::Error>> {
-        tracing::debug!("{} poll_send {}", self.local, transmits.len());
         if transmits.is_empty() {
             return task::Poll::Ready(Ok(0));
-        }
-        for transmit in transmits.iter() {
-            tracing::debug!(
-                "{} sending packet to {} with ECN {:?}",
-                self.local,
-                transmit.destination,
-                transmit.ecn,
-            );
         }
         let mut offset = 0;
         let mut pending = false;
         for transmit in transmits {
-            trace!("{} send {}", self.local, hex::encode(&transmit.contents));
             let item = Packet {
                 from: self.local,
                 to: transmit.destination,
                 data: transmit.contents.clone(),
             };
-            debug!("calling poll_ready_unpin");
             let res = self.sender.poll_ready_unpin(cx);
             match res {
                 task::Poll::Ready(Ok(())) => {
@@ -165,11 +151,9 @@ impl FlumeSocketInner {
                 )));
             }
             // report how many transmits we sent
-            tracing::debug!("{} poll_send returned ready {}", self.local, offset);
             task::Poll::Ready(Ok(offset))
         } else if pending {
             // only return pending if we got a pending for the first slot
-            tracing::debug!("{} poll_send returned pending", self.local);
             task::Poll::Pending
         } else {
             task::Poll::Ready(Err(std::io::Error::new(
@@ -186,7 +170,6 @@ impl FlumeSocketInner {
         meta: &mut [quinn_udp::RecvMeta],
     ) -> task::Poll<io::Result<usize>> {
         let n = bufs.len().min(meta.len());
-        tracing::debug!("{} poll_recv {}", self.local, n);
         if n == 0 {
             return task::Poll::Ready(Ok(0));
         }
@@ -204,7 +187,6 @@ impl FlumeSocketInner {
             };
             if packet.to == self.local {
                 let len = packet.data.len();
-                trace!("{} recv {}", self.local, hex::encode(&packet.data));
                 let m = quinn_udp::RecvMeta {
                     addr: packet.from,
                     len,
@@ -222,19 +204,9 @@ impl FlumeSocketInner {
         }
         if offset > 0 {
             // report how many slots we filled
-            for i in 0..offset {
-                tracing::debug!(
-                    "{} received packet to {:?} with ecn {:?}",
-                    self.local,
-                    meta[i].dst_ip,
-                    meta[i].ecn
-                );
-            }
-            tracing::debug!("{} poll_recv returned ready {}", self.local, offset);
             task::Poll::Ready(Ok(offset))
         } else if pending {
             // only return pending if we got a pending for the first slot
-            tracing::debug!("{} poll_recv returned pending", self.local);
             task::Poll::Pending
         } else {
             task::Poll::Ready(Err(std::io::Error::new(
@@ -314,6 +286,7 @@ where
     let (in_send, in_recv) = flume::bounded::<Packet>(32);
     let mut out_recv = out_recv.into_stream().ready_chunks(16);
     let task = tokio::task::spawn(async move {
+        tracing::debug!("{} running forwarder task to {}", local, remote);
         let mut buffer = BytesMut::with_capacity(65535);
         loop {
             buffer.reserve(1024 * 32);
@@ -321,6 +294,7 @@ where
                 biased;
                 // try to send all pending packets before reading more
                 Some(packets) = out_recv.next() => {
+                    tracing::debug!("{} sending {} packets", local, packets.len());
                     for packet in packets {
                         if packet.to == remote {
                             let len: u16 = packet.data.len().try_into().unwrap();

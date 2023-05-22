@@ -4,9 +4,10 @@ use std::{
     sync::Arc,
 };
 
-use quic_rpc::{RpcClient, RpcServer};
+use quic_rpc::{transport::interprocess::tokio_io_endpoint, RpcClient, RpcServer};
 use quinn::{ClientConfig, Endpoint, ServerConfig};
-use tokio::task::JoinHandle;
+use tokio::{io::AsyncWriteExt, task::JoinHandle};
+use tokio_util::compat::{FuturesAsyncReadCompatExt, FuturesAsyncWriteCompatExt};
 
 mod math;
 use math::*;
@@ -108,7 +109,7 @@ fn run_server(server: quinn::Endpoint) -> JoinHandle<anyhow::Result<()>> {
 }
 
 #[tokio::test]
-async fn quinn_interprocess_raw() -> anyhow::Result<()> {
+async fn quinn_flume_socket_raw() -> anyhow::Result<()> {
     tracing_subscriber::fmt::try_init().ok();
     let Endpoints {
         client,
@@ -143,7 +144,7 @@ async fn quinn_interprocess_raw() -> anyhow::Result<()> {
 
 // #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[tokio::test]
-async fn quinn_interprocess_channel_bench() -> anyhow::Result<()> {
+async fn quinn_flume_channel_bench() -> anyhow::Result<()> {
     tracing_subscriber::fmt::try_init().ok();
     let Endpoints {
         client,
@@ -163,7 +164,7 @@ async fn quinn_interprocess_channel_bench() -> anyhow::Result<()> {
 }
 
 #[tokio::test]
-async fn quinn_interprocess_channel_smoke() -> anyhow::Result<()> {
+async fn quinn_flume_channel_smoke() -> anyhow::Result<()> {
     tracing_subscriber::fmt::try_init().ok();
     let Endpoints {
         client,
@@ -175,5 +176,200 @@ async fn quinn_interprocess_channel_smoke() -> anyhow::Result<()> {
         quic_rpc::transport::quinn::QuinnConnection::new(client, server_addr, "localhost".into());
     smoke_test(client_connection).await?;
     server_handle.abort();
+    Ok(())
+}
+
+/// Basic test of the interprocess crate.
+/// Just sends a message from client to server and back.
+#[tokio::test]
+async fn interprocess_accept_connect_raw() -> anyhow::Result<()> {
+    tracing_subscriber::fmt::try_init().ok();
+    use interprocess::local_socket::tokio::*;
+    let dir = tempfile::tempdir()?;
+    let socket_name = dir.path().join("interprocess.socket");
+    let socket = LocalSocketListener::bind(socket_name.clone())?;
+    let socket_name_2 = socket_name.clone();
+    let server = tokio::spawn(async move {
+        let stream = socket.accept().await?;
+        let (r, w) = stream.into_split();
+        let mut r = r.compat();
+        let mut w = w.compat_write();
+        tokio::io::copy(&mut r, &mut w).await?;
+        anyhow::Ok(())
+    });
+    let client = tokio::spawn(async move {
+        let stream = LocalSocketStream::connect(socket_name_2.clone()).await?;
+        let (r, w) = stream.into_split();
+        let mut r = r.compat();
+        let mut w = w.compat_write();
+        w.write_all(b"hello").await?;
+        w.write_all(b"world").await?;
+        let validator = tokio::spawn(async move {
+            let mut out = Vec::<u8>::new();
+            tokio::io::copy(&mut r, &mut out).await?;
+            let pass = out == b"helloworld";
+            anyhow::Ok(pass)
+        });
+        drop(w);
+        validator.await?
+    });
+    server.await??;
+    assert!(client.await??, "echo test failed");
+    Ok(())
+}
+
+/// Test of quinn on top of interprocess.
+/// Just sends a message from client to server and back.
+#[tokio::test]
+async fn interprocess_quinn_accept_connect_raw() -> anyhow::Result<()> {
+    tracing_subscriber::fmt::try_init().ok();
+    use interprocess::local_socket::tokio::*;
+    let (server_config, server_certs) = configure_server()?;
+    let client_config = configure_client(&[&server_certs])?;
+    tracing_subscriber::fmt::try_init().ok();
+    let dir = tempfile::tempdir()?;
+    let socket_name = dir.path().join("interprocess.socket");
+    let socket = LocalSocketListener::bind(socket_name.clone())?;
+    let local = SocketAddrV4::new(Ipv4Addr::LOCALHOST, 1).into();
+    let remote = SocketAddrV4::new(Ipv4Addr::LOCALHOST, 2).into();
+    let server = tokio::spawn(async move {
+        let stream = socket.accept().await?;
+        let (r, w) = stream.into_split();
+        let r = r.compat();
+        let w = w.compat_write();
+        let (endpoint, _task) = tokio_io_endpoint(r, w, remote, local, Some(server_config))?;
+        tracing::debug!("server accepting connection");
+        let connection = endpoint.accept().await.unwrap().await?;
+        tracing::debug!("server accepted connection");
+        let (mut send, mut recv) = connection.accept_bi().await?;
+        tracing::debug!("server accepted bi stream");
+        tracing::debug!("server copying");
+        let n = tokio::io::copy(&mut recv, &mut send).await?;
+        tracing::debug!("server done copying {} bytes", n);
+        // need to keep the connection alive until the client is done
+        anyhow::Ok(connection)
+    });
+    let client = tokio::spawn(async move {
+        let stream = LocalSocketStream::connect(socket_name).await?;
+        let (r, w) = stream.into_split();
+        let r = r.compat();
+        let w = w.compat_write();
+        let (mut endpoint, _task) = tokio_io_endpoint(r, w, local, remote, None)?;
+        endpoint.set_default_client_config(client_config);
+        tracing::debug!("client connecting to server at {} using localhost", remote);
+        let connection = endpoint.connect(remote, "localhost")?.await?;
+        tracing::debug!("client got connection");
+        let (mut send, mut recv) = connection.open_bi().await?;
+        tracing::debug!("client got bi stream");
+        let validator = tokio::spawn(async move {
+            let mut out = Vec::<u8>::new();
+            tracing::debug!("client validator reading data");
+            tokio::io::copy(&mut recv, &mut out).await.ok();
+            tracing::debug!("client validator done reading data {}", out.len());
+            let pass = out == b"helloworld";
+            anyhow::Ok(pass)
+        });
+        tracing::debug!("client sending data");
+        send.write_all(b"hello").await?;
+        send.write_all(b"world").await?;
+        send.finish().await?;
+        tracing::debug!("client finished sending data");
+        drop(send);
+        validator.await?
+    });
+    let connection = server.await??;
+    assert!(client.await??, "echo test failed");
+    drop(connection);
+    Ok(())
+}
+
+/// Smoke test of quinn on top of interprocess.
+#[tokio::test]
+async fn interprocess_quinn_smoke() -> anyhow::Result<()> {
+    tracing_subscriber::fmt::try_init().ok();
+    use interprocess::local_socket::tokio::*;
+    let (server_config, server_certs) = configure_server()?;
+    let client_config = configure_client(&[&server_certs])?;
+    tracing_subscriber::fmt::try_init().ok();
+    let dir = tempfile::tempdir()?;
+    let socket_name = dir.path().join("interprocess.socket");
+    let socket = LocalSocketListener::bind(socket_name.clone())?;
+    let local = SocketAddrV4::new(Ipv4Addr::LOCALHOST, 1).into();
+    let remote = SocketAddrV4::new(Ipv4Addr::LOCALHOST, 2).into();
+    let server = tokio::spawn(async move {
+        let stream = socket.accept().await?;
+        let (r, w) = stream.into_split();
+        let r = r.compat();
+        let w = w.compat_write();
+        let (endpoint, _task) = tokio_io_endpoint(r, w, remote, local, Some(server_config))?;
+        // run rpc server on endpoint
+        tracing::debug!("creating test rpc server");
+        let _server_task = run_server(endpoint);
+        anyhow::Ok(())
+    });
+    let client = tokio::spawn(async move {
+        let stream = LocalSocketStream::connect(socket_name).await?;
+        let (r, w) = stream.into_split();
+        let r = r.compat();
+        let w = w.compat_write();
+        let (mut endpoint, _task) = tokio_io_endpoint(r, w, local, remote, None)?;
+        endpoint.set_default_client_config(client_config);
+        tracing::debug!(
+            "creating test rpc client, connecting to server at {} using localhost",
+            remote
+        );
+        let client: quic_rpc::transport::quinn::QuinnConnection<ComputeResponse, ComputeRequest> =
+            quic_rpc::transport::quinn::QuinnConnection::new(endpoint, remote, "localhost".into());
+        smoke_test(client).await?;
+        anyhow::Ok(())
+    });
+    server.await??;
+    client.await??;
+    Ok(())
+}
+
+/// Bench test of quinn on top of interprocess.
+#[tokio::test]
+async fn interprocess_quinn_bench() -> anyhow::Result<()> {
+    tracing_subscriber::fmt::try_init().ok();
+    use interprocess::local_socket::tokio::*;
+    let (server_config, server_certs) = configure_server()?;
+    let client_config = configure_client(&[&server_certs])?;
+    tracing_subscriber::fmt::try_init().ok();
+    let dir = tempfile::tempdir()?;
+    let socket_name = dir.path().join("interprocess.socket");
+    let socket = LocalSocketListener::bind(socket_name.clone())?;
+    let local = SocketAddrV4::new(Ipv4Addr::LOCALHOST, 1).into();
+    let remote = SocketAddrV4::new(Ipv4Addr::LOCALHOST, 2).into();
+    let server = tokio::spawn(async move {
+        let stream = socket.accept().await?;
+        let (r, w) = stream.into_split();
+        let r = r.compat();
+        let w = w.compat_write();
+        let (endpoint, _task) = tokio_io_endpoint(r, w, remote, local, Some(server_config))?;
+        // run rpc server on endpoint
+        tracing::debug!("creating test rpc server");
+        let _server_task = run_server(endpoint);
+        anyhow::Ok(())
+    });
+    let client = tokio::spawn(async move {
+        let stream = LocalSocketStream::connect(socket_name).await?;
+        let (r, w) = stream.into_split();
+        let r = r.compat();
+        let w = w.compat_write();
+        let (mut endpoint, _task) = tokio_io_endpoint(r, w, local, remote, None)?;
+        endpoint.set_default_client_config(client_config);
+        tracing::debug!(
+            "creating test rpc client, connecting to server at {} using localhost",
+            remote
+        );
+        let client: quic_rpc::transport::quinn::QuinnConnection<ComputeResponse, ComputeRequest> =
+            quic_rpc::transport::quinn::QuinnConnection::new(endpoint, remote, "localhost".into());
+        let client = RpcClient::new(client);
+        bench(client, 50000).await?;
+        anyhow::Ok(())
+    });
+    server.await??;
+    client.await??;
     Ok(())
 }
