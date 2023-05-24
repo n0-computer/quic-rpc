@@ -33,6 +33,18 @@ jobs:
       - name: cargo test
         run: cargo test --locked --workspace --all-features --bins --tests --examples
 
+  wasm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          target: wasm32-unknown-unknown
+          override: true
+      - uses: swatinem/rust-cache@v2
+      - name: cargo test
+        run: cargo build --locked --no-default-features --features flume-transport --target wasm32-unknown-unknown
+
   msrv:
     runs-on: ubuntu-latest
     steps:
