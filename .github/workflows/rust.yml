@@ -43,7 +43,7 @@ jobs:
           override: true
       - uses: swatinem/rust-cache@v2
       - name: cargo test
-        run: cargo build --locked --workspace --no-default-features --features flume-transport --target wasm32-unknown-unknown
+        run: cargo build --locked --no-default-features --features flume-transport --target wasm32-unknown-unknown
 
   msrv:
     runs-on: ubuntu-latest
