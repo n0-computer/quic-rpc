@@ -110,8 +110,12 @@ async fn quinn_channel_bench() -> anyhow::Result<()> {
     tracing::debug!("Starting server");
     let server_handle = run_server(server);
     tracing::debug!("Starting client");
-    let client =
-        quic_rpc::transport::quinn::QuinnConnection::new(client, server_addr, "localhost".into());
+    let client = quic_rpc::transport::quinn::QuinnConnection::new(
+        client,
+        server_addr,
+        "localhost".into(),
+        quic_rpc::transport::quinn::AsapReconnecter::new()
+    );
     let client = RpcClient::<ComputeService, _>::new(client);
     tracing::debug!("Starting benchmark");
     bench(client, 50000).await?;
@@ -128,8 +132,12 @@ async fn quinn_channel_smoke() -> anyhow::Result<()> {
         server_addr,
     } = make_endpoints(12346)?;
     let server_handle = run_server(server);
-    let client_connection =
-        quic_rpc::transport::quinn::QuinnConnection::new(client, server_addr, "localhost".into());
+    let client_connection = quic_rpc::transport::quinn::QuinnConnection::new(
+        client,
+        server_addr,
+        "localhost".into(),
+        quic_rpc::transport::quinn::AsapReconnecter::new()
+    );
     smoke_test(client_connection).await?;
     server_handle.abort();
     Ok(())
