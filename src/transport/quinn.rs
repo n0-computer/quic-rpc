@@ -51,6 +51,33 @@ impl Drop for ServerEndpointInner {
     }
 }
 
+/// Trait spcifing delay before establishing connection
+pub trait ReconnectPolicy {
+    /// Output of wait
+    type Output: std::future::Future<Output = ()> + Send;
+
+    /// Method called just before trying to establish new connection
+    fn wait(&mut self) -> Self::Output;
+    /// Method used to notify that connection was established
+    fn reset(&mut self);
+}
+
+/// Reconnect policy that performs no waitng
+pub struct AsapReconnecter;
+
+impl AsapReconnecter {
+
+    /// Creates new instance of no wait reconnect policy
+    pub fn new() -> Self { Self {} }
+}
+
+impl ReconnectPolicy for AsapReconnecter {
+    type Output = std::future::Ready<()>;
+
+    fn wait(&mut self) -> Self::Output { std::future::ready(()) }
+    fn reset(&mut self) { }
+}
+
 /// A server endpoint using a quinn connection
 #[derive(Debug)]
 pub struct QuinnServerEndpoint<In: RpcMessage, Out: RpcMessage> {
@@ -136,7 +163,7 @@ impl<In: RpcMessage, Out: RpcMessage> QuinnServerEndpoint<In, Out> {
     pub fn handle_connections(
         incoming: flume::Receiver<quinn::Connection>,
         local_addr: SocketAddr,
-    ) -> Self {
+        ) -> Self {
         let (sender, receiver) = flume::bounded(16);
         let task = tokio::spawn(async move {
             // just grab all connections and spawn a handler for each one
@@ -162,7 +189,7 @@ impl<In: RpcMessage, Out: RpcMessage> QuinnServerEndpoint<In, Out> {
     pub fn handle_substreams(
         receiver: flume::Receiver<SocketInner>,
         local_addr: SocketAddr,
-    ) -> Self {
+        ) -> Self {
         Self {
             inner: Arc::new(ServerEndpointInner {
                 endpoint: None,
@@ -254,7 +281,7 @@ impl<In: RpcMessage, Out: RpcMessage> QuinnConnection<In, Out> {
     async fn single_connection_handler_inner(
         connection: quinn::Connection,
         requests: flume::Receiver<oneshot::Sender<Result<SocketInner, quinn::ConnectionError>>>,
-    ) -> result::Result<(), flume::RecvError> {
+        ) -> result::Result<(), flume::RecvError> {
         loop {
             tracing::debug!("Awaiting request for new bidi substream...");
             let request = requests.recv_async().await?;
@@ -279,7 +306,7 @@ impl<In: RpcMessage, Out: RpcMessage> QuinnConnection<In, Out> {
     async fn single_connection_handler(
         connection: quinn::Connection,
         requests: flume::Receiver<oneshot::Sender<Result<SocketInner, quinn::ConnectionError>>>,
-    ) {
+        ) {
         if Self::single_connection_handler_inner(connection, requests)
             .await
             .is_err()
@@ -295,19 +322,22 @@ impl<In: RpcMessage, Out: RpcMessage> QuinnConnection<In, Out> {
     /// It will run until the send side of the channel is dropped.
     /// All other errors are logged and handled internally.
     /// It will try to keep a connection open at all times.
-    async fn reconnect_handler_inner(
+    async fn reconnect_handler_inner<T>(
         endpoint: quinn::Endpoint,
         addr: SocketAddr,
         name: String,
         requests: flume::Receiver<oneshot::Sender<Result<SocketInner, quinn::ConnectionError>>>,
-    ) -> result::Result<(), flume::RecvError> {
+        mut reconnecter: T
+    ) -> result::Result<(), flume::RecvError>
+    where T: ReconnectPolicy + Send + Sync + 'static {
         'outer: loop {
+            tracing::debug!("Delying re-connection");
+            reconnecter.wait().await;
             tracing::debug!("Connecting to {} as {}", addr, name);
             let connecting = match endpoint.connect(addr, &name) {
                 Ok(connecting) => connecting,
                 Err(e) => {
                     tracing::warn!("error calling connect: {}", e);
-                    // try again. Maybe delay?
                     continue;
                 }
             };
@@ -315,7 +345,6 @@ impl<In: RpcMessage, Out: RpcMessage> QuinnConnection<In, Out> {
                 Ok(connection) => connection,
                 Err(e) => {
                     tracing::warn!("error awaiting connect: {}", e);
-                    // try again. Maybe delay?
                     continue;
                 }
             };
@@ -326,14 +355,13 @@ impl<In: RpcMessage, Out: RpcMessage> QuinnConnection<In, Out> {
                 match connection.open_bi().await {
                     Ok(pair) => {
                         tracing::debug!("Bidi substream opened");
+                        reconnecter.reset();
                         if request.send(Ok(pair)).is_err() {
                             tracing::debug!("requester dropped");
                         }
                     }
                     Err(e) => {
-                        tracing::warn!("error opening bidi substream: {}", e);
-                        tracing::warn!("recreating connection");
-                        // try again. Maybe delay?
+                        tracing::warn!("recreating connection - error opening bidi substream: {} ", e);
                         continue 'outer;
                     }
                 }
@@ -341,13 +369,14 @@ impl<In: RpcMessage, Out: RpcMessage> QuinnConnection<In, Out> {
         }
     }
 
-    async fn reconnect_handler(
+    async fn reconnect_handler<T>(
         endpoint: quinn::Endpoint,
         addr: SocketAddr,
         name: String,
         requests: flume::Receiver<oneshot::Sender<Result<SocketInner, quinn::ConnectionError>>>,
-    ) {
-        if Self::reconnect_handler_inner(endpoint, addr, name, requests)
+        reconnecter: T
+    ) where T: ReconnectPolicy + Send + Sync + 'static {
+        if Self::reconnect_handler_inner(endpoint, addr, name, requests, reconnecter)
             .await
             .is_err()
         {
@@ -372,13 +401,15 @@ impl<In: RpcMessage, Out: RpcMessage> QuinnConnection<In, Out> {
     }
 
     /// Create a new channel
-    pub fn new(endpoint: quinn::Endpoint, addr: SocketAddr, name: String) -> Self {
+    pub fn new<T>(endpoint: quinn::Endpoint, addr: SocketAddr, name: String, reconnecter: T)
+    -> Self where T: ReconnectPolicy + Send + Sync + 'static {
         let (sender, receiver) = flume::bounded(16);
         let task = tokio::spawn(Self::reconnect_handler(
             endpoint.clone(),
             addr,
             name,
             receiver,
+            reconnecter,
         ));
         Self {
             inner: Arc::new(ClientConnectionInner {
@@ -467,7 +498,7 @@ impl<Out: Serialize> Sink<Out> for SendSink<Out> {
     fn poll_ready(
         self: Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<(), Self::Error>> {
+        ) -> std::task::Poll<Result<(), Self::Error>> {
         self.project().0.poll_ready_unpin(cx)
     }
 
@@ -478,14 +509,14 @@ impl<Out: Serialize> Sink<Out> for SendSink<Out> {
     fn poll_flush(
         self: Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<(), Self::Error>> {
+        ) -> std::task::Poll<Result<(), Self::Error>> {
         self.project().0.poll_flush_unpin(cx)
     }
 
     fn poll_close(
         self: Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<(), Self::Error>> {
+        ) -> std::task::Poll<Result<(), Self::Error>> {
         self.project().0.poll_close_unpin(cx)
     }
 }
@@ -524,7 +555,7 @@ impl<In: DeserializeOwned> Stream for RecvStream<In> {
     fn poll_next(
         self: Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Option<Self::Item>> {
+        ) -> std::task::Poll<Option<Self::Item>> {
         self.project().0.poll_next_unpin(cx)
     }
 }
@@ -621,7 +652,7 @@ impl<In: RpcMessage, Out: RpcMessage> Future for AcceptBiFuture<In, Out> {
     fn poll(
         self: Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Self::Output> {
+        ) -> std::task::Poll<Self::Output> {
         self.project().0.poll_unpin(cx).map(|conn| {
             let (send, recv) = conn.map_err(|e| {
                 tracing::warn!("accept_bi: error receiving connection: {}", e);
@@ -674,7 +705,7 @@ impl std::error::Error for CreateChannelError {}
 /// Get the handshake data from a quinn connection that uses rustls.
 pub fn get_handshake_data(
     connection: &quinn::Connection,
-) -> Option<quinn::crypto::rustls::HandshakeData> {
+    ) -> Option<quinn::crypto::rustls::HandshakeData> {
     let handshake_data = connection.handshake_data()?;
     let tls_connection = handshake_data.downcast_ref::<quinn::crypto::rustls::HandshakeData>()?;
     Some(quinn::crypto::rustls::HandshakeData {
