@@ -300,7 +300,7 @@ impl<In: RpcMessage, Out: RpcMessage> QuinnConnection<In, Out> {
         addr: SocketAddr,
         name: String,
         requests: flume::Receiver<oneshot::Sender<Result<SocketInner, quinn::ConnectionError>>>,
-    ) -> result::Result<(), flume::RecvError> {
+    ) {
         'outer: loop {
             tracing::debug!("Connecting to {} as {}", addr, name);
             let connecting = match endpoint.connect(addr, &name) {
@@ -321,7 +321,14 @@ impl<In: RpcMessage, Out: RpcMessage> QuinnConnection<In, Out> {
             };
             loop {
                 tracing::debug!("Awaiting request for new bidi substream...");
-                let request = requests.recv_async().await?;
+                let request = match requests.recv_async().await {
+                    Ok(request) => request,
+                    Err(_) => {
+                        tracing::debug!("client dropped");
+                        connection.close(0u32.into(), b"requester dropped");
+                        break;
+                    }
+                };
                 tracing::debug!("Got request for new bidi substream");
                 match connection.open_bi().await {
                     Ok(pair) => {
@@ -347,14 +354,8 @@ impl<In: RpcMessage, Out: RpcMessage> QuinnConnection<In, Out> {
         name: String,
         requests: flume::Receiver<oneshot::Sender<Result<SocketInner, quinn::ConnectionError>>>,
     ) {
-        if Self::reconnect_handler_inner(endpoint, addr, name, requests)
-            .await
-            .is_err()
-        {
-            tracing::info!("Reconnect handler finished");
-        } else {
-            unreachable!()
-        }
+        Self::reconnect_handler_inner(endpoint, addr, name, requests).await;
+        tracing::info!("Reconnect handler finished");
     }
 
     /// Create a new channel
