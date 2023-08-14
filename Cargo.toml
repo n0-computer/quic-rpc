@@ -1,6 +1,6 @@
 [package]
 name = "quic-rpc"
-version = "0.6.0"
+version = "0.6.1"
 edition = "2021"
 authors = ["Rüdiger Klaehn <rklaehn@protonmail.com>"]
 keywords = ["api", "protocol", "network", "rpc"]
@@ -23,7 +23,7 @@ hyper = { version = "0.14.16", features = ["full"], optional = true }
 pin-project = "1"
 quinn = { version = "0.10", optional = true }
 serde = { version = "1.0.103" }
-tokio = { version = "1", features = ["full"] }
+tokio = { version = "1", default-features = false, features = ["macros"] }
 tokio-serde = { version = "0.8", features = ["bincode"], optional = true }
 tokio-util = { version = "0.7", features = ["codec", "compat"], optional = true }
 tracing = "0.1"
