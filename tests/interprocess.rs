@@ -127,7 +127,7 @@ async fn quinn_flume_socket_raw() -> anyhow::Result<()> {
         anyhow::Ok(())
     });
     let client = tokio::spawn(async move {
-        let conn = client.connect(server_addr, "localhost".into())?.await?;
+        let conn = client.connect(server_addr, "localhost")?.await?;
         let (mut send, mut recv) = conn.open_bi().await?;
         tracing::info!("client connected");
         tokio::spawn(async move {
@@ -147,8 +147,7 @@ async fn quinn_flume_socket_raw() -> anyhow::Result<()> {
     Ok(())
 }
 
-// #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn quinn_flume_channel_bench() -> anyhow::Result<()> {
     tracing_subscriber::fmt::try_init().ok();
     let Endpoints {
@@ -168,7 +167,7 @@ async fn quinn_flume_channel_bench() -> anyhow::Result<()> {
     Ok(())
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn quinn_flume_channel_smoke() -> anyhow::Result<()> {
     tracing_subscriber::fmt::try_init().ok();
     let Endpoints {

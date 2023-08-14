@@ -276,6 +276,7 @@ impl<'a> Iterator for FrameIter<'a> {
 ///
 /// The connection is assumed to be from `local` to `remote`. If you try to
 /// connect to any other address, packets will be dropped.
+#[allow(clippy::type_complexity)]
 pub fn tokio_io_endpoint<R, W>(
     mut r: R,
     mut w: W,
