@@ -84,13 +84,9 @@ pub fn make_endpoints() -> anyhow::Result<Endpoints> {
     let client_addr: SocketAddr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 2));
     let (server_config, server_cert) = configure_server()?;
     let client_config = configure_client(&[&server_cert])?;
-    let (server, mut client) = quic_rpc::transport::interprocess::endpoint_pair(
-        server_addr,
-        Some(server_config),
-        client_addr,
-        None,
-    )
-    .unwrap();
+    let (server, mut client) =
+        quic_rpc::transport::interprocess::endpoint_pair(server_addr, client_addr, server_config)
+            .unwrap();
     client.set_default_client_config(client_config);
     Ok(Endpoints {
         client,
@@ -122,7 +118,7 @@ async fn quinn_flume_socket_raw() -> anyhow::Result<()> {
         while let Some(connecting) = server.accept().await {
             tracing::info!("server accepted connection");
             let connection = connecting.await?;
-            while let Ok((mut send, mut recv)) =  connection.accept_bi().await {
+            while let Ok((mut send, mut recv)) = connection.accept_bi().await {
                 tracing::info!("server accepted bidi stream");
                 tokio::io::copy(&mut recv, &mut send).await?;
                 tracing::info!("server done with bidi stream");
@@ -134,7 +130,7 @@ async fn quinn_flume_socket_raw() -> anyhow::Result<()> {
         let conn = client.connect(server_addr, "localhost".into())?.await?;
         let (mut send, mut recv) = conn.open_bi().await?;
         tracing::info!("client connected");
-        tokio::spawn(async move { 
+        tokio::spawn(async move {
             tracing::info!("outputting data from server");
             tokio::io::copy(&mut recv, &mut tokio::io::stdout()).await?;
             tracing::info!("outputting data from server done");

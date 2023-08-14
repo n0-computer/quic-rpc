@@ -46,10 +46,12 @@ pub(crate) struct FlumeSocket(Arc<Mutex<FlumeSocketInner>>);
 pub(crate) struct LocalAddrHandle(Arc<Mutex<FlumeSocketInner>>);
 
 impl LocalAddrHandle {
+    #[allow(dead_code)]
     pub fn set(&self, addr: SocketAddr) {
         self.0.lock().unwrap().local = addr;
     }
 
+    #[allow(dead_code)]
     pub fn get(&self) -> SocketAddr {
         self.0.lock().unwrap().local
     }
@@ -237,19 +239,18 @@ fn make_endpoint(
 ///
 /// Useful for testing.
 pub fn endpoint_pair(
-    a: SocketAddr,
-    asc: Option<quinn::ServerConfig>,
-    b: SocketAddr,
-    bsc: Option<quinn::ServerConfig>,
+    s: SocketAddr,
+    c: SocketAddr,
+    sc: quinn::ServerConfig,
 ) -> io::Result<(quinn::Endpoint, quinn::Endpoint)> {
-    let (socket_a, socket_b) = FlumeSocketInner::pair(a, b);
+    let (socket_a, socket_b) = FlumeSocketInner::pair(s, c);
     let socket_a = FlumeSocket(Arc::new(Mutex::new(socket_a)));
     let socket_b = FlumeSocket(Arc::new(Mutex::new(socket_b)));
     let ac = EndpointConfig::default();
     let bc = EndpointConfig::default();
     Ok((
-        make_endpoint(socket_a, ac, asc)?,
-        make_endpoint(socket_b, bc, bsc)?,
+        make_endpoint(socket_a, ac, Some(sc))?,
+        make_endpoint(socket_b, bc, None)?,
     ))
 }
 
@@ -281,7 +282,11 @@ pub fn tokio_io_endpoint<R, W>(
     local: SocketAddr,
     remote: SocketAddr,
     server_config: Option<quinn::ServerConfig>,
-) -> io::Result<(Endpoint, JoinHandle<io::Result<()>>, JoinHandle<io::Result<()>>)>
+) -> io::Result<(
+    Endpoint,
+    JoinHandle<io::Result<()>>,
+    JoinHandle<io::Result<()>>,
+)>
 where
     R: AsyncRead + Send + Unpin + 'static,
     W: AsyncWrite + Send + Unpin + 'static,
