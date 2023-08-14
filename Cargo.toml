@@ -54,10 +54,10 @@ tempfile = "3.5.0"
 hyper-transport = ["flume", "hyper", "bincode", "bytes"]
 quinn-transport = ["flume", "quinn", "bincode", "tokio-serde", "tokio-util"]
 flume-transport = ["flume"]
-interprocess-transport = ["quinn-transport", "quinn-udp", "interprocess", "bytes", "tokio-util"]
+interprocess-transport = ["quinn-udp", "interprocess", "bytes", "tokio-util"]
 combined-transport = []
 macros = []
-default = ["interprocess-transport"]
+default = ["quinn-transport", "interprocess-transport"]
 
 [[example]]
 name = "errors"

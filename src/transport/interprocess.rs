@@ -11,11 +11,10 @@ use std::{
 
 use bytes::{Buf, Bytes, BytesMut};
 use futures::{SinkExt, StreamExt};
-use quinn::{AsyncUdpSocket, Endpoint};
+use quinn::{AsyncUdpSocket, Endpoint, EndpointConfig};
 use quinn_udp::RecvMeta;
 use tokio::{
     io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
-    select,
     task::JoinHandle,
 };
 
@@ -223,9 +222,9 @@ impl FlumeSocketInner {
 
 fn make_endpoint(
     socket: FlumeSocket,
+    config: EndpointConfig,
     server_config: Option<quinn::ServerConfig>,
 ) -> io::Result<quinn::Endpoint> {
-    let config = quinn::EndpointConfig::default();
     quinn::Endpoint::new_with_abstract_socket(
         config,
         server_config,
@@ -239,14 +238,19 @@ fn make_endpoint(
 /// Useful for testing.
 pub fn endpoint_pair(
     a: SocketAddr,
-    ac: Option<quinn::ServerConfig>,
+    asc: Option<quinn::ServerConfig>,
     b: SocketAddr,
-    bc: Option<quinn::ServerConfig>,
+    bsc: Option<quinn::ServerConfig>,
 ) -> io::Result<(quinn::Endpoint, quinn::Endpoint)> {
     let (socket_a, socket_b) = FlumeSocketInner::pair(a, b);
     let socket_a = FlumeSocket(Arc::new(Mutex::new(socket_a)));
     let socket_b = FlumeSocket(Arc::new(Mutex::new(socket_b)));
-    Ok((make_endpoint(socket_a, ac)?, make_endpoint(socket_b, bc)?))
+    let ac = EndpointConfig::default();
+    let bc = EndpointConfig::default();
+    Ok((
+        make_endpoint(socket_a, ac, asc)?,
+        make_endpoint(socket_b, bc, bsc)?,
+    ))
 }
 
 struct FrameIter<'a>(&'a mut BytesMut);
@@ -277,7 +281,7 @@ pub fn tokio_io_endpoint<R, W>(
     local: SocketAddr,
     remote: SocketAddr,
     server_config: Option<quinn::ServerConfig>,
-) -> io::Result<(Endpoint, JoinHandle<io::Result<()>>)>
+) -> io::Result<(Endpoint, JoinHandle<io::Result<()>>, JoinHandle<io::Result<()>>)>
 where
     R: AsyncRead + Send + Unpin + 'static,
     W: AsyncWrite + Send + Unpin + 'static,
@@ -285,48 +289,43 @@ where
     let (out_send, out_recv) = flume::bounded::<Packet>(32);
     let (in_send, in_recv) = flume::bounded::<Packet>(32);
     let mut out_recv = out_recv.into_stream().ready_chunks(16);
-    let task = tokio::task::spawn(async move {
+    let sender = tokio::task::spawn(async move {
         tracing::debug!("{} running forwarder task to {}", local, remote);
+        while let Some(packets) = out_recv.next().await {
+            for packet in packets {
+                if packet.to == remote {
+                    let len: u16 = packet.data.len().try_into().unwrap();
+                    w.write_all(&len.to_le_bytes()).await?;
+                    w.write_all(&packet.data).await?;
+                } else {
+                    // not for us, ignore
+                    continue;
+                }
+            }
+        }
+        Ok(())
+    });
+    let receiver = tokio::task::spawn(async move {
         let mut buffer = BytesMut::with_capacity(65535);
         loop {
-            buffer.reserve(1024 * 32);
-            select! {
-                biased;
-                // try to send all pending packets before reading more
-                Some(packets) = out_recv.next() => {
-                    tracing::debug!("{} sending {} packets", local, packets.len());
-                    for packet in packets {
-                        if packet.to == remote {
-                            let len: u16 = packet.data.len().try_into().unwrap();
-                            w.write_all(&len.to_le_bytes()).await?;
-                            w.write_all(&packet.data).await?;
-                        } else {
-                            // not for us, ignore
-                            continue;
-                        }
-                    }
-                }
-                // read more data and split into frames
-                n = r.read_buf(&mut buffer) => {
-                    if n? == 0 {
-                        // eof
-                        break;
-                    }
-                    // split into frames and send all full frames
-                    for item in FrameIter(&mut buffer) {
-                        let packet = Packet {
-                            from: remote,
-                            to: local,
-                            data: item,
-                        };
-                        if in_send.send_async(packet).await.is_err() {
-                            // in_recv dropped
-                            break;
-                        }
-                    }
-                }
-                else => {
-                    // out_recv returned None, so out_send was dropped
+            // read more data and split into frames
+            let n = r.read_buf(&mut buffer).await;
+
+            let n = n?;
+            if n == 0 {
+                // eof
+                break;
+            }
+            tracing::debug!("R {} read {} bytes {}", local, n, buffer.len());
+            // split into frames and send all full frames
+            for item in FrameIter(&mut buffer) {
+                let packet = Packet {
+                    from: remote,
+                    to: local,
+                    data: item,
+                };
+                if in_send.send_async(packet).await.is_err() {
+                    // in_recv dropped
                     break;
                 }
             }
@@ -338,6 +337,7 @@ where
         sender: out_send.into_sink(),
         local,
     })));
-    let endpoint = make_endpoint(socket, server_config)?;
-    Ok((endpoint, task))
+    let config = EndpointConfig::default();
+    let endpoint = make_endpoint(socket, config, server_config)?;
+    Ok((endpoint, sender, receiver))
 }

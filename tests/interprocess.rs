@@ -1,4 +1,4 @@
-#![cfg(feature = "quinn-transport")]
+#![cfg(feature = "interprocess-transport")]
 use std::{
     net::{Ipv4Addr, SocketAddr, SocketAddrV4},
     sync::Arc,
@@ -118,13 +118,14 @@ async fn quinn_flume_socket_raw() -> anyhow::Result<()> {
     } = make_endpoints()?;
     tracing::debug!("Starting server");
     let server = tokio::spawn(async move {
+        tracing::info!("server started");
         while let Some(connecting) = server.accept().await {
             tracing::info!("server accepted connection");
             let connection = connecting.await?;
-            loop {
-                let (mut send, mut recv) = connection.accept_bi().await?;
+            while let Ok((mut send, mut recv)) =  connection.accept_bi().await {
                 tracing::info!("server accepted bidi stream");
                 tokio::io::copy(&mut recv, &mut send).await?;
+                tracing::info!("server done with bidi stream");
             }
         }
         anyhow::Ok(())
@@ -132,9 +133,17 @@ async fn quinn_flume_socket_raw() -> anyhow::Result<()> {
     let client = tokio::spawn(async move {
         let conn = client.connect(server_addr, "localhost".into())?.await?;
         let (mut send, mut recv) = conn.open_bi().await?;
-        tokio::spawn(async move { tokio::io::copy(&mut recv, &mut tokio::io::stdout()).await });
+        tracing::info!("client connected");
+        tokio::spawn(async move { 
+            tracing::info!("outputting data from server");
+            tokio::io::copy(&mut recv, &mut tokio::io::stdout()).await?;
+            tracing::info!("outputting data from server done");
+            anyhow::Ok(())
+        });
+        tracing::info!("sending data to be echoed");
         let test = vec![0u8; 1024];
         send.write_all(&test).await?;
+        tracing::info!("sending data done");
         anyhow::Ok(())
     });
     server.await??;
@@ -237,7 +246,7 @@ async fn interprocess_quinn_accept_connect_raw() -> anyhow::Result<()> {
         let (r, w) = stream.into_split();
         let r = r.compat();
         let w = w.compat_write();
-        let (endpoint, _task) = tokio_io_endpoint(r, w, remote, local, Some(server_config))?;
+        let (endpoint, _s, _r) = tokio_io_endpoint(r, w, remote, local, Some(server_config))?;
         tracing::debug!("server accepting connection");
         let connection = endpoint.accept().await.unwrap().await?;
         tracing::debug!("server accepted connection");
@@ -254,7 +263,7 @@ async fn interprocess_quinn_accept_connect_raw() -> anyhow::Result<()> {
         let (r, w) = stream.into_split();
         let r = r.compat();
         let w = w.compat_write();
-        let (mut endpoint, _task) = tokio_io_endpoint(r, w, local, remote, None)?;
+        let (mut endpoint, _s, _r) = tokio_io_endpoint(r, w, local, remote, None)?;
         endpoint.set_default_client_config(client_config);
         tracing::debug!("client connecting to server at {} using localhost", remote);
         let connection = endpoint.connect(remote, "localhost")?.await?;
@@ -301,7 +310,7 @@ async fn interprocess_quinn_smoke() -> anyhow::Result<()> {
         let (r, w) = stream.into_split();
         let r = r.compat();
         let w = w.compat_write();
-        let (endpoint, _task) = tokio_io_endpoint(r, w, remote, local, Some(server_config))?;
+        let (endpoint, _s, _r) = tokio_io_endpoint(r, w, remote, local, Some(server_config))?;
         // run rpc server on endpoint
         tracing::debug!("creating test rpc server");
         let _server_task = run_server(endpoint);
@@ -312,7 +321,7 @@ async fn interprocess_quinn_smoke() -> anyhow::Result<()> {
         let (r, w) = stream.into_split();
         let r = r.compat();
         let w = w.compat_write();
-        let (mut endpoint, _task) = tokio_io_endpoint(r, w, local, remote, None)?;
+        let (mut endpoint, _s, _r) = tokio_io_endpoint(r, w, local, remote, None)?;
         endpoint.set_default_client_config(client_config);
         tracing::debug!(
             "creating test rpc client, connecting to server at {} using localhost",
@@ -346,7 +355,7 @@ async fn interprocess_quinn_bench() -> anyhow::Result<()> {
         let (r, w) = stream.into_split();
         let r = r.compat();
         let w = w.compat_write();
-        let (endpoint, _task) = tokio_io_endpoint(r, w, remote, local, Some(server_config))?;
+        let (endpoint, _s, _r) = tokio_io_endpoint(r, w, remote, local, Some(server_config))?;
         // run rpc server on endpoint
         tracing::debug!("creating test rpc server");
         let _server_task = run_server(endpoint);
@@ -357,7 +366,7 @@ async fn interprocess_quinn_bench() -> anyhow::Result<()> {
         let (r, w) = stream.into_split();
         let r = r.compat();
         let w = w.compat_write();
-        let (mut endpoint, _task) = tokio_io_endpoint(r, w, local, remote, None)?;
+        let (mut endpoint, _s, _r) = tokio_io_endpoint(r, w, local, remote, None)?;
         endpoint.set_default_client_config(client_config);
         tracing::debug!(
             "creating test rpc client, connecting to server at {} using localhost",
