@@ -37,6 +37,7 @@ struct Packet {
     from: SocketAddr,
     to: SocketAddr,
     data: Bytes,
+    segment_size: Option<usize>,
 }
 
 #[derive(Debug)]
@@ -116,45 +117,29 @@ impl FlumeSocketInner {
         let mut offset = 0;
         let mut pending = false;
         for transmit in transmits {
-            let items = if let Some(segment_size) = transmit.segment_size {
-                (0..transmit.contents.len())
-                    .step_by(segment_size)
-                    .map(|min| {
-                        let max = (min + segment_size).min(transmit.contents.len());
-                        let data = transmit.contents.slice(min..max);
-                        Packet {
-                            from: self.local,
-                            to: transmit.destination,
-                            data,
-                        }
-                    })
-                    .collect::<Vec<_>>()
-            } else {
-                vec![Packet {
-                    from: self.local,
-                    to: transmit.destination,
-                    data: transmit.contents.clone(),
-                }]
+            let item = Packet {
+                from: self.local,
+                to: transmit.destination,
+                data: transmit.contents.clone(),
+                segment_size: transmit.segment_size,
             };
-            for item in items {
-                let res = self.sender.poll_ready_unpin(cx);
-                match res {
-                    task::Poll::Ready(Ok(())) => {
-                        // ready to send
-                        if self.sender.start_send_unpin(item).is_err() {
-                            // disconnected
-                            break;
-                        }
-                    }
-                    task::Poll::Ready(Err(_)) => {
-                        // disconneced
+            let res = self.sender.poll_ready_unpin(cx);
+            match res {
+                task::Poll::Ready(Ok(())) => {
+                    // ready to send
+                    if self.sender.start_send_unpin(item).is_err() {
+                        // disconnected
                         break;
                     }
-                    task::Poll::Pending => {
-                        // remember the offset of the first pending transmit
-                        pending = true;
-                        break;
-                    }
+                }
+                task::Poll::Ready(Err(_)) => {
+                    // disconneced
+                    break;
+                }
+                task::Poll::Pending => {
+                    // remember the offset of the first pending transmit
+                    pending = true;
+                    break;
                 }
             }
             offset += 1;
@@ -208,7 +193,7 @@ impl FlumeSocketInner {
                 let m = quinn_udp::RecvMeta {
                     addr: packet.from,
                     len,
-                    stride: len,
+                    stride: packet.segment_size.unwrap_or(len),
                     ecn: None,
                     dst_ip: Some(self.local.ip()),
                 };
@@ -345,6 +330,7 @@ where
                     from: remote,
                     to: local,
                     data: item,
+                    segment_size: None,
                 };
                 if in_send.send_async(packet).await.is_err() {
                     // in_recv dropped
