@@ -96,6 +96,7 @@ impl FlumeSocketInner {
         }
         let mut offset = 0;
         let mut pending = false;
+        tracing::debug!("S {} transmits", transmits.len());
         for transmit in transmits {
             let item = Packet {
                 from: self.local,
@@ -103,6 +104,7 @@ impl FlumeSocketInner {
                 contents: transmit.contents.clone(),
                 segment_size: transmit.segment_size,
             };
+            tracing::debug!("S sending {} {:?}", transmit.contents.len(), transmit.segment_size);
             let res = self.sender.poll_ready_unpin(cx);
             match res {
                 task::Poll::Ready(Ok(())) => {
@@ -177,7 +179,7 @@ impl FlumeSocketInner {
                     ecn: None,
                     dst_ip: Some(self.local.ip()),
                 };
-                tracing::debug!("bufs {} bytes, {} slots", bufs[offset].len(), n);
+                tracing::debug!("R bufs {} bytes, {} slots", bufs[offset].len(), n);
                 bufs[offset][..len].copy_from_slice(&packet.contents);
                 meta[offset] = m;
                 offset += 1;
