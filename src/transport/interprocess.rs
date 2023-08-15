@@ -302,9 +302,18 @@ where
         while let Some(packets) = out_recv.next().await {
             for packet in packets {
                 if packet.to == remote {
-                    let len: u16 = packet.data.len().try_into().unwrap();
-                    w.write_all(&len.to_le_bytes()).await?;
-                    w.write_all(&packet.data).await?;
+                    if let Some(segment_size) = packet.segment_size {
+                        for min in (0..packet.data.len()).step_by(segment_size) {
+                            let max = (min + segment_size).min(packet.data.len());
+                            let len: u16 = (max - min).try_into().unwrap();
+                            w.write_all(&len.to_le_bytes()).await?;
+                            w.write_all(&packet.data[min..max]).await?;
+                        }
+                    } else {
+                        let len: u16 = packet.data.len().try_into().unwrap();
+                        w.write_all(&len.to_le_bytes()).await?;
+                        w.write_all(&packet.data).await?;
+                    }
                 } else {
                     // not for us, ignore
                     continue;
