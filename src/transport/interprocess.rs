@@ -1,260 +1,16 @@
 //! Custom quinn transport that uses the interprocess crate to provide
 //! local interprocess communication via either Unix domain sockets or
 //! Windows named pipes.
-use std::{
-    fmt::{self, Debug},
-    io,
-    net::SocketAddr,
-    sync::{Arc, Mutex},
-    task,
-};
+use std::{io, net::SocketAddr};
 
+use super::quinn_flume_socket::{make_endpoint, FlumeSocket, Packet};
 use bytes::{Buf, Bytes, BytesMut};
-use futures::{SinkExt, StreamExt};
-use quinn::{AsyncUdpSocket, Endpoint, EndpointConfig};
-use quinn_udp::RecvMeta;
+use futures::StreamExt;
+use quinn::{Endpoint, EndpointConfig};
 use tokio::{
     io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
     task::JoinHandle,
 };
-
-struct FlumeSocketInner {
-    local: SocketAddr,
-    receiver: flume::r#async::RecvStream<'static, Packet>,
-    sender: flume::r#async::SendSink<'static, Packet>,
-}
-
-impl fmt::Debug for FlumeSocketInner {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("StreamSocketInner")
-            .field("local", &self.local)
-            .finish_non_exhaustive()
-    }
-}
-
-/// A packet for the flume socket.
-struct Packet {
-    from: SocketAddr,
-    to: SocketAddr,
-    data: Bytes,
-    segment_size: Option<usize>,
-}
-
-#[derive(Debug)]
-pub(crate) struct FlumeSocket(Arc<Mutex<FlumeSocketInner>>);
-
-#[derive(Debug)]
-pub(crate) struct LocalAddrHandle(Arc<Mutex<FlumeSocketInner>>);
-
-impl LocalAddrHandle {
-    #[allow(dead_code)]
-    pub fn set(&self, addr: SocketAddr) {
-        self.0.lock().unwrap().local = addr;
-    }
-
-    #[allow(dead_code)]
-    pub fn get(&self) -> SocketAddr {
-        self.0.lock().unwrap().local
-    }
-}
-
-impl AsyncUdpSocket for FlumeSocket {
-    fn poll_send(
-        &self,
-        state: &quinn_udp::UdpState,
-        cx: &mut task::Context,
-        transmits: &[quinn_udp::Transmit],
-    ) -> task::Poll<Result<usize, io::Error>> {
-        self.0.lock().unwrap().poll_send(state, cx, transmits)
-    }
-
-    fn poll_recv(
-        &self,
-        cx: &mut task::Context,
-        bufs: &mut [io::IoSliceMut<'_>],
-        meta: &mut [RecvMeta],
-    ) -> task::Poll<io::Result<usize>> {
-        self.0.lock().unwrap().poll_recv(cx, bufs, meta)
-    }
-
-    fn local_addr(&self) -> io::Result<SocketAddr> {
-        self.0.lock().unwrap().local_addr()
-    }
-}
-
-impl FlumeSocketInner {
-    /// Create a pair of connected sockets.
-    fn pair(local: SocketAddr, remote: SocketAddr) -> (Self, Self) {
-        let (tx1, rx1) = flume::bounded(16);
-        let (tx2, rx2) = flume::bounded(16);
-
-        let a = Self {
-            receiver: rx1.into_stream(),
-            sender: tx2.into_sink(),
-            local,
-        };
-
-        let b = Self {
-            receiver: rx2.into_stream(),
-            sender: tx1.into_sink(),
-            local: remote,
-        };
-
-        (a, b)
-    }
-}
-
-impl FlumeSocketInner {
-    fn poll_send(
-        &mut self,
-        _state: &quinn_udp::UdpState,
-        cx: &mut task::Context,
-        transmits: &[quinn_udp::Transmit],
-    ) -> task::Poll<Result<usize, std::io::Error>> {
-        if transmits.is_empty() {
-            return task::Poll::Ready(Ok(0));
-        }
-        let mut offset = 0;
-        let mut pending = false;
-        for transmit in transmits {
-            let item = Packet {
-                from: self.local,
-                to: transmit.destination,
-                data: transmit.contents.clone(),
-                segment_size: transmit.segment_size,
-            };
-            let res = self.sender.poll_ready_unpin(cx);
-            match res {
-                task::Poll::Ready(Ok(())) => {
-                    // ready to send
-                    if self.sender.start_send_unpin(item).is_err() {
-                        // disconnected
-                        break;
-                    }
-                }
-                task::Poll::Ready(Err(_)) => {
-                    // disconneced
-                    break;
-                }
-                task::Poll::Pending => {
-                    // remember the offset of the first pending transmit
-                    pending = true;
-                    break;
-                }
-            }
-            offset += 1;
-        }
-        if offset > 0 {
-            // call poll_flush_unpin only once.
-            if let task::Poll::Ready(Err(_)) = self.sender.poll_flush_unpin(cx) {
-                // disconnected
-                return task::Poll::Ready(Err(std::io::Error::new(
-                    std::io::ErrorKind::UnexpectedEof,
-                    "all receivers dropped",
-                )));
-            }
-            // report how many transmits we sent
-            task::Poll::Ready(Ok(offset))
-        } else if pending {
-            // only return pending if we got a pending for the first slot
-            task::Poll::Pending
-        } else {
-            task::Poll::Ready(Err(std::io::Error::new(
-                std::io::ErrorKind::UnexpectedEof,
-                "all receivers dropped",
-            )))
-        }
-    }
-
-    fn poll_recv(
-        &mut self,
-        cx: &mut std::task::Context,
-        bufs: &mut [io::IoSliceMut<'_>],
-        meta: &mut [quinn_udp::RecvMeta],
-    ) -> task::Poll<io::Result<usize>> {
-        let n = bufs.len().min(meta.len());
-        if n == 0 {
-            return task::Poll::Ready(Ok(0));
-        }
-        let mut offset = 0;
-        let mut pending = false;
-        // try to fill as many slots as possible
-        while offset < n {
-            let packet = match self.receiver.poll_next_unpin(cx) {
-                task::Poll::Ready(Some(recv)) => recv,
-                task::Poll::Ready(None) => break,
-                task::Poll::Pending => {
-                    pending = true;
-                    break;
-                }
-            };
-            if packet.to == self.local {
-                let len = packet.data.len();
-                let m = quinn_udp::RecvMeta {
-                    addr: packet.from,
-                    len,
-                    stride: packet.segment_size.unwrap_or(len),
-                    ecn: None,
-                    dst_ip: Some(self.local.ip()),
-                };
-                bufs[offset][..len].copy_from_slice(&packet.data);
-                meta[offset] = m;
-                offset += 1;
-            } else {
-                // not for us, ignore
-                continue;
-            }
-        }
-        if offset > 0 {
-            // report how many slots we filled
-            task::Poll::Ready(Ok(offset))
-        } else if pending {
-            // only return pending if we got a pending for the first slot
-            task::Poll::Pending
-        } else {
-            task::Poll::Ready(Err(std::io::Error::new(
-                std::io::ErrorKind::UnexpectedEof,
-                "all senders dropped",
-            )))
-        }
-    }
-
-    fn local_addr(&self) -> std::io::Result<SocketAddr> {
-        Ok(self.local)
-    }
-}
-
-fn make_endpoint(
-    socket: FlumeSocket,
-    config: EndpointConfig,
-    server_config: Option<quinn::ServerConfig>,
-) -> io::Result<quinn::Endpoint> {
-    quinn::Endpoint::new_with_abstract_socket(
-        config,
-        server_config,
-        socket,
-        Arc::new(quinn::TokioRuntime),
-    )
-}
-
-/// Create a pair of directly connected endpoints.
-///
-/// Useful for testing.
-pub fn endpoint_pair(
-    s: SocketAddr,
-    c: SocketAddr,
-    sc: quinn::ServerConfig,
-) -> io::Result<(quinn::Endpoint, quinn::Endpoint)> {
-    let (socket_a, socket_b) = FlumeSocketInner::pair(s, c);
-    let socket_a = FlumeSocket(Arc::new(Mutex::new(socket_a)));
-    let socket_b = FlumeSocket(Arc::new(Mutex::new(socket_b)));
-    let ac = EndpointConfig::default();
-    let bc = EndpointConfig::default();
-    Ok((
-        make_endpoint(socket_a, ac, Some(sc))?,
-        make_endpoint(socket_b, bc, None)?,
-    ))
-}
 
 struct FrameIter<'a>(&'a mut BytesMut);
 
@@ -302,17 +58,18 @@ where
         while let Some(packets) = out_recv.next().await {
             for packet in packets {
                 if packet.to == remote {
+                    let contents = packet.contents.as_ref();
                     if let Some(segment_size) = packet.segment_size {
-                        for min in (0..packet.data.len()).step_by(segment_size) {
-                            let max = (min + segment_size).min(packet.data.len());
+                        for min in (0..contents.len()).step_by(segment_size) {
+                            let max = (min + segment_size).min(contents.len());
                             let len: u16 = (max - min).try_into().unwrap();
                             w.write_all(&len.to_le_bytes()).await?;
-                            w.write_all(&packet.data[min..max]).await?;
+                            w.write_all(&contents[min..max]).await?;
                         }
                     } else {
-                        let len: u16 = packet.data.len().try_into().unwrap();
+                        let len: u16 = contents.len().try_into().unwrap();
                         w.write_all(&len.to_le_bytes()).await?;
-                        w.write_all(&packet.data).await?;
+                        w.write_all(contents).await?;
                     }
                 } else {
                     // not for us, ignore
@@ -338,7 +95,7 @@ where
                 let packet = Packet {
                     from: remote,
                     to: local,
-                    data: item,
+                    contents: item,
                     segment_size: None,
                 };
                 if in_send.send_async(packet).await.is_err() {
@@ -349,11 +106,7 @@ where
         }
         Ok(())
     });
-    let socket = FlumeSocket(Arc::new(Mutex::new(FlumeSocketInner {
-        receiver: in_recv.into_stream(),
-        sender: out_send.into_sink(),
-        local,
-    })));
+    let socket = FlumeSocket::new(local, out_send, in_recv);
     let config = EndpointConfig::default();
     let endpoint = make_endpoint(socket, config, server_config)?;
     Ok((endpoint, sender, receiver))

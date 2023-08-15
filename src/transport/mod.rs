@@ -15,6 +15,8 @@ pub mod hyper;
 pub mod interprocess;
 #[cfg(feature = "quinn-transport")]
 pub mod quinn;
+#[cfg(feature = "quinn-flume-socket")]
+pub mod quinn_flume_socket;
 
 pub mod misc;
 

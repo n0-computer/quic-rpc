@@ -58,8 +58,9 @@ quinn-transport = ["flume", "quinn", "bincode", "tokio-serde", "tokio-util"]
 flume-transport = ["flume"]
 interprocess-transport = ["quinn-udp", "interprocess", "bytes", "tokio-util"]
 combined-transport = []
+quinn-flume-socket = ["flume", "quinn", "quinn-udp", "bytes", "tokio-util"]
 macros = []
-default = ["interprocess-transport"]
+default = []
 
 [[example]]
 name = "errors"
