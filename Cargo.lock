@@ -932,6 +932,7 @@ dependencies = [
  "hyper",
  "interprocess",
  "pin-project",
+ "proc-macro2",
  "quinn",
  "quinn-udp",
  "rcgen",
