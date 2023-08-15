@@ -116,28 +116,45 @@ impl FlumeSocketInner {
         let mut offset = 0;
         let mut pending = false;
         for transmit in transmits {
-            let item = Packet {
-                from: self.local,
-                to: transmit.destination,
-                data: transmit.contents.clone(),
+            let items = if let Some(segment_size) = transmit.segment_size {
+                (0..transmit.contents.len())
+                    .step_by(segment_size)
+                    .map(|min| {
+                        let max = (min + segment_size).min(transmit.contents.len());
+                        let data = transmit.contents.slice(min..max);
+                        Packet {
+                            from: self.local,
+                            to: transmit.destination,
+                            data,
+                        }
+                    })
+                    .collect::<Vec<_>>()
+            } else {
+                vec![Packet {
+                    from: self.local,
+                    to: transmit.destination,
+                    data: transmit.contents.clone(),
+                }]
             };
-            let res = self.sender.poll_ready_unpin(cx);
-            match res {
-                task::Poll::Ready(Ok(())) => {
-                    // ready to send
-                    if self.sender.start_send_unpin(item).is_err() {
-                        // disconnected
+            for item in items {
+                let res = self.sender.poll_ready_unpin(cx);
+                match res {
+                    task::Poll::Ready(Ok(())) => {
+                        // ready to send
+                        if self.sender.start_send_unpin(item).is_err() {
+                            // disconnected
+                            break;
+                        }
+                    }
+                    task::Poll::Ready(Err(_)) => {
+                        // disconneced
                         break;
                     }
-                }
-                task::Poll::Ready(Err(_)) => {
-                    // disconneced
-                    break;
-                }
-                task::Poll::Pending => {
-                    // remember the offset of the first pending transmit
-                    pending = true;
-                    break;
+                    task::Poll::Pending => {
+                        // remember the offset of the first pending transmit
+                        pending = true;
+                        break;
+                    }
                 }
             }
             offset += 1;
@@ -322,7 +339,6 @@ where
                 // eof
                 break;
             }
-            tracing::debug!("R {} read {} bytes {}", local, n, buffer.len());
             // split into frames and send all full frames
             for item in FrameIter(&mut buffer) {
                 let packet = Packet {

@@ -30,6 +30,7 @@ tracing = "0.1"
 quinn-udp = { version = "0.4.0", optional = true }
 interprocess = { version = "1.2.1", features = ["tokio_support"], optional = true }
 hex = "0.4.3"
+blake3 = "1.4.1"
 
 [dependencies.educe]
 # This is an unused dependency, it is needed to make the minimal
@@ -57,7 +58,7 @@ flume-transport = ["flume"]
 interprocess-transport = ["quinn-udp", "interprocess", "bytes", "tokio-util"]
 combined-transport = []
 macros = []
-default = []
+default = ["interprocess-transport"]
 
 [[example]]
 name = "errors"
