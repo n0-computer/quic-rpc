@@ -56,11 +56,11 @@ proc-macro2 = "1.0.66"
 hyper-transport = ["flume", "hyper", "bincode", "bytes"]
 quinn-transport = ["flume", "quinn", "bincode", "tokio-serde", "tokio-util"]
 flume-transport = ["flume"]
-interprocess-transport = ["quinn-udp", "interprocess", "bytes", "tokio-util"]
+interprocess-transport = ["quinn-udp", "interprocess", "bytes", "tokio-util", "quinn-transport"]
 combined-transport = []
 quinn-flume-socket = ["flume", "quinn", "quinn-udp", "bytes", "tokio-util"]
 macros = []
-default = []
+default = ["quinn-flume-socket", "interprocess-transport"]
 
 [[example]]
 name = "errors"

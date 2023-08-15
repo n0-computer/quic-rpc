@@ -177,6 +177,7 @@ impl FlumeSocketInner {
                     ecn: None,
                     dst_ip: Some(self.local.ip()),
                 };
+                tracing::debug!("bufs {} bytes, {} slots", bufs[offset].len(), n);
                 bufs[offset][..len].copy_from_slice(&packet.contents);
                 meta[offset] = m;
                 offset += 1;
