@@ -45,6 +45,8 @@ rcgen = "0.10.0"
 rustls = "0.21"
 thousands = "0.2.0"
 tracing-subscriber = "0.3.16"
+tempfile = "3.5.0"
+proc-macro2 = "1.0.66"
 
 [features]
 hyper-transport = ["flume", "hyper", "bincode", "bytes"]
