@@ -158,6 +158,7 @@ impl ComputeService {
         server: RpcServer<ComputeService, C>,
         count: usize,
     ) -> result::Result<RpcServer<ComputeService, C>, RpcServerError<C>> {
+        tracing::info!(%count, "server running");
         let s = server;
         let mut received = 0;
         let service = ComputeService;
@@ -167,6 +168,7 @@ impl ComputeService {
             let service = service.clone();
             tokio::spawn(async move {
                 use ComputeRequest::*;
+                tracing::info!(?req, "got request");
                 #[rustfmt::skip]
                 match req {
                     Sqr(msg) => chan.rpc(msg, service, ComputeService::sqr).await,

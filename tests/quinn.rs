@@ -146,25 +146,28 @@ async fn server_went_away() -> anyhow::Result<()> {
     // create the RPC Server
     let connection = transport::quinn::QuinnServerEndpoint::new(server)?;
     let server = RpcServer::<ComputeService, _>::new(connection);
-
-    // spawn the service, waiting for a single rpc request
-    let server_join = tokio::task::spawn(async move { ComputeService::server_bounded(server, 1) });
+    let server_handle = tokio::task::spawn(ComputeService::server_bounded(server, 1));
 
     // create the rpc client
     let client_connection =
-        transport::quinn::QuinnConnection::new(client, server_addr, "compute client".into());
+        transport::quinn::QuinnConnection::new(client, server_addr, "localhost".into());
     let client = RpcClient::new(client_connection);
 
     // send the first request and wait for the response to ensure everything works as expected
     let SqrResponse(response) = client.rpc(Sqr(4)).await.unwrap();
     assert_eq!(response, 16);
 
-    // make the server go away
-    let x = server_join.await.unwrap();
+    let server = server_handle.await.unwrap().unwrap();
 
-    // send the first request and wait for the response to ensure everything works as expected
-    let SqrResponse(response) = client.rpc(Sqr(2)).await.unwrap();
-    assert_eq!(response, 4);
+    // server is not running, this should fail
+    client.rpc(Sqr(2)).await.unwrap_err();
 
+    // make the server run again
+    let server_handle = tokio::task::spawn(ComputeService::server_bounded(server, 5));
+
+    // server is running, this should work
+    let SqrResponse(response) = client.rpc(Sqr(3)).await.unwrap();
+    assert_eq!(response, 9);
+    server_handle.abort();
     Ok(())
 }
