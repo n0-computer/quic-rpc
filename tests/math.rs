@@ -153,6 +153,35 @@ impl ComputeService {
         }
     }
 
+    /// Runs the service until `count` requests have been received.
+    pub async fn server_bounded<C: ServiceEndpoint<ComputeService>>(
+        server: RpcServer<ComputeService, C>,
+        count: usize,
+    ) -> result::Result<RpcServer<ComputeService, C>, RpcServerError<C>> {
+        let s = server;
+        let mut received = 0;
+        let service = ComputeService;
+        while received < count {
+            received += 1;
+            let (req, chan) = s.accept().await?;
+            let service = service.clone();
+            tokio::spawn(async move {
+                use ComputeRequest::*;
+                #[rustfmt::skip]
+                match req {
+                    Sqr(msg) => chan.rpc(msg, service, ComputeService::sqr).await,
+                    Sum(msg) => chan.client_streaming(msg, service, ComputeService::sum).await,
+                    Fibonacci(msg) => chan.server_streaming(msg, service, ComputeService::fibonacci).await,
+                    Multiply(msg) => chan.bidi_streaming(msg, service, ComputeService::multiply).await,
+                    SumUpdate(_) => Err(RpcServerError::UnexpectedStartMessage)?,
+                    MultiplyUpdate(_) => Err(RpcServerError::UnexpectedStartMessage)?,
+                }?;
+                Ok::<_, RpcServerError<C>>(())
+            });
+        }
+        Ok(s)
+    }
+
     pub async fn server_par<C: ServiceEndpoint<ComputeService>>(
         server: RpcServer<ComputeService, C>,
         parallelism: usize,
@@ -199,6 +228,55 @@ pub async fn smoke_test<C: ServiceConnection<ComputeService>>(client: C) -> anyh
     // a rpc call
     tracing::debug!("calling rpc S(1234)");
     let res = client.rpc(Sqr(1234)).await?;
+    tracing::debug!("got response {:?}", res);
+    assert_eq!(res, SqrResponse(1522756));
+
+    // client streaming call
+    tracing::debug!("calling client_streaming Sum");
+    let (mut send, recv) = client.client_streaming(Sum).await?;
+    tokio::task::spawn(async move {
+        for i in 1..=3 {
+            send.send(SumUpdate(i)).await?;
+        }
+        Ok::<_, C::SendError>(())
+    });
+    let res = recv.await?;
+    tracing::debug!("got response {:?}", res);
+    assert_eq!(res, SumResponse(6));
+
+    // server streaming call
+    tracing::debug!("calling server_streaming Fibonacci(10)");
+    let s = client.server_streaming(Fibonacci(10)).await?;
+    let res = s.map_ok(|x| x.0).try_collect::<Vec<_>>().await?;
+    tracing::debug!("got response {:?}", res);
+    assert_eq!(res, vec![0, 1, 1, 2, 3, 5, 8, 13, 21, 34]);
+
+    // bidi streaming call
+    tracing::debug!("calling bidi Multiply(2)");
+    let (mut send, recv) = client.bidi(Multiply(2)).await?;
+    tokio::task::spawn(async move {
+        for i in 1..=3 {
+            send.send(MultiplyUpdate(i)).await?;
+        }
+        Ok::<_, C::SendError>(())
+    });
+    let res = recv.map_ok(|x| x.0).try_collect::<Vec<_>>().await?;
+    tracing::debug!("got response {:?}", res);
+    assert_eq!(res, vec![2, 4, 6]);
+
+    tracing::debug!("dropping client!");
+    Ok(())
+}
+
+pub async fn went_away_test<C: ServiceConnection<ComputeService>>(client: C) -> anyhow::Result<()> {
+    let client = RpcClient::<ComputeService, C>::new(client);
+    // a rpc call
+    tracing::debug!("calling rpc S(1234)");
+    let res = client.rpc(Sqr(1234)).await?;
+
+    tracing::debug!("sleeping for server death");
+    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+
     tracing::debug!("got response {:?}", res);
     assert_eq!(res, SqrResponse(1522756));
 

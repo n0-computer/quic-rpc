@@ -4,7 +4,7 @@ use std::{
     sync::Arc,
 };
 
-use quic_rpc::{RpcClient, RpcServer};
+use quic_rpc::{transport, RpcClient, RpcServer};
 use quinn::{ClientConfig, Endpoint, ServerConfig};
 use tokio::task::JoinHandle;
 
@@ -91,7 +91,7 @@ pub fn make_endpoints(port: u16) -> anyhow::Result<Endpoints> {
 
 fn run_server(server: quinn::Endpoint) -> JoinHandle<anyhow::Result<()>> {
     tokio::task::spawn(async move {
-        let connection = quic_rpc::transport::quinn::QuinnServerEndpoint::new(server)?;
+        let connection = transport::quinn::QuinnServerEndpoint::new(server)?;
         let server = RpcServer::<ComputeService, _>::new(connection);
         ComputeService::server(server).await?;
         anyhow::Ok(())
@@ -110,8 +110,7 @@ async fn quinn_channel_bench() -> anyhow::Result<()> {
     tracing::debug!("Starting server");
     let server_handle = run_server(server);
     tracing::debug!("Starting client");
-    let client =
-        quic_rpc::transport::quinn::QuinnConnection::new(client, server_addr, "localhost".into());
+    let client = transport::quinn::QuinnConnection::new(client, server_addr, "localhost".into());
     let client = RpcClient::<ComputeService, _>::new(client);
     tracing::debug!("Starting benchmark");
     bench(client, 50000).await?;
@@ -129,8 +128,43 @@ async fn quinn_channel_smoke() -> anyhow::Result<()> {
     } = make_endpoints(12346)?;
     let server_handle = run_server(server);
     let client_connection =
-        quic_rpc::transport::quinn::QuinnConnection::new(client, server_addr, "localhost".into());
+        transport::quinn::QuinnConnection::new(client, server_addr, "localhost".into());
     smoke_test(client_connection).await?;
     server_handle.abort();
+    Ok(())
+}
+
+#[tokio::test]
+async fn server_went_away() -> anyhow::Result<()> {
+    tracing_subscriber::fmt::try_init().ok();
+    let Endpoints {
+        client,
+        server,
+        server_addr,
+    } = make_endpoints(12346)?;
+
+    // create the RPC Server
+    let connection = transport::quinn::QuinnServerEndpoint::new(server)?;
+    let server = RpcServer::<ComputeService, _>::new(connection);
+
+    // spawn the service, waiting for a single rpc request
+    let server_join = tokio::task::spawn(async move { ComputeService::server_bounded(server, 1) });
+
+    // create the rpc client
+    let client_connection =
+        transport::quinn::QuinnConnection::new(client, server_addr, "compute client".into());
+    let client = RpcClient::new(client_connection);
+
+    // send the first request and wait for the response to ensure everything works as expected
+    let SqrResponse(response) = client.rpc(Sqr(4)).await.unwrap();
+    assert_eq!(response, 16);
+
+    // make the server go away
+    let x = server_join.await.unwrap();
+
+    // send the first request and wait for the response to ensure everything works as expected
+    let SqrResponse(response) = client.rpc(Sqr(2)).await.unwrap();
+    assert_eq!(response, 4);
+
     Ok(())
 }
