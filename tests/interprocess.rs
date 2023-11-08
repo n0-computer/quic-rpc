@@ -201,28 +201,34 @@ async fn interprocess_accept_connect_raw() -> anyhow::Result<()> {
     let socket = LocalSocketListener::bind(socket_name.clone())?;
     let socket_name_2 = socket_name.clone();
     let server = tokio::spawn(async move {
+        tracing::info!("spawning server");
         let stream = socket.accept().await?;
+        tracing::info!("server: accepted");
         let (r, mut w) = stream.into_split();
 
         let mut buffer = String::new();
         let mut reader = BufReader::new(r);
         reader.read_line(&mut buffer).await?;
+        tracing::info!("server: read: {:?}", buffer);
         w.write_all(buffer.as_bytes()).await?;
 
         anyhow::Ok(())
     });
     let client = tokio::spawn(async move {
+        tracing::info!("client: spawned");
         let stream = LocalSocketStream::connect(socket_name_2.clone()).await?;
         let (r, w) = stream.into_split();
-        let mut r = r.compat();
         let mut w = w.compat_write();
         w.write_all(b"hello").await?;
         w.write_all(b"world").await?;
         w.write_all(b"\n").await?;
+        tracing::info!("client: written");
         let validator = tokio::spawn(async move {
-            let mut out = Vec::<u8>::new();
-            tokio::io::copy(&mut r, &mut out).await?;
-            let pass = out == b"helloworld";
+            let mut buffer = String::new();
+            let mut reader = BufReader::new(r);
+            reader.read_line(&mut buffer).await?;
+            let pass = buffer == "helloworld\n";
+
             anyhow::Ok(pass)
         });
         drop(w);
