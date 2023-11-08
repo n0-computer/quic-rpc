@@ -10,7 +10,7 @@ use quic_rpc::{
     RpcClient, RpcServer,
 };
 use quinn::{ClientConfig, Endpoint, ServerConfig};
-use tokio::{io::AsyncWriteExt as _, task::JoinHandle};
+use tokio::task::JoinHandle;
 use tokio_util::compat::{FuturesAsyncReadCompatExt, FuturesAsyncWriteCompatExt};
 
 mod math;
@@ -220,8 +220,8 @@ async fn interprocess_accept_connect_raw() -> anyhow::Result<()> {
         tracing::info!("client: spawned");
         let stream = LocalSocketStream::connect(socket_name_2.clone()).await?;
         tracing::info!("client: connected");
-        let (r, w) = stream.into_split();
-        let mut w = w.compat_write();
+        let (r, mut w) = stream.into_split();
+
         tracing::info!("client: writting");
         w.write_all(b"hello").await?;
         w.write_all(b"world").await?;
