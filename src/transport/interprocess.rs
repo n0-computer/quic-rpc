@@ -86,6 +86,7 @@ where
                         }
                     } else {
                         let len: u16 = contents.len().try_into().unwrap();
+                        tracing::debug!("sending {}bytes", len);
                         w.write_all(&len.to_le_bytes()).await?;
                         w.write_all(contents).await?;
                     }
@@ -102,8 +103,8 @@ where
         loop {
             // read more data and split into frames
             let n = r.read_buf(&mut buffer).await;
-
             let n = n?;
+            tracing::debug!("read {}bytes", n);
             if n == 0 {
                 // eof
                 break;
