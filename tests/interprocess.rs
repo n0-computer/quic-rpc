@@ -1,12 +1,13 @@
 #![cfg(feature = "interprocess-transport")]
 use std::{
-    ffi::OsString,
     net::{Ipv4Addr, SocketAddr, SocketAddrV4},
-    path::Path,
     sync::Arc,
 };
 
-use quic_rpc::{transport::interprocess::tokio_io_endpoint, RpcClient, RpcServer};
+use quic_rpc::{
+    transport::interprocess::{new_socket_name, tokio_io_endpoint},
+    RpcClient, RpcServer,
+};
 use quinn::{ClientConfig, Endpoint, ServerConfig};
 use tokio::{io::AsyncWriteExt, task::JoinHandle};
 use tokio_util::compat::{FuturesAsyncReadCompatExt, FuturesAsyncWriteCompatExt};
@@ -29,25 +30,6 @@ pub fn make_client_endpoint(
     let mut endpoint = Endpoint::client(bind_addr)?;
     endpoint.set_default_client_config(client_cfg);
     Ok(endpoint)
-}
-
-// TODO: add to quic-rpc lib if this works
-/// Automatically chooses name type based on OS support and preference.
-fn new_socket_name(root: impl AsRef<Path>, id: &str) -> OsString {
-    let namespaced = {
-        use interprocess::local_socket::NameTypeSupport;
-        let nts = NameTypeSupport::query();
-        match nts {
-            NameTypeSupport::OnlyPaths | NameTypeSupport::Both => false,
-            NameTypeSupport::OnlyNamespaced => true,
-        }
-    };
-
-    if namespaced {
-        format!("@quic-rpc-socket-{}.sock", id).into()
-    } else {
-        root.as_ref().join(format!("{id}.sock")).into()
-    }
 }
 
 /// Constructs a QUIC endpoint configured to listen for incoming connections on a certain address
