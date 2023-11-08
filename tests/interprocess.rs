@@ -197,7 +197,7 @@ async fn interprocess_accept_connect_raw() -> anyhow::Result<()> {
     tracing_subscriber::fmt::try_init().ok();
     use interprocess::local_socket::tokio::*;
     let dir = tempfile::tempdir()?;
-    let socket_name = new_socket_name(dir.path(), "interprocess");
+    let socket_name = new_socket_name(dir.path(), "interprocess-accept-connect-raw");
     let socket = LocalSocketListener::bind(socket_name.clone())?;
     let socket_name_2 = socket_name.clone();
     let server = tokio::spawn(async move {
@@ -254,7 +254,7 @@ async fn interprocess_quinn_accept_connect_raw() -> anyhow::Result<()> {
     let client_config = configure_client(&[&server_certs])?;
 
     let dir = tempfile::tempdir()?;
-    let socket_name = new_socket_name(dir.path(), "interprocess");
+    let socket_name = new_socket_name(dir.path(), "interprocess-quinn-accet-connect-raw");
     let socket = LocalSocketListener::bind(socket_name.clone())?;
     let local = SocketAddrV4::new(Ipv4Addr::LOCALHOST, 1).into();
     let remote = SocketAddrV4::new(Ipv4Addr::LOCALHOST, 2).into();
@@ -318,7 +318,7 @@ async fn interprocess_quinn_smoke() -> anyhow::Result<()> {
     let client_config = configure_client(&[&server_certs])?;
 
     let dir = tempfile::tempdir()?;
-    let socket_name = new_socket_name(dir.path(), "interprocess");
+    let socket_name = new_socket_name(dir.path(), "interprocess-quinn-smoke");
     let socket = LocalSocketListener::bind(socket_name.clone())?;
     let local = SocketAddrV4::new(Ipv4Addr::LOCALHOST, 1).into();
     let remote = SocketAddrV4::new(Ipv4Addr::LOCALHOST, 2).into();
@@ -363,7 +363,7 @@ async fn interprocess_quinn_bench() -> anyhow::Result<()> {
     let client_config = configure_client(&[&server_certs])?;
 
     let dir = tempfile::tempdir()?;
-    let socket_name = new_socket_name(dir.path(), "interprocess");
+    let socket_name = new_socket_name(dir.path(), "interprocess-quinn-bench");
     let socket = LocalSocketListener::bind(socket_name.clone())?;
     let local = SocketAddrV4::new(Ipv4Addr::LOCALHOST, 1).into();
     let remote = SocketAddrV4::new(Ipv4Addr::LOCALHOST, 2).into();
