@@ -4,7 +4,7 @@ use std::{
     sync::Arc,
 };
 
-use futures::{io::BufReader, AsyncBufReadExt, AsyncReadExt, AsyncWriteExt as _};
+use futures::{io::BufReader, AsyncBufReadExt, AsyncWriteExt as _};
 use quic_rpc::{
     transport::interprocess::{new_socket_name, tokio_io_endpoint},
     RpcClient, RpcServer,
@@ -260,7 +260,7 @@ async fn interprocess_quinn_accept_connect_raw() -> anyhow::Result<()> {
     let remote = SocketAddrV4::new(Ipv4Addr::LOCALHOST, 2).into();
     let server = tokio::spawn(async move {
         let stream = socket.accept().await?;
-        let (r, w) = stream.into_split();
+        let (r, w) = stream.split();
         let r = r.compat();
         let w = w.compat_write();
         let (endpoint, _s, _r) = tokio_io_endpoint(r, w, remote, local, Some(server_config))?;
@@ -277,7 +277,7 @@ async fn interprocess_quinn_accept_connect_raw() -> anyhow::Result<()> {
     });
     let client = tokio::spawn(async move {
         let stream = LocalSocketStream::connect(socket_name).await?;
-        let (r, w) = stream.into_split();
+        let (r, w) = stream.split();
         let r = r.compat();
         let w = w.compat_write();
         let (mut endpoint, _s, _r) = tokio_io_endpoint(r, w, local, remote, None)?;
@@ -324,7 +324,7 @@ async fn interprocess_quinn_smoke() -> anyhow::Result<()> {
     let remote = SocketAddrV4::new(Ipv4Addr::LOCALHOST, 2).into();
     let server = tokio::spawn(async move {
         let stream = socket.accept().await?;
-        let (r, w) = stream.into_split();
+        let (r, w) = stream.split();
         let r = r.compat();
         let w = w.compat_write();
         let (endpoint, _s, _r) = tokio_io_endpoint(r, w, remote, local, Some(server_config))?;
@@ -335,7 +335,7 @@ async fn interprocess_quinn_smoke() -> anyhow::Result<()> {
     });
     let client = tokio::spawn(async move {
         let stream = LocalSocketStream::connect(socket_name).await?;
-        let (r, w) = stream.into_split();
+        let (r, w) = stream.split();
         let r = r.compat();
         let w = w.compat_write();
         let (mut endpoint, _s, _r) = tokio_io_endpoint(r, w, local, remote, None)?;
@@ -369,7 +369,7 @@ async fn interprocess_quinn_bench() -> anyhow::Result<()> {
     let remote = SocketAddrV4::new(Ipv4Addr::LOCALHOST, 2).into();
     let server = tokio::spawn(async move {
         let stream = socket.accept().await?;
-        let (r, w) = stream.into_split();
+        let (r, w) = stream.split();
         let r = r.compat();
         let w = w.compat_write();
         let (endpoint, _s, _r) = tokio_io_endpoint(r, w, remote, local, Some(server_config))?;
@@ -380,7 +380,7 @@ async fn interprocess_quinn_bench() -> anyhow::Result<()> {
     });
     let client = tokio::spawn(async move {
         let stream = LocalSocketStream::connect(socket_name).await?;
-        let (r, w) = stream.into_split();
+        let (r, w) = stream.split();
         let r = r.compat();
         let w = w.compat_write();
         let (mut endpoint, _s, _r) = tokio_io_endpoint(r, w, local, remote, None)?;
