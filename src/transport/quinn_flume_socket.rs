@@ -104,7 +104,11 @@ impl FlumeSocketInner {
                 contents: transmit.contents.clone(),
                 segment_size: transmit.segment_size,
             };
-            tracing::debug!("S sending {} {:?}", transmit.contents.len(), transmit.segment_size);
+            tracing::debug!(
+                "S sending {} {:?}",
+                transmit.contents.len(),
+                transmit.segment_size
+            );
             let res = self.sender.poll_ready_unpin(cx);
             match res {
                 task::Poll::Ready(Ok(())) => {
