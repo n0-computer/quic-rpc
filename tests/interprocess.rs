@@ -192,7 +192,7 @@ async fn quinn_flume_channel_smoke() -> anyhow::Result<()> {
 
 /// Basic test of the interprocess crate.
 /// Just sends a message from client to server and back.
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn interprocess_accept_connect_raw() -> anyhow::Result<()> {
     tracing_subscriber::fmt::try_init().ok();
     use interprocess::local_socket::tokio::*;
