@@ -1,6 +1,8 @@
 #![cfg(feature = "interprocess-transport")]
 use std::{
+    ffi::OsString,
     net::{Ipv4Addr, SocketAddr, SocketAddrV4},
+    path::Path,
     sync::Arc,
 };
 
@@ -27,6 +29,25 @@ pub fn make_client_endpoint(
     let mut endpoint = Endpoint::client(bind_addr)?;
     endpoint.set_default_client_config(client_cfg);
     Ok(endpoint)
+}
+
+// TODO: add to quic-rpc lib if this works
+/// Automatically chooses name type based on OS support and preference.
+fn new_socket_name(root: impl AsRef<Path>, id: &str) -> OsString {
+    let namespaced = {
+        use interprocess::local_socket::NameTypeSupport;
+        let nts = NameTypeSupport::query();
+        match nts {
+            NameTypeSupport::OnlyPaths | NameTypeSupport::Both => false,
+            NameTypeSupport::OnlyNamespaced => true,
+        }
+    };
+
+    if namespaced {
+        format!("@quic-rpc-socket-{}.sock", id).into()
+    } else {
+        root.as_ref().join(format!("{id}.sock")).into()
+    }
 }
 
 /// Constructs a QUIC endpoint configured to listen for incoming connections on a certain address
@@ -193,7 +214,7 @@ async fn interprocess_accept_connect_raw() -> anyhow::Result<()> {
     tracing_subscriber::fmt::try_init().ok();
     use interprocess::local_socket::tokio::*;
     let dir = tempfile::tempdir()?;
-    let socket_name = dir.path().join("interprocess.socket");
+    let socket_name = new_socket_name(dir.path(), "interprocess");
     let socket = LocalSocketListener::bind(socket_name.clone())?;
     let socket_name_2 = socket_name.clone();
     let server = tokio::spawn(async move {
@@ -235,7 +256,7 @@ async fn interprocess_quinn_accept_connect_raw() -> anyhow::Result<()> {
     let client_config = configure_client(&[&server_certs])?;
     tracing_subscriber::fmt::try_init().ok();
     let dir = tempfile::tempdir()?;
-    let socket_name = dir.path().join("interprocess.socket");
+    let socket_name = new_socket_name(dir.path(), "interprocess");
     let socket = LocalSocketListener::bind(socket_name.clone())?;
     let local = SocketAddrV4::new(Ipv4Addr::LOCALHOST, 1).into();
     let remote = SocketAddrV4::new(Ipv4Addr::LOCALHOST, 2).into();
@@ -299,7 +320,7 @@ async fn interprocess_quinn_smoke() -> anyhow::Result<()> {
     let client_config = configure_client(&[&server_certs])?;
     tracing_subscriber::fmt::try_init().ok();
     let dir = tempfile::tempdir()?;
-    let socket_name = dir.path().join("interprocess.socket");
+    let socket_name = new_socket_name(dir.path(), "interprocess");
     let socket = LocalSocketListener::bind(socket_name.clone())?;
     let local = SocketAddrV4::new(Ipv4Addr::LOCALHOST, 1).into();
     let remote = SocketAddrV4::new(Ipv4Addr::LOCALHOST, 2).into();
@@ -344,7 +365,7 @@ async fn interprocess_quinn_bench() -> anyhow::Result<()> {
     let client_config = configure_client(&[&server_certs])?;
     tracing_subscriber::fmt::try_init().ok();
     let dir = tempfile::tempdir()?;
-    let socket_name = dir.path().join("interprocess.socket");
+    let socket_name = new_socket_name(dir.path(), "interprocess");
     let socket = LocalSocketListener::bind(socket_name.clone())?;
     let local = SocketAddrV4::new(Ipv4Addr::LOCALHOST, 1).into();
     let remote = SocketAddrV4::new(Ipv4Addr::LOCALHOST, 2).into();
