@@ -4,7 +4,7 @@ use std::{
     sync::Arc,
 };
 
-use futures::{io::BufReader, AsyncBufReadExt, AsyncWriteExt as _};
+use futures::{io::BufReader, AsyncBufReadExt, AsyncReadExt, AsyncWriteExt as _};
 use quic_rpc::{
     transport::interprocess::{new_socket_name, tokio_io_endpoint},
     RpcClient, RpcServer,
@@ -204,7 +204,7 @@ async fn interprocess_accept_connect_raw() -> anyhow::Result<()> {
         tracing::info!("server: spawn");
         let stream = socket.accept().await?;
         tracing::info!("server: accepted");
-        let (r, mut w) = stream.into_split();
+        let (r, mut w) = stream.split();
 
         let mut buffer = String::new();
         let mut reader = BufReader::new(r);
@@ -220,7 +220,7 @@ async fn interprocess_accept_connect_raw() -> anyhow::Result<()> {
         tracing::info!("client: spawned");
         let stream = LocalSocketStream::connect(socket_name_2.clone()).await?;
         tracing::info!("client: connected");
-        let (r, mut w) = stream.into_split();
+        let (r, mut w) = stream.split();
 
         tracing::info!("client: writting");
         w.write_all(b"hello").await?;
