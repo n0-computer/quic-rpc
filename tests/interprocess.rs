@@ -4,12 +4,13 @@ use std::{
     sync::Arc,
 };
 
+use futures::{io::BufReader, AsyncBufReadExt, AsyncWriteExt as _};
 use quic_rpc::{
     transport::interprocess::{new_socket_name, tokio_io_endpoint},
     RpcClient, RpcServer,
 };
 use quinn::{ClientConfig, Endpoint, ServerConfig};
-use tokio::{io::AsyncWriteExt, task::JoinHandle};
+use tokio::{io::AsyncWriteExt as _, task::JoinHandle};
 use tokio_util::compat::{FuturesAsyncReadCompatExt, FuturesAsyncWriteCompatExt};
 
 mod math;
@@ -201,10 +202,13 @@ async fn interprocess_accept_connect_raw() -> anyhow::Result<()> {
     let socket_name_2 = socket_name.clone();
     let server = tokio::spawn(async move {
         let stream = socket.accept().await?;
-        let (r, w) = stream.into_split();
-        let mut r = r.compat();
-        let mut w = w.compat_write();
-        tokio::io::copy(&mut r, &mut w).await?;
+        let (r, mut w) = stream.into_split();
+
+        let mut buffer = String::new();
+        let mut reader = BufReader::new(r);
+        reader.read_line(&mut buffer).await?;
+        w.write_all(buffer.as_bytes()).await?;
+
         anyhow::Ok(())
     });
     let client = tokio::spawn(async move {
@@ -214,6 +218,7 @@ async fn interprocess_accept_connect_raw() -> anyhow::Result<()> {
         let mut w = w.compat_write();
         w.write_all(b"hello").await?;
         w.write_all(b"world").await?;
+        w.write_all(b"\n").await?;
         let validator = tokio::spawn(async move {
             let mut out = Vec::<u8>::new();
             tokio::io::copy(&mut r, &mut out).await?;
@@ -236,7 +241,7 @@ async fn interprocess_quinn_accept_connect_raw() -> anyhow::Result<()> {
     use interprocess::local_socket::tokio::*;
     let (server_config, server_certs) = configure_server()?;
     let client_config = configure_client(&[&server_certs])?;
-    tracing_subscriber::fmt::try_init().ok();
+
     let dir = tempfile::tempdir()?;
     let socket_name = new_socket_name(dir.path(), "interprocess");
     let socket = LocalSocketListener::bind(socket_name.clone())?;
@@ -300,7 +305,7 @@ async fn interprocess_quinn_smoke() -> anyhow::Result<()> {
     use interprocess::local_socket::tokio::*;
     let (server_config, server_certs) = configure_server()?;
     let client_config = configure_client(&[&server_certs])?;
-    tracing_subscriber::fmt::try_init().ok();
+
     let dir = tempfile::tempdir()?;
     let socket_name = new_socket_name(dir.path(), "interprocess");
     let socket = LocalSocketListener::bind(socket_name.clone())?;
@@ -345,7 +350,7 @@ async fn interprocess_quinn_bench() -> anyhow::Result<()> {
     use interprocess::local_socket::tokio::*;
     let (server_config, server_certs) = configure_server()?;
     let client_config = configure_client(&[&server_certs])?;
-    tracing_subscriber::fmt::try_init().ok();
+
     let dir = tempfile::tempdir()?;
     let socket_name = new_socket_name(dir.path(), "interprocess");
     let socket = LocalSocketListener::bind(socket_name.clone())?;
