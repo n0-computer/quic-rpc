@@ -19,7 +19,7 @@ use std::{
 use thousands::Separable;
 
 /// compute the square of a number
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
 pub struct Sqr(pub u64);
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -181,6 +181,7 @@ impl ComputeService {
                 Ok::<_, RpcServerError<C>>(())
             });
         }
+        tracing::info!(%count, "server finished");
         Ok(s)
     }
 

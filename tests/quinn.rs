@@ -137,11 +137,12 @@ async fn quinn_channel_smoke() -> anyhow::Result<()> {
 #[tokio::test]
 async fn server_went_away() -> anyhow::Result<()> {
     tracing_subscriber::fmt::try_init().ok();
+    tracing::info!("Creating endpoints");
     let Endpoints {
         client,
         server,
         server_addr,
-    } = make_endpoints(12346)?;
+    } = make_endpoints(12347)?;
 
     // create the RPC Server
     let connection = transport::quinn::QuinnServerEndpoint::new(server)?;
@@ -160,7 +161,8 @@ async fn server_went_away() -> anyhow::Result<()> {
     let server = server_handle.await.unwrap().unwrap();
 
     // server is not running, this should fail
-    client.rpc(Sqr(2)).await.unwrap_err();
+    let e = client.rpc(Sqr(2)).await.unwrap_err();
+    tracing::info!(?e, "request got expected failure");
 
     // make the server run again
     let server_handle = tokio::task::spawn(ComputeService::server_bounded(server, 5));
