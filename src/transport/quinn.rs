@@ -583,7 +583,10 @@ impl<In: RpcMessage, Out: RpcMessage> Future for OpenBiFuture<In, Out> {
                     self.0 = OpenBiFutureState::Sending(fut, recever);
                     Poll::Pending
                 }
-                Poll::Ready(Err(_)) => Poll::Ready(Err(quinn::ConnectionError::LocallyClosed)),
+                Poll::Ready(Err(e)) => {
+                    tracing::warn!(?e, "OpenBiFuture poll err sending");
+                    Poll::Ready(Err(quinn::ConnectionError::LocallyClosed))
+                }
             },
             OpenBiFutureState::Receiving(mut fut) => match fut.poll_unpin(cx) {
                 Poll::Ready(Ok(Ok((send, recv)))) => {
@@ -596,7 +599,10 @@ impl<In: RpcMessage, Out: RpcMessage> Future for OpenBiFuture<In, Out> {
                     self.0 = OpenBiFutureState::Receiving(fut);
                     Poll::Pending
                 }
-                Poll::Ready(Err(_)) => Poll::Ready(Err(quinn::ConnectionError::LocallyClosed)),
+                Poll::Ready(Err(e)) => {
+                    tracing::warn!(?e, "OpenBiFuture poll err receiving");
+                    Poll::Ready(Err(quinn::ConnectionError::LocallyClosed))
+                }
             },
             OpenBiFutureState::Taken => unreachable!(),
         }

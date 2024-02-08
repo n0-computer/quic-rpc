@@ -168,8 +168,63 @@ async fn server_went_away() -> anyhow::Result<()> {
     let server_handle = tokio::task::spawn(ComputeService::server_bounded(server, 5));
 
     // server is running, this should work
+    // let SqrResponse(response) = client.rpc(Sqr(3)).await.unwrap();
+    let r = client.rpc(Sqr(3)).await;
+    // assert_eq!(response, 9);
+    tracing::info!(?r, "first failure that should work");
+
+    // server is running, this should work
+    let SqrResponse(response) = client.rpc(Sqr(10)).await.unwrap();
+    assert_eq!(response, 100);
+
+    server_handle.abort();
+    Ok(())
+}
+
+#[tokio::test]
+async fn server_away_and_back() -> anyhow::Result<()> {
+    tracing_subscriber::fmt::try_init().ok();
+    tracing::info!("Creating endpoints");
+
+    let server_addr: SocketAddr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 12347));
+    let (server_config, server_cert) = configure_server()?;
+    let server = Endpoint::server(server_config.clone(), server_addr)?;
+    let client = make_client_endpoint("0.0.0.0:0".parse()?, &[&server_cert])?;
+
+    // create the RPC Server
+    let connection = transport::quinn::QuinnServerEndpoint::new(server)?;
+    let server = RpcServer::<ComputeService, _>::new(connection);
+    let server_handle = tokio::task::spawn(ComputeService::server_bounded(server, 1));
+
+    // create the rpc client
+    let client_connection =
+        transport::quinn::QuinnConnection::new(client, server_addr, "localhost".into());
+    let client = RpcClient::new(client_connection);
+
+    // send the first request and wait for the response to ensure everything works as expected
+    let SqrResponse(response) = client.rpc(Sqr(4)).await.unwrap();
+    assert_eq!(response, 16);
+
+    let server = server_handle.await.unwrap().unwrap();
+    drop(server);
+    // wait for drop to free the socket
+    tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
+
+    // make the server run again
+    let server = Endpoint::server(server_config, server_addr)?;
+    let connection = transport::quinn::QuinnServerEndpoint::new(server)?;
+    let server = RpcServer::<ComputeService, _>::new(connection);
+    let server_handle = tokio::task::spawn(ComputeService::server_bounded(server, 5));
+
+    // server is running, this should work
+    // let SqrResponse(response) = client.rpc(Sqr(3)).await.unwrap();
+    let r = client.rpc(Sqr(3)).await;
+    // assert_eq!(response, 9);
+    tracing::info!(?r, "first failure that should work");
+
     let SqrResponse(response) = client.rpc(Sqr(3)).await.unwrap();
     assert_eq!(response, 9);
+
     server_handle.abort();
     Ok(())
 }
