@@ -310,6 +310,8 @@ impl<In: RpcMessage, Out: RpcMessage> QuinnConnection<In, Out> {
                 Ok(connecting) => connecting,
                 Err(e) => {
                     tracing::warn!("error calling connect: {}", e);
+                    // could not connect, if a request is pending, drop it.
+                    pending_request = None;
                     // try again. Maybe delay?
                     continue;
                 }
@@ -318,6 +320,8 @@ impl<In: RpcMessage, Out: RpcMessage> QuinnConnection<In, Out> {
                 Ok(connection) => connection,
                 Err(e) => {
                     tracing::warn!("error awaiting connect: {}", e);
+                    // could not connect, if a request is pending, drop it.
+                    pending_request = None;
                     // try again. Maybe delay?
                     continue;
                 }
