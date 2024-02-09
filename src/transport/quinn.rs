@@ -301,6 +301,9 @@ impl<In: RpcMessage, Out: RpcMessage> QuinnConnection<In, Out> {
         name: String,
         requests: flume::Receiver<oneshot::Sender<Result<SocketInner, quinn::ConnectionError>>>,
     ) {
+        // a pending request to open a bi-directional stream that was received with a lost
+        // connection
+        let mut pending_request = None;
         'outer: loop {
             tracing::debug!("Connecting to {} as {}", addr, name);
             let connecting = match endpoint.connect(addr, &name) {
@@ -320,13 +323,19 @@ impl<In: RpcMessage, Out: RpcMessage> QuinnConnection<In, Out> {
                 }
             };
             loop {
-                tracing::debug!("Awaiting request for new bidi substream...");
-                let request = match requests.recv_async().await {
-                    Ok(request) => request,
-                    Err(_) => {
-                        tracing::debug!("client dropped");
-                        connection.close(0u32.into(), b"requester dropped");
-                        break;
+                // first handle the pending request, then check for new requests
+                let request = match pending_request.take() {
+                    Some(request) => request,
+                    None => {
+                        tracing::debug!("Awaiting request for new bidi substream...");
+                        match requests.recv_async().await {
+                            Ok(request) => request,
+                            Err(_) => {
+                                tracing::debug!("client dropped");
+                                connection.close(0u32.into(), b"requester dropped");
+                                break;
+                            }
+                        }
                     }
                 };
                 tracing::debug!("Got request for new bidi substream");
@@ -340,6 +349,7 @@ impl<In: RpcMessage, Out: RpcMessage> QuinnConnection<In, Out> {
                     Err(e) => {
                         tracing::warn!("error opening bidi substream: {}", e);
                         tracing::warn!("recreating connection");
+                        pending_request = Some(request);
                         // try again. Maybe delay?
                         continue 'outer;
                     }
@@ -583,10 +593,7 @@ impl<In: RpcMessage, Out: RpcMessage> Future for OpenBiFuture<In, Out> {
                     self.0 = OpenBiFutureState::Sending(fut, recever);
                     Poll::Pending
                 }
-                Poll::Ready(Err(e)) => {
-                    tracing::warn!(?e, "OpenBiFuture poll err sending");
-                    Poll::Ready(Err(quinn::ConnectionError::LocallyClosed))
-                }
+                Poll::Ready(Err(_)) => Poll::Ready(Err(quinn::ConnectionError::LocallyClosed)),
             },
             OpenBiFutureState::Receiving(mut fut) => match fut.poll_unpin(cx) {
                 Poll::Ready(Ok(Ok((send, recv)))) => {
@@ -599,10 +606,7 @@ impl<In: RpcMessage, Out: RpcMessage> Future for OpenBiFuture<In, Out> {
                     self.0 = OpenBiFutureState::Receiving(fut);
                     Poll::Pending
                 }
-                Poll::Ready(Err(e)) => {
-                    tracing::warn!(?e, "OpenBiFuture poll err receiving");
-                    Poll::Ready(Err(quinn::ConnectionError::LocallyClosed))
-                }
+                Poll::Ready(Err(_)) => Poll::Ready(Err(quinn::ConnectionError::LocallyClosed)),
             },
             OpenBiFutureState::Taken => unreachable!(),
         }

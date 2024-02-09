@@ -19,7 +19,7 @@ use std::{
 use thousands::Separable;
 
 /// compute the square of a number
-#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Sqr(pub u64);
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]

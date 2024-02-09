@@ -134,53 +134,10 @@ async fn quinn_channel_smoke() -> anyhow::Result<()> {
     Ok(())
 }
 
-#[tokio::test]
-async fn server_went_away() -> anyhow::Result<()> {
-    tracing_subscriber::fmt::try_init().ok();
-    tracing::info!("Creating endpoints");
-    let Endpoints {
-        client,
-        server,
-        server_addr,
-    } = make_endpoints(12347)?;
-
-    // create the RPC Server
-    let connection = transport::quinn::QuinnServerEndpoint::new(server)?;
-    let server = RpcServer::<ComputeService, _>::new(connection);
-    let server_handle = tokio::task::spawn(ComputeService::server_bounded(server, 1));
-
-    // create the rpc client
-    let client_connection =
-        transport::quinn::QuinnConnection::new(client, server_addr, "localhost".into());
-    let client = RpcClient::new(client_connection);
-
-    // send the first request and wait for the response to ensure everything works as expected
-    let SqrResponse(response) = client.rpc(Sqr(4)).await.unwrap();
-    assert_eq!(response, 16);
-
-    let server = server_handle.await.unwrap().unwrap();
-
-    // server is not running, this should fail
-    let e = client.rpc(Sqr(2)).await.unwrap_err();
-    tracing::info!(?e, "request got expected failure");
-
-    // make the server run again
-    let server_handle = tokio::task::spawn(ComputeService::server_bounded(server, 5));
-
-    // server is running, this should work
-    // let SqrResponse(response) = client.rpc(Sqr(3)).await.unwrap();
-    let r = client.rpc(Sqr(3)).await;
-    // assert_eq!(response, 9);
-    tracing::info!(?r, "first failure that should work");
-
-    // server is running, this should work
-    let SqrResponse(response) = client.rpc(Sqr(10)).await.unwrap();
-    assert_eq!(response, 100);
-
-    server_handle.abort();
-    Ok(())
-}
-
+/// Test that using the client after the server goes away and comes back behaves as if the server
+/// had never gone away in the first place.
+///
+/// This is a regression test.
 #[tokio::test]
 async fn server_away_and_back() -> anyhow::Result<()> {
     tracing_subscriber::fmt::try_init().ok();
@@ -196,7 +153,7 @@ async fn server_away_and_back() -> anyhow::Result<()> {
     let server = RpcServer::<ComputeService, _>::new(connection);
     let server_handle = tokio::task::spawn(ComputeService::server_bounded(server, 1));
 
-    // create the rpc client
+    // create the RPC client
     let client_connection =
         transport::quinn::QuinnConnection::new(client, server_addr, "localhost".into());
     let client = RpcClient::new(client_connection);
@@ -217,11 +174,6 @@ async fn server_away_and_back() -> anyhow::Result<()> {
     let server_handle = tokio::task::spawn(ComputeService::server_bounded(server, 5));
 
     // server is running, this should work
-    // let SqrResponse(response) = client.rpc(Sqr(3)).await.unwrap();
-    let r = client.rpc(Sqr(3)).await;
-    // assert_eq!(response, 9);
-    tracing::info!(?r, "first failure that should work");
-
     let SqrResponse(response) = client.rpc(Sqr(3)).await.unwrap();
     assert_eq!(response, 9);
 
