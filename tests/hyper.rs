@@ -283,7 +283,7 @@ async fn hyper_channel_errors() -> anyhow::Result<()> {
 
     // response small - should succeed
     let res = client.rpc(BigResponseRequest(10_000_000)).await;
-    assert_matches!(res, Ok(_));
+    assert!(res.is_ok());
     assert_server_result!(Ok(()));
 
     // response big - should fail
