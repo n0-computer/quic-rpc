@@ -145,18 +145,22 @@ async fn server_away_and_back() -> anyhow::Result<()> {
 
     let server_addr: SocketAddr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 12347));
     let (server_config, server_cert) = configure_server()?;
-    let server = Endpoint::server(server_config.clone(), server_addr)?;
-    let client = make_client_endpoint("0.0.0.0:0".parse()?, &[&server_cert])?;
-
-    // create the RPC Server
-    let connection = transport::quinn::QuinnServerEndpoint::new(server)?;
-    let server = RpcServer::<ComputeService, _>::new(connection);
-    let server_handle = tokio::task::spawn(ComputeService::server_bounded(server, 1));
 
     // create the RPC client
+    let client = make_client_endpoint("0.0.0.0:0".parse()?, &[&server_cert])?;
     let client_connection =
         transport::quinn::QuinnConnection::new(client, server_addr, "localhost".into());
     let client = RpcClient::new(client_connection);
+
+    // send a request. No server available so it should fail
+    let e = client.rpc(Sqr(4)).await.unwrap_err();
+    println!("{e}");
+
+    // create the RPC Server
+    let server = Endpoint::server(server_config.clone(), server_addr)?;
+    let connection = transport::quinn::QuinnServerEndpoint::new(server)?;
+    let server = RpcServer::<ComputeService, _>::new(connection);
+    let server_handle = tokio::task::spawn(ComputeService::server_bounded(server, 1));
 
     // send the first request and wait for the response to ensure everything works as expected
     let SqrResponse(response) = client.rpc(Sqr(4)).await.unwrap();
