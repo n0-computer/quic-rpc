@@ -61,7 +61,7 @@ pub struct QuinnServerEndpoint<In: RpcMessage, Out: RpcMessage> {
 impl<In: RpcMessage, Out: RpcMessage> QuinnServerEndpoint<In, Out> {
     /// handles RPC requests from a connection
     ///
-    /// to cleanly shutdown the handler, drop the receiver side of the sender.
+    /// to cleanly shutdown tee handler, drop the receiver side of the sender.
     async fn connection_handler(connection: quinn::Connection, sender: flume::Sender<SocketInner>) {
         loop {
             tracing::debug!("Awaiting incoming bidi substream on existing connection...");
@@ -106,6 +106,7 @@ impl<In: RpcMessage, Out: RpcMessage> QuinnServerEndpoint<In, Out> {
             tracing::debug!("Spawning connection handler...");
             tokio::spawn(Self::connection_handler(conection, sender.clone()));
         }
+        tracing::debug!("endpoint handler finished");
     }
 
     /// Create a new server channel, given a quinn endpoint.
@@ -311,8 +312,6 @@ impl<In: RpcMessage, Out: RpcMessage> QuinnConnection<In, Out> {
 
         let mut receiver = Receiver::new(&requests);
 
-        // a pending request to open a bi-directional stream that was received with a lost
-        // connection
         let mut pending_request: Option<
             oneshot::Sender<Result<SocketInner, quinn::ConnectionError>>,
         > = None;
@@ -322,8 +321,12 @@ impl<In: RpcMessage, Out: RpcMessage> QuinnConnection<In, Out> {
             tokio::select! {
                 // wait for a new connection to be opened
                 conn_result = reconnect.as_mut() => {
+                    tracing::trace!("tick: connection result");
                     match conn_result {
-                        Ok(new_connection) => connection = Some(new_connection),
+                        Ok(new_connection) => {
+                            connection = Some(new_connection);
+                            tracing::debug!("got new connection");
+                        },
                         Err(e) => {
                             let connection_err = match e {
                                 ReconnectErr::Connect(e) => {
@@ -331,10 +334,13 @@ impl<In: RpcMessage, Out: RpcMessage> QuinnConnection<In, Out> {
                                     // ConnectionError, not a ConnectError. I'm mapping this now to
                                     // some ConnectionError since before it was not even reported.
                                     // Maybe adjust the type?
-                                    tracing::warn!("error calling connect: {}", e);
+                                    tracing::warn!(%e, "error calling connect");
                                     quinn::ConnectionError::Reset
                                 },
-                                ReconnectErr::Connection(e) => e,
+                                ReconnectErr::Connection(e) => {
+                                    tracing::warn!(%e, "failed to connect");
+                                    e
+                                },
                             };
                             if let Some(request) = pending_request.take() {
                                 if request.send(Err(connection_err)).is_err() {
@@ -346,8 +352,10 @@ impl<In: RpcMessage, Out: RpcMessage> QuinnConnection<In, Out> {
                 }
                 // wait for a new request as long as there is no pending one
                 req = receiver.next(), if pending_request.is_none() => {
+                    tracing::trace!("tick: bidi request");
                     match req {
                         Some(request) => {
+                            tracing::debug!("got new bidi request");
                             pending_request = Some(request)
                         },
                         None => {
@@ -361,6 +369,11 @@ impl<In: RpcMessage, Out: RpcMessage> QuinnConnection<In, Out> {
                 }
             }
 
+            tracing::trace!(
+                "connection is some {}; request is some {}",
+                connection.is_some(),
+                pending_request.is_some()
+            );
             if let Some(connection) = connection.as_mut() {
                 if let Some(request) = pending_request.take() {
                     match connection.open_bi().await {
@@ -473,32 +486,40 @@ impl Future for ReconnectHandler {
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         match self.state.poison() {
-            ConnectionState::NotConnected => match self.endpoint.connect(self.addr, &self.name) {
-                Ok(connecting) => {
-                    self.state = ConnectionState::Connecting(connecting);
-                    self.poll(cx)
-                }
-                Err(e) => {
-                    self.state = ConnectionState::NotConnected;
-                    Poll::Ready(Err(ReconnectErr::Connect(e)))
-                }
-            },
-            ConnectionState::Connecting(mut connecting) => match connecting.poll_unpin(cx) {
-                Poll::Ready(res) => match res {
-                    Ok(connection) => {
-                        self.state = ConnectionState::Connected;
-                        Poll::Ready(Ok(connection))
+            ConnectionState::NotConnected => {
+                tracing::debug!(addr = %self.addr, name = self.name, "calling connect");
+
+                match self.endpoint.connect(self.addr, &self.name) {
+                    Ok(connecting) => {
+                        self.state = ConnectionState::Connecting(connecting);
+                        self.poll(cx)
                     }
                     Err(e) => {
                         self.state = ConnectionState::NotConnected;
-                        Poll::Ready(Err(ReconnectErr::Connection(e)))
+                        Poll::Ready(Err(ReconnectErr::Connect(e)))
                     }
-                },
-                Poll::Pending => {
-                    self.state = ConnectionState::Connecting(connecting);
-                    Poll::Pending
                 }
-            },
+            }
+            ConnectionState::Connecting(mut connecting) => {
+                tracing::debug!(addr = %self.addr, name = self.name, "awaiting connect");
+
+                match connecting.poll_unpin(cx) {
+                    Poll::Ready(res) => match res {
+                        Ok(connection) => {
+                            self.state = ConnectionState::Connected;
+                            Poll::Ready(Ok(connection))
+                        }
+                        Err(e) => {
+                            self.state = ConnectionState::NotConnected;
+                            Poll::Ready(Err(ReconnectErr::Connection(e)))
+                        }
+                    },
+                    Poll::Pending => {
+                        self.state = ConnectionState::Connecting(connecting);
+                        Poll::Pending
+                    }
+                }
+            }
             ConnectionState::Connected => {
                 // waiting for a request to open a new connection, nothing to do
                 self.state = ConnectionState::Connected;
