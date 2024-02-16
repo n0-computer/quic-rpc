@@ -154,7 +154,6 @@ async fn server_away_and_back() -> anyhow::Result<()> {
 
     // send a request. No server available so it should fail
     let e = client.rpc(Sqr(4)).await.unwrap_err();
-    tracing::info!(%e, "got expected request failure");
 
     // create the RPC Server
     let server = Endpoint::server(server_config.clone(), server_addr)?;
@@ -164,7 +163,6 @@ async fn server_away_and_back() -> anyhow::Result<()> {
 
     // send the first request and wait for the response to ensure everything works as expected
     let SqrResponse(response) = client.rpc(Sqr(4)).await.unwrap();
-    tracing::info!(%response, "got expected response");
     assert_eq!(response, 16);
 
     let server = server_handle.await.unwrap().unwrap();
@@ -172,19 +170,14 @@ async fn server_away_and_back() -> anyhow::Result<()> {
     // wait for drop to free the socket
     tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
 
-    tracing::info!("SERVER DROPPED");
-
     // make the server run again
     let server = Endpoint::server(server_config, server_addr)?;
     let connection = transport::quinn::QuinnServerEndpoint::new(server)?;
     let server = RpcServer::<ComputeService, _>::new(connection);
     let server_handle = tokio::task::spawn(ComputeService::server_bounded(server, 5));
-    tracing::info!("Server spawned");
 
     // server is running, this should work
-    tracing::info!("sending Sqr(3)");
     let SqrResponse(response) = client.rpc(Sqr(3)).await.unwrap();
-    tracing::info!(%response, "got expected response");
     assert_eq!(response, 9);
 
     server_handle.abort();

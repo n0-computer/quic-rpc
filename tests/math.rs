@@ -164,9 +164,7 @@ impl ComputeService {
         let service = ComputeService;
         while received < count {
             received += 1;
-            tracing::debug!("before accept");
             let (req, chan) = s.accept().await?;
-            tracing::debug!("after accept");
             let service = service.clone();
             tokio::spawn(async move {
                 use ComputeRequest::*;
