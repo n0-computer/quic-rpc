@@ -153,7 +153,7 @@ async fn server_away_and_back() -> anyhow::Result<()> {
     let client = RpcClient::new(client_connection);
 
     // send a request. No server available so it should fail
-    let e = client.rpc(Sqr(4)).await.unwrap_err();
+    client.rpc(Sqr(4)).await.unwrap_err();
 
     // create the RPC Server
     let server = Endpoint::server(server_config.clone(), server_addr)?;
