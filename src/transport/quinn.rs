@@ -317,52 +317,65 @@ impl<In: RpcMessage, Out: RpcMessage> QuinnConnection<In, Out> {
         let mut connection = None;
 
         loop {
-            tokio::select! {
-                // wait for a new connection to be opened
-                conn_result = reconnect.as_mut(), if !reconnect.connected() => {
-                    tracing::trace!("tick: connection result");
-                    match conn_result {
-                        Ok(new_connection) => {
-                            connection = Some(new_connection);
-                        },
-                        Err(e) => {
-                            let connection_err = match e {
-                                ReconnectErr::Connect(e) => {
-                                    // TODO(@divma): the type for now accepts only a
-                                    // ConnectionError, not a ConnectError. I'm mapping this now to
-                                    // some ConnectionError since before it was not even reported.
-                                    // Maybe adjust the type?
-                                    tracing::warn!(%e, "error calling connect");
-                                    quinn::ConnectionError::Reset
-                                },
-                                ReconnectErr::Connection(e) => {
-                                    tracing::warn!(%e, "failed to connect");
-                                    e
-                                },
-                            };
-                            if let Some(request) = pending_request.take() {
-                                if request.send(Err(connection_err)).is_err() {
-                                    tracing::debug!("requester dropped");
-                                }
-                            }
-                        },
+            let mut conn_result = None;
+            let mut chann_result = None;
+            if !reconnect.connected() && pending_request.is_none() {
+                match futures::future::select(reconnect.as_mut(), receiver.next()).await {
+                    futures::future::Either::Left((connection_result, _)) => {
+                        conn_result = Some(connection_result)
+                    }
+                    futures::future::Either::Right((channel_result, _)) => {
+                        chann_result = Some(channel_result);
                     }
                 }
+            } else if !reconnect.connected() {
+                // only need a new connection
+                conn_result = Some(reconnect.as_mut().await);
+            } else if pending_request.is_none() {
+                // there is a connection, just need a request
+                chann_result = Some(receiver.next().await);
+            }
 
-                // wait for a new request as long as there is no pending one
-                req = receiver.next(), if pending_request.is_none() => {
-                    tracing::trace!("tick: bidi request");
-                    match req {
-                        Some(request) => {
-                            pending_request = Some(request)
-                        },
-                        None => {
-                            tracing::debug!("client dropped");
-                            if let Some(connection) = connection {
-                                connection.close(0u32.into(), b"requester dropped");
+            if let Some(conn_result) = conn_result {
+                tracing::trace!("tick: connection result");
+                match conn_result {
+                    Ok(new_connection) => {
+                        connection = Some(new_connection);
+                    }
+                    Err(e) => {
+                        let connection_err = match e {
+                            ReconnectErr::Connect(e) => {
+                                // TODO(@divma): the type for now accepts only a
+                                // ConnectionError, not a ConnectError. I'm mapping this now to
+                                // some ConnectionError since before it was not even reported.
+                                // Maybe adjust the type?
+                                tracing::warn!(%e, "error calling connect");
+                                quinn::ConnectionError::Reset
                             }
-                            break;
+                            ReconnectErr::Connection(e) => {
+                                tracing::warn!(%e, "failed to connect");
+                                e
+                            }
+                        };
+                        if let Some(request) = pending_request.take() {
+                            if request.send(Err(connection_err)).is_err() {
+                                tracing::debug!("requester dropped");
+                            }
                         }
+                    }
+                }
+            }
+
+            if let Some(req) = chann_result {
+                tracing::trace!("tick: bidi request");
+                match req {
+                    Some(request) => pending_request = Some(request),
+                    None => {
+                        tracing::debug!("client dropped");
+                        if let Some(connection) = connection {
+                            connection.close(0u32.into(), b"requester dropped");
+                        }
+                        break;
                     }
                 }
             }
