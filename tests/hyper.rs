@@ -31,6 +31,105 @@ fn run_server(addr: &SocketAddr) -> JoinHandle<anyhow::Result<()>> {
     })
 }
 
+#[derive(Debug, Serialize, Deserialize, From, TryInto)]
+enum TestResponse {
+    Unit(()),
+    Big(Vec<u8>),
+    NoSer(NoSer),
+    NoDeser(NoDeser),
+}
+
+type SC = HyperServerEndpoint<TestRequest, TestResponse>;
+
+/// request that can be too big
+#[derive(Debug, Serialize, Deserialize)]
+pub struct BigRequest(Vec<u8>);
+
+/// request that looks serializable but isn't
+#[derive(Debug, Serialize, Deserialize)]
+pub struct NoSerRequest(NoSer);
+
+/// request that looks deserializable but isn't
+#[derive(Debug, Serialize, Deserialize)]
+pub struct NoDeserRequest(NoDeser);
+
+/// request where the response is not serializable
+#[derive(Debug, Serialize, Deserialize)]
+pub struct NoSerResponseRequest;
+
+/// request where the response is not deserializable
+#[derive(Debug, Serialize, Deserialize)]
+pub struct NoDeserResponseRequest;
+
+/// request that can produce a response that is too big
+#[derive(Debug, Serialize, Deserialize)]
+pub struct BigResponseRequest(usize);
+
+/// helper struct that implements serde::Serialize but errors on serialization
+#[derive(Debug, Deserialize)]
+pub struct NoSer;
+
+impl serde::Serialize for NoSer {
+    fn serialize<S>(&self, _serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        Err(serde::ser::Error::custom("nope"))
+    }
+}
+
+/// helper struct that implements serde::Deserialize but errors on deserialization
+#[derive(Debug, Serialize)]
+pub struct NoDeser;
+
+impl<'de> serde::Deserialize<'de> for NoDeser {
+    fn deserialize<D>(_deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        Err(serde::de::Error::custom("nope"))
+    }
+}
+
+#[allow(clippy::enum_variant_names)]
+#[derive(Debug, Serialize, Deserialize, From, TryInto)]
+enum TestRequest {
+    BigRequest(BigRequest),
+    NoSerRequest(NoSerRequest),
+    NoDeserRequest(NoDeserRequest),
+    NoSerResponseRequest(NoSerResponseRequest),
+    NoDeserResponseRequest(NoDeserResponseRequest),
+    BigResponseRequest(BigResponseRequest),
+}
+
+#[derive(Debug, Clone)]
+struct TestService;
+
+impl Service for TestService {
+    type Req = TestRequest;
+    type Res = TestResponse;
+}
+
+impl TestService {
+    async fn big(self, _req: BigRequest) {}
+
+    async fn noser(self, _req: NoSerRequest) {}
+
+    async fn nodeser(self, _req: NoDeserRequest) {}
+
+    async fn noserresponse(self, _req: NoSerResponseRequest) -> NoSer {
+        NoSer
+    }
+
+    async fn nodeserresponse(self, _req: NoDeserResponseRequest) -> NoDeser {
+        NoDeser
+    }
+
+    async fn bigresponse(self, req: BigResponseRequest) -> Vec<u8> {
+        vec![0; req.0]
+    }
+}
+
 #[tokio::test]
 async fn hyper_channel_bench() -> anyhow::Result<()> {
     let addr: SocketAddr = "127.0.0.1:3000".parse()?;
@@ -57,114 +156,15 @@ async fn hyper_channel_smoke() -> anyhow::Result<()> {
     Ok(())
 }
 
+declare_rpc!(TestService, BigRequest, ());
+declare_rpc!(TestService, NoSerRequest, ());
+declare_rpc!(TestService, NoDeserRequest, ());
+declare_rpc!(TestService, NoSerResponseRequest, NoSer);
+declare_rpc!(TestService, NoDeserResponseRequest, NoDeser);
+declare_rpc!(TestService, BigResponseRequest, Vec<u8>);
+
 #[tokio::test]
 async fn hyper_channel_errors() -> anyhow::Result<()> {
-    type SC = HyperServerEndpoint<TestRequest, TestResponse>;
-
-    /// request that can be too big
-    #[derive(Debug, Serialize, Deserialize)]
-    pub struct BigRequest(Vec<u8>);
-
-    /// request that looks serializable but isn't
-    #[derive(Debug, Serialize, Deserialize)]
-    pub struct NoSerRequest(NoSer);
-
-    /// request that looks deserializable but isn't
-    #[derive(Debug, Serialize, Deserialize)]
-    pub struct NoDeserRequest(NoDeser);
-
-    /// request where the response is not serializable
-    #[derive(Debug, Serialize, Deserialize)]
-    pub struct NoSerResponseRequest;
-
-    /// request where the response is not deserializable
-    #[derive(Debug, Serialize, Deserialize)]
-    pub struct NoDeserResponseRequest;
-
-    /// request that can produce a response that is too big
-    #[derive(Debug, Serialize, Deserialize)]
-    pub struct BigResponseRequest(usize);
-
-    /// helper struct that implements serde::Serialize but errors on serialization
-    #[derive(Debug, Deserialize)]
-    pub struct NoSer;
-
-    impl serde::Serialize for NoSer {
-        fn serialize<S>(&self, _serializer: S) -> Result<S::Ok, S::Error>
-        where
-            S: serde::Serializer,
-        {
-            Err(serde::ser::Error::custom("nope"))
-        }
-    }
-
-    /// helper struct that implements serde::Deserialize but errors on deserialization
-    #[derive(Debug, Serialize)]
-    pub struct NoDeser;
-
-    impl<'de> serde::Deserialize<'de> for NoDeser {
-        fn deserialize<D>(_deserializer: D) -> Result<Self, D::Error>
-        where
-            D: serde::Deserializer<'de>,
-        {
-            Err(serde::de::Error::custom("nope"))
-        }
-    }
-
-    #[allow(clippy::enum_variant_names)]
-    #[derive(Debug, Serialize, Deserialize, From, TryInto)]
-    enum TestRequest {
-        BigRequest(BigRequest),
-        NoSerRequest(NoSerRequest),
-        NoDeserRequest(NoDeserRequest),
-        NoSerResponseRequest(NoSerResponseRequest),
-        NoDeserResponseRequest(NoDeserResponseRequest),
-        BigResponseRequest(BigResponseRequest),
-    }
-
-    #[derive(Debug, Serialize, Deserialize, From, TryInto)]
-    enum TestResponse {
-        Unit(()),
-        Big(Vec<u8>),
-        NoSer(NoSer),
-        NoDeser(NoDeser),
-    }
-
-    #[derive(Debug, Clone)]
-    struct TestService;
-
-    impl Service for TestService {
-        type Req = TestRequest;
-        type Res = TestResponse;
-    }
-
-    impl TestService {
-        async fn big(self, _req: BigRequest) {}
-
-        async fn noser(self, _req: NoSerRequest) {}
-
-        async fn nodeser(self, _req: NoDeserRequest) {}
-
-        async fn noserresponse(self, _req: NoSerResponseRequest) -> NoSer {
-            NoSer
-        }
-
-        async fn nodeserresponse(self, _req: NoDeserResponseRequest) -> NoDeser {
-            NoDeser
-        }
-
-        async fn bigresponse(self, req: BigResponseRequest) -> Vec<u8> {
-            vec![0; req.0]
-        }
-    }
-
-    declare_rpc!(TestService, BigRequest, ());
-    declare_rpc!(TestService, NoSerRequest, ());
-    declare_rpc!(TestService, NoDeserRequest, ());
-    declare_rpc!(TestService, NoSerResponseRequest, NoSer);
-    declare_rpc!(TestService, NoDeserResponseRequest, NoDeser);
-    declare_rpc!(TestService, BigResponseRequest, Vec<u8>);
-
     #[allow(clippy::type_complexity)]
     fn run_test_server(
         addr: &SocketAddr,
