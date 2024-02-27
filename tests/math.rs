@@ -153,6 +153,38 @@ impl ComputeService {
         }
     }
 
+    /// Runs the service until `count` requests have been received.
+    pub async fn server_bounded<C: ServiceEndpoint<ComputeService>>(
+        server: RpcServer<ComputeService, C>,
+        count: usize,
+    ) -> result::Result<RpcServer<ComputeService, C>, RpcServerError<C>> {
+        tracing::info!(%count, "server running");
+        let s = server;
+        let mut received = 0;
+        let service = ComputeService;
+        while received < count {
+            received += 1;
+            let (req, chan) = s.accept().await?;
+            let service = service.clone();
+            tokio::spawn(async move {
+                use ComputeRequest::*;
+                tracing::info!(?req, "got request");
+                #[rustfmt::skip]
+                match req {
+                    Sqr(msg) => chan.rpc(msg, service, ComputeService::sqr).await,
+                    Sum(msg) => chan.client_streaming(msg, service, ComputeService::sum).await,
+                    Fibonacci(msg) => chan.server_streaming(msg, service, ComputeService::fibonacci).await,
+                    Multiply(msg) => chan.bidi_streaming(msg, service, ComputeService::multiply).await,
+                    SumUpdate(_) => Err(RpcServerError::UnexpectedStartMessage)?,
+                    MultiplyUpdate(_) => Err(RpcServerError::UnexpectedStartMessage)?,
+                }?;
+                Ok::<_, RpcServerError<C>>(())
+            });
+        }
+        tracing::info!(%count, "server finished");
+        Ok(s)
+    }
+
     pub async fn server_par<C: ServiceEndpoint<ComputeService>>(
         server: RpcServer<ComputeService, C>,
         parallelism: usize,
