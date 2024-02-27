@@ -25,8 +25,13 @@ quinn = { version = "0.10", optional = true }
 serde = { version = "1.0.183" }
 tokio = { version = "1", default-features = false, features = ["macros"] }
 tokio-serde = { version = "0.8", features = ["bincode"], optional = true }
-tokio-util = { version = "0.7", features = ["codec"], optional = true }
+tokio-util = { version = "0.7", features = ["codec", "compat"], optional = true }
 tracing = "0.1"
+quinn-udp = { version = "0.4.0", optional = true }
+interprocess = { version = "1.2.1", features = ["tokio"], optional = true }
+# interprocess = { git = "https://github.com/kotauskas/interprocess", branch = "main", version = "2", features = ["tokio"], optional = true }
+hex = "0.4.3"
+blake3 = "1.4.1"
 
 [dependencies.educe]
 # This is an unused dependency, it is needed to make the minimal
@@ -52,9 +57,11 @@ proc-macro2 = "1.0.66"
 hyper-transport = ["flume", "hyper", "bincode", "bytes"]
 quinn-transport = ["flume", "quinn", "bincode", "tokio-serde", "tokio-util"]
 flume-transport = ["flume"]
+interprocess-transport = ["quinn-udp", "interprocess", "bytes", "tokio-util", "quinn-transport"]
 combined-transport = []
+quinn-flume-socket = ["flume", "quinn", "quinn-udp", "bytes", "tokio-util"]
 macros = []
-default = []
+default = ["quinn-flume-socket", "interprocess-transport"]
 
 [[example]]
 name = "errors"

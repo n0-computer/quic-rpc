@@ -1,4 +1,6 @@
 #![cfg(feature = "hyper-transport")]
+#![allow(clippy::redundant_pattern_matching)]
+
 use std::{net::SocketAddr, result};
 
 use ::hyper::Uri;

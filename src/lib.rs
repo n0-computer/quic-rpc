@@ -12,6 +12,7 @@
 //!
 //! # Example
 //! ```
+//! #[cfg(feature = "flume-transport")]
 //! # async fn example() -> anyhow::Result<()> {
 //! use quic_rpc::{message::RpcMsg, Service, RpcClient, RpcServer};
 //! use serde::{Serialize, Deserialize};
