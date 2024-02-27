@@ -5,7 +5,7 @@ use futures::{SinkExt, Stream, StreamExt};
 use quic_rpc::{
     server::RpcServerError,
     transport::{flume, Connection, ServerEndpoint},
-    Service, ServiceEndpoint, *,
+    *,
 };
 use serde::{Deserialize, Serialize};
 use std::{fmt::Debug, result};
