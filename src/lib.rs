@@ -173,10 +173,8 @@ impl<S0, S2> IntoService<S2> for S0
 where
     S0: Service,
     S2: Service,
-    S2::Req: Into<S0::Req> + Send + 'static,
-    S2::Res: Into<S0::Res> + Send + 'static,
-    S2::Req: TryFrom<S0::Req> + Send + 'static,
-    S2::Res: TryFrom<S0::Res> + Send + 'static,
+    S2::Req: Into<S0::Req> + TryFrom<S0::Req> + Send + 'static,
+    S2::Res: Into<S0::Res> + TryFrom<S0::Res> + Send + 'static,
 {
     fn outer_req_from(req: impl Into<S2::Req>) -> S0::Req {
         (req.into()).into()
