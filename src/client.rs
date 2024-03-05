@@ -4,7 +4,7 @@
 use crate::{
     message::{BidiStreamingMsg, ClientStreamingMsg, RpcMsg, ServerStreamingMsg},
     transport::ConnectionErrors,
-    Service, ServiceConnection,
+    IntoService, Service, ServiceConnection,
 };
 use futures::{
     future::BoxFuture, stream::BoxStream, FutureExt, Sink, SinkExt, Stream, StreamExt, TryFutureExt,
@@ -24,16 +24,18 @@ use std::{
 /// This is a wrapper around a [ServiceConnection] that serves as the entry point
 /// for the client DSL. `S` is the service type, `C` is the substream source.
 #[derive(Debug)]
-pub struct RpcClient<S, C> {
+pub struct RpcClient<S, C, S2 = S> {
     source: C,
     p: PhantomData<S>,
+    p2: PhantomData<S2>,
 }
 
-impl<S, C: Clone> Clone for RpcClient<S, C> {
+impl<S, C: Clone, S2> Clone for RpcClient<S, C, S2> {
     fn clone(&self) -> Self {
         Self {
             source: self.source.clone(),
             p: PhantomData,
+            p2: PhantomData,
         }
     }
 }
@@ -42,51 +44,19 @@ impl<S, C: Clone> Clone for RpcClient<S, C> {
 /// that support it, [crate::message::ClientStreaming] and [crate::message::BidiStreaming].
 #[pin_project]
 #[derive(Debug)]
-pub struct UpdateSink<S: Service, C: ServiceConnection<S>, T: Into<S::Req>>(
-    #[pin] C::SendSink,
-    PhantomData<T>,
-);
-
-impl<S: Service, C: ServiceConnection<S>, T: Into<S::Req>> Sink<T> for UpdateSink<S, C, T> {
-    type Error = C::SendError;
-
-    fn poll_ready(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.project().0.poll_ready_unpin(cx)
-    }
-
-    fn start_send(self: Pin<&mut Self>, item: T) -> Result<(), Self::Error> {
-        let req: S::Req = item.into();
-        self.project().0.start_send_unpin(req)
-    }
-
-    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.project().0.poll_flush_unpin(cx)
-    }
-
-    fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.project().0.poll_close_unpin(cx)
-    }
-}
-
-/// Sink that can be used to send updates to the server for the two interaction patterns
-/// that support it, [crate::message::ClientStreaming] and [crate::message::BidiStreaming].
-#[pin_project]
-#[derive(Debug)]
-pub struct MappedUpdateSink<S2, S, C, T>(#[pin] C::SendSink, PhantomData<T>, PhantomData<S2>)
+pub struct UpdateSink<S, C, T, S2 = S>(#[pin] C::SendSink, PhantomData<T>, PhantomData<S2>)
 where
+    S: IntoService<S2>,
     S2: Service,
-    S: Service,
+    C: ServiceConnection<S>,
+    T: Into<S2::Req>;
+
+impl<S, C, T, S2> Sink<T> for UpdateSink<S, C, T, S2>
+where
+    S: IntoService<S2>,
+    S2: Service,
     C: ServiceConnection<S>,
     T: Into<S2::Req>,
-    S2::Req: Into<S::Req>;
-
-impl<S2, S, C, T> Sink<T> for MappedUpdateSink<S2, S, C, T>
-where
-    S2: Service,
-    S: Service,
-    C: ServiceConnection<S>,
-    T: Into<S2::Req>,
-    S2::Req: Into<S::Req>,
 {
     type Error = C::SendError;
 
@@ -96,7 +66,7 @@ where
 
     fn start_send(self: Pin<&mut Self>, item: T) -> Result<(), Self::Error> {
         let req: S2::Req = item.into();
-        let req: S::Req = req.into();
+        let req = S::outer_req_from(req);
         self.project().0.start_send_unpin(req)
     }
 
@@ -109,7 +79,7 @@ where
     }
 }
 
-impl<S: Service, C: ServiceConnection<S>> RpcClient<S, C> {
+impl<S: Service + IntoService<S2>, C: ServiceConnection<S>, S2: Service> RpcClient<S, C, S2> {
     /// Create a new rpc client for a specific [Service] given a compatible
     /// [ServiceConnection].
     ///
@@ -118,6 +88,7 @@ impl<S: Service, C: ServiceConnection<S>> RpcClient<S, C> {
         Self {
             source,
             p: PhantomData,
+            p2: PhantomData,
         }
     }
 
@@ -126,15 +97,21 @@ impl<S: Service, C: ServiceConnection<S>> RpcClient<S, C> {
         self.source
     }
 
+    /// Map this channel into a derivable service channel.
+    pub fn into_service<SN: Service>(self) -> RpcClient<S, C, SN>
+    where
+        S: IntoService<SN>,
+    {
+        RpcClient::<S, C, SN>::new(self.source)
+    }
+
     /// RPC call to the server, single request, single response
-    pub async fn rpc_mapped<S2, M>(&self, msg: M) -> result::Result<M::Response, RpcClientError<C>>
+    pub async fn rpc<M>(&self, msg: M) -> result::Result<M::Response, RpcClientError<C>>
     where
         M: RpcMsg<S2>,
-        S2: Service,
-        S2::Req: Into<S::Req> + TryFrom<S::Req> + Send + 'static,
-        S2::Res: Into<S::Res> + TryFrom<S::Res> + Send + 'static,
     {
-        let msg: <S2 as Service>::Req = msg.into();
+        let msg: S2::Req = msg.into();
+        let msg = S::outer_req_from(msg);
         let msg: <S as Service>::Req = msg.into();
         let (mut send, mut recv) = self.source.open_bi().await.map_err(RpcClientError::Open)?;
         send.send(msg).await.map_err(RpcClientError::<C>::Send)?;
@@ -145,53 +122,8 @@ impl<S: Service, C: ServiceConnection<S>> RpcClient<S, C> {
             .map_err(RpcClientError::<C>::RecvError)?;
         // keep send alive until we have the answer
         drop(send);
-        let res = S2::Res::try_from(res).map_err(|_| RpcClientError::DowncastError)?;
+        let res = S::try_inner_res_from(res).map_err(|_| RpcClientError::DowncastError)?;
         M::Response::try_from(res).map_err(|_| RpcClientError::DowncastError)
-    }
-
-    /// RPC call to the server, single request, single response
-    pub async fn rpc<M>(&self, msg: M) -> result::Result<M::Response, RpcClientError<C>>
-    where
-        M: RpcMsg<S>,
-    {
-        self.rpc_mapped::<S, _>(msg).await
-    }
-
-    /// Bidi call to the server, request opens a stream, response is a stream
-    pub async fn server_streaming_mapped<S2, M>(
-        &self,
-        msg: M,
-    ) -> result::Result<
-        BoxStream<'static, result::Result<M::Response, StreamingResponseItemError<C>>>,
-        StreamingResponseError<C>,
-    >
-    where
-        M: ServerStreamingMsg<S2>,
-        S2: Service,
-        S2::Req: Into<S::Req> + TryFrom<S::Req> + Send + 'static,
-        S2::Res: Into<S::Res> + TryFrom<S::Res> + Send + 'static,
-    {
-        let msg: S2::Req = msg.into();
-        let msg: S::Req = msg.into();
-        let (mut send, recv) = self
-            .source
-            .open_bi()
-            .await
-            .map_err(StreamingResponseError::Open)?;
-        send.send(msg)
-            .map_err(StreamingResponseError::<C>::Send)
-            .await?;
-        let recv = recv.map(move |x| match x {
-            Ok(x) => {
-                let x =
-                    S2::Res::try_from(x).map_err(|_| StreamingResponseItemError::DowncastError)?;
-                M::Response::try_from(x).map_err(|_| StreamingResponseItemError::DowncastError)
-            }
-            Err(e) => Err(StreamingResponseItemError::RecvError(e)),
-        });
-        // keep send alive so the request on the server side does not get cancelled
-        let recv = DeferDrop(recv, send).boxed();
-        Ok(recv)
     }
 
     /// Bidi call to the server, request opens a stream, response is a stream
@@ -203,37 +135,54 @@ impl<S: Service, C: ServiceConnection<S>> RpcClient<S, C> {
         StreamingResponseError<C>,
     >
     where
-        M: ServerStreamingMsg<S>,
+        M: ServerStreamingMsg<S2>,
     {
-        self.server_streaming_mapped::<S, _>(msg).await
+        let msg: S2::Req = msg.into();
+        let msg = S::outer_req_from(msg);
+        let (mut send, recv) = self
+            .source
+            .open_bi()
+            .await
+            .map_err(StreamingResponseError::Open)?;
+        send.send(msg)
+            .map_err(StreamingResponseError::<C>::Send)
+            .await?;
+        let recv = recv.map(move |x| match x {
+            Ok(x) => {
+                let x = S::try_inner_res_from(x)
+                    .map_err(|_| StreamingResponseItemError::DowncastError)?;
+                M::Response::try_from(x).map_err(|_| StreamingResponseItemError::DowncastError)
+            }
+            Err(e) => Err(StreamingResponseItemError::RecvError(e)),
+        });
+        // keep send alive so the request on the server side does not get cancelled
+        let recv = DeferDrop(recv, send).boxed();
+        Ok(recv)
     }
 
     /// Call to the server that allows the client to stream, single response
-    pub async fn client_streaming_mapped<S2, M>(
+    pub async fn client_streaming<M>(
         &self,
         msg: M,
     ) -> result::Result<
         (
-            MappedUpdateSink<S2, S, C, M::Update>,
+            UpdateSink<S, C, M::Update, S2>,
             BoxFuture<'static, result::Result<M::Response, ClientStreamingItemError<C>>>,
         ),
         ClientStreamingError<C>,
     >
     where
         M: ClientStreamingMsg<S2>,
-        S2: Service,
-        S2::Req: Into<S::Req> + TryFrom<S::Req> + Send + 'static,
-        S2::Res: Into<S::Res> + TryFrom<S::Res> + Send + 'static,
     {
         let msg: S2::Req = msg.into();
-        let msg: S::Req = msg.into();
+        let msg = S::outer_req_from(msg);
         let (mut send, mut recv) = self
             .source
             .open_bi()
             .await
             .map_err(ClientStreamingError::Open)?;
         send.send(msg).map_err(ClientStreamingError::Send).await?;
-        let send = MappedUpdateSink::<S2, S, C, M::Update>(send, PhantomData, PhantomData);
+        let send = UpdateSink::<S, C, M::Update, S2>(send, PhantomData, PhantomData);
         let recv = async move {
             let item = recv
                 .next()
@@ -242,7 +191,7 @@ impl<S: Service, C: ServiceConnection<S>> RpcClient<S, C> {
 
             match item {
                 Ok(x) => {
-                    let x = S2::Res::try_from(x)
+                    let x = S::try_inner_res_from(x)
                         .map_err(|_| ClientStreamingItemError::DowncastError)?;
                     M::Response::try_from(x).map_err(|_| ClientStreamingItemError::DowncastError)
                 }
@@ -253,72 +202,35 @@ impl<S: Service, C: ServiceConnection<S>> RpcClient<S, C> {
         Ok((send, recv))
     }
 
-    /// Call to the server that allows the client to stream, single response
-    pub async fn client_streaming<M>(
-        &self,
-        msg: M,
-    ) -> result::Result<
-        (
-            MappedUpdateSink<S, S, C, M::Update>,
-            BoxFuture<'static, result::Result<M::Response, ClientStreamingItemError<C>>>,
-        ),
-        ClientStreamingError<C>,
-    >
-    where
-        M: ClientStreamingMsg<S>,
-    {
-        self.client_streaming_mapped::<S, _>(msg).await
-    }
-
-    /// Bidi call to the server, request opens a stream, response is a stream
-    pub async fn bidi_mapped<S2, M>(
-        &self,
-        msg: M,
-    ) -> result::Result<
-        (
-            MappedUpdateSink<S2, S, C, M::Update>,
-            BoxStream<'static, result::Result<M::Response, BidiItemError<C>>>,
-        ),
-        BidiError<C>,
-    >
-    where
-        M: BidiStreamingMsg<S2>,
-        S2: Service,
-        S2::Req: Into<S::Req> + TryFrom<S::Req> + Send + 'static,
-        S2::Res: Into<S::Res> + TryFrom<S::Res> + Send + 'static,
-    {
-        let msg: S2::Req = msg.into();
-        let msg: S::Req = msg.into();
-        let (mut send, recv) = self.source.open_bi().await.map_err(BidiError::Open)?;
-        send.send(msg).await.map_err(BidiError::<C>::Send)?;
-        let send = MappedUpdateSink(send, PhantomData, PhantomData);
-        let recv = recv
-            .map(|x| match x {
-                Ok(x) => {
-                    let x = S2::Res::try_from(x).map_err(|_| BidiItemError::DowncastError)?;
-                    M::Response::try_from(x).map_err(|_| BidiItemError::DowncastError)
-                }
-                Err(e) => Err(BidiItemError::RecvError(e)),
-            })
-            .boxed();
-        Ok((send, recv))
-    }
-
     /// Bidi call to the server, request opens a stream, response is a stream
     pub async fn bidi<M>(
         &self,
         msg: M,
     ) -> result::Result<
         (
-            MappedUpdateSink<S, S, C, M::Update>,
+            UpdateSink<S, C, M::Update, S2>,
             BoxStream<'static, result::Result<M::Response, BidiItemError<C>>>,
         ),
         BidiError<C>,
     >
     where
-        M: BidiStreamingMsg<S>,
+        M: BidiStreamingMsg<S2>,
     {
-        self.bidi_mapped::<S, _>(msg).await
+        let msg: S2::Req = msg.into();
+        let msg = S::outer_req_from(msg);
+        let (mut send, recv) = self.source.open_bi().await.map_err(BidiError::Open)?;
+        send.send(msg).await.map_err(BidiError::<C>::Send)?;
+        let send = UpdateSink(send, PhantomData, PhantomData);
+        let recv = recv
+            .map(|x| match x {
+                Ok(x) => {
+                    let x = S::try_inner_res_from(x).map_err(|_| BidiItemError::DowncastError)?;
+                    M::Response::try_from(x).map_err(|_| BidiItemError::DowncastError)
+                }
+                Err(e) => Err(BidiItemError::RecvError(e)),
+            })
+            .boxed();
+        Ok((send, recv))
     }
 }
 
