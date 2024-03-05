@@ -96,7 +96,10 @@ impl<S: Service + IntoService<S2>, C: ServiceConnection<S>, S2: Service> RpcClie
         self.source
     }
 
-    /// Map this channel into a derivable service channel.
+    /// Map this channel's service into an inner service.
+    ///
+    /// This method is available as long as the outer service implements [`IntoService`] for the
+    /// inner service.
     pub fn map<SN: Service>(self) -> RpcClient<S, C, SN>
     where
         S: IntoService<SN>,

@@ -75,7 +75,10 @@ impl<S: IntoService<S2>, C: ServiceEndpoint<S>, S2: Service> RpcChannel<S, C, S2
         }
     }
 
-    /// Map this channel into a derivable service channel.
+    /// Map this channel's service into an inner service.
+    ///
+    /// This method is available as long as the outer service implements [`IntoService`] for the
+    /// inner service.
     pub fn map<SN: Service>(self) -> RpcChannel<S, C, SN>
     where
         S: IntoService<SN>,

@@ -156,8 +156,16 @@ pub trait Service: Send + Sync + Debug + Clone + 'static {
 
 /// Marker trait for services that can be mapped into another service.
 ///
+/// This can be used in place of the usual `S: Service` generic to accept any service that can be
+/// mapped to the service in question.
+///
 /// There is usually no need to impl this trait manually, because it is auto-implemented as long as
-/// the inner service's Req and Res types implement Into and TryFrom to the outer service's types.
+/// the inner service's Req and Res types implement [`Into`] and [`TryFrom`] to the outer service's types.
+///
+/// See `examples/modularize.rs` for an example of how to use this trait to decouple RPC services
+/// between different, independent modules or crates.
+///
+/// If an outer service impls [`IntoService`] for an inner service, the [`crate::RpcChannel`] and [`RpcClient`]
 pub trait IntoService<S: Service>: Service {
     /// Convert the inner request into the outer request.
     fn outer_req_from(req: impl Into<S::Req>) -> Self::Req;

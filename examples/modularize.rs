@@ -1,3 +1,14 @@
+//! This example shows how an RPC service can be modularized, even between different crates.
+//!
+//! The [`calc`] and [`clock`] modules both expose a [`quic_rpc::Service`] in a regular fashion.
+//! They do not `use` anything from `super` or `app` so they could live in their own crates
+//! unchanged. The only difference to other examples is that their handlers take a generic 
+//! `S: IntoService<clock:ClockService>`, which allows to pass in any service that can be mapped to
+//! the module's service.
+//!
+//! The [`app`] module depends on both `calc` and `clock` and composes both their servers and
+//! clients into a single app handler / client.
+
 use quic_rpc::{transport::flume, RpcServer};
 use tracing::warn;
 
