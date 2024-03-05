@@ -97,7 +97,7 @@ impl<S: Service + IntoService<S2>, C: ServiceConnection<S>, S2: Service> RpcClie
     }
 
     /// Map this channel into a derivable service channel.
-    pub fn service<SN: Service>(self) -> RpcClient<S, C, SN>
+    pub fn map<SN: Service>(self) -> RpcClient<S, C, SN>
     where
         S: IntoService<SN>,
     {

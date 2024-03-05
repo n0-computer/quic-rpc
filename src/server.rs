@@ -76,7 +76,7 @@ impl<S: IntoService<S2>, C: ServiceEndpoint<S>, S2: Service> RpcChannel<S, C, S2
     }
 
     /// Map this channel into a derivable service channel.
-    pub fn service<SN: Service>(self) -> RpcChannel<S, C, SN>
+    pub fn map<SN: Service>(self) -> RpcChannel<S, C, SN>
     where
         S: IntoService<SN>,
     {
@@ -110,7 +110,6 @@ impl<S: IntoService<S2>, C: ServiceEndpoint<S>, S2: Service> RpcChannel<S, C, S2
             // get the response
             let res = f(target, req).await;
             // turn into a S::Res so we can send it
-            let res: S2::Res = res.into();
             let res = S::outer_res_from(res);
             // send it and return the error if any
             send.send(res).await.map_err(RpcServerError::SendError)
@@ -168,11 +167,11 @@ impl<S: IntoService<S2>, C: ServiceEndpoint<S>, S2: Service> RpcChannel<S, C, S2
         let responses = f(target, req, updates);
         race2(read_error.map(Err), async move {
             tokio::pin!(responses);
-            while let Some(res) = responses.next().await {
+            while let Some(response) = responses.next().await {
                 // turn into a S::Res so we can send it
-                let res = S::outer_res_from(res);
+                let response = S::outer_res_from(response);
                 // send it and return the error if any
-                send.send(res).await.map_err(RpcServerError::SendError)?;
+                send.send(response).await.map_err(RpcServerError::SendError)?;
             }
             Ok(())
         })
