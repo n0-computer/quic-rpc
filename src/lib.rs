@@ -154,54 +154,18 @@ pub trait Service: Send + Sync + Debug + Clone + 'static {
     type Res: RpcMessage;
 }
 
-// pub trait MappedService2<S, Req, Res>: Service<Req, Res> {
-//     type Req
-//
-// }
+/// Marker trait for services that can be mapped into another service.
 ///
-// pub trait ServiceWrapperFor<S>: Service {}
-//
-// impl<S0, S2> ServiceWrapperFor<S2> for S0
-// where
-//     S0: Service,
-//     S2: Service,
-//     S0::Req: From<S2::Req>,
-//     S0::Res: From<S0::Res>,
-// {
-// }
-// //
-// ///
-// pub trait FromService<S: Service>: Service {
-//     ///
-//     fn req_from(req: <Self as Service>::Req) -> S::Req;
-//     ///
-//     fn res_from(res: <Self as Service>::Res) -> S::Res;
-// }
-//
-// impl<S0, S2> FromService<S0> for S2
-// where
-//     S0: Service,
-//     S2: Service,
-//     S2::Req: Into<S0::Req> + Send + 'static,
-//     S2::Res: Into<S0::Res> + Send + 'static,
-// {
-//     fn req_from(req: <Self as Service>::Req) -> S0::Req {
-//         req.into()
-//     }
-//     fn res_from(res: <Self as Service>::Res) -> S0::Res {
-//         res.into()
-//     }
-// }
-
-///
+/// There is usually no need to impl this trait manually, because it is auto-implemented as long as
+/// the inner service's Req and Res types implement Into and TryFrom to the outer service's types.
 pub trait IntoService<S: Service>: Service {
-    ///
-    fn outer_req_from(req: S::Req) -> Self::Req;
-    ///
-    fn outer_res_from(res: S::Res) -> Self::Res;
-    ///
+    /// Convert the inner request into the outer request.
+    fn outer_req_from(req: impl Into<S::Req>) -> Self::Req;
+    /// Convert the inner response into the outer response.
+    fn outer_res_from(res: impl Into<S::Res>) -> Self::Res;
+    /// Try to convert the outer request into the inner request.
     fn try_inner_req_from(req: Self::Req) -> Result<S::Req, ()>;
-    ///
+    /// Try to convert the outer response into the inner response.
     fn try_inner_res_from(res: Self::Res) -> Result<S::Res, ()>;
 }
 
@@ -211,82 +175,25 @@ where
     S2: Service,
     S2::Req: Into<S0::Req> + Send + 'static,
     S2::Res: Into<S0::Res> + Send + 'static,
-
     S2::Req: TryFrom<S0::Req> + Send + 'static,
     S2::Res: TryFrom<S0::Res> + Send + 'static,
 {
-    fn outer_req_from(req: S2::Req) -> S0::Req {
-        req.into()
-    }
-    fn outer_res_from(res: S2::Res) -> S0::Res {
-        res.into()
+    fn outer_req_from(req: impl Into<S2::Req>) -> S0::Req {
+        (req.into()).into()
     }
 
-    ///
-    fn try_inner_req_from(req: S0::Req) -> Result<S2::Req, ()> {
+    fn outer_res_from(res: impl Into<S2::Res>) -> S0::Res {
+        (res.into()).into()
+    }
+
+    fn try_inner_req_from(req: Self::Req) -> Result<S2::Req, ()> {
         req.try_into().map_err(|_| ())
     }
-    ///
+
     fn try_inner_res_from(res: Self::Res) -> Result<S2::Res, ()> {
         res.try_into().map_err(|_| ())
     }
-
-    // fn try_req_into(req: S2::Req) -> <Self as Service>::Req {
-    //     req.into()
-    // }
-    // fn try_res_from(res: S2::Res) -> <Self as Service>::Res {
-    //     res.into()
-    // }
 }
-
-// ///
-// pub trait IntoService<S: Service>: Service {
-//     fn req_into(req: <Self as Service>::Req) -> S::Req;
-//     fn res_into(res: <Self as Service>::Res) -> S::Res;
-// }
-//
-// impl<S0, S2> IntoService<S2> for S0
-// where
-//     S0: Service,
-//     S2: Service,
-//     S2::Req: Into<S0::Req> + Send + 'static,
-//     S2::Res: Into<S0::Res> + Send + 'static,
-// {
-//     fn req_into(req: S2::Req) -> S0::Req {
-//         req.into()
-//     }
-//     fn res_into(res: S2::Res) -> S0::Res {
-//         res.into()
-//     }
-// }
-
-// impl<S0, S2> IntoService<S2> for S0 where S0: Service, S2: FromService<S0> {
-//     fn req_into(req: <S2 as Service>::Req) -> <S0 as Service>::Req {
-//         <S0 as FromService<S2>>::req_from(req)
-//     }
-//
-//     fn res_into(res: <S2 as Service>::Res) -> <S0 as Service>::Res {
-//         <S0 as FromService<S2>>::res_from(res)
-//     }
-// }
-
-// impl<S2, S0> MappedService<S0> for S2
-// where
-//     S0: Service,
-//     S2: Service,
-//     // <T as Service>::Req: From<S::Req>,
-//     // <T as Service>::Res: From<S::Res>,
-//     // <S0 as Service>::Req: From<S2::Req>,
-//     // <S0 as Service>::Res: From<S2::Res>,
-//     // <S2 as Service>::Req: From<S0::Req>,
-//     // <S2 as Service>::Res: From<S0::Res>,
-//         S2::Req: Into<S0::Req> + Send + 'static,
-//         S2::Res: Into<S0::Res> + Send + 'static,
-// {
-// }
-// S0: quic_rpc::Service,
-// S0::Req: From<Request> + Send + 'static,
-// S0::Res: From<Response> + Send + 'static,
 
 /// A connection to a specific service on a specific remote machine
 ///

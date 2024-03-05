@@ -54,7 +54,7 @@ quinn-transport = ["flume", "quinn", "bincode", "tokio-serde", "tokio-util"]
 flume-transport = ["flume"]
 combined-transport = []
 macros = []
-default = ["flume-transport"]
+default = []
 
 [[example]]
 name = "errors"

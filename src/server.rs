@@ -46,24 +46,13 @@ impl<S: Service, C: ServiceEndpoint<S>> RpcServer<S, C> {
     }
 }
 
-// /// A channel for requests and responses for a specific service.
-// ///
-// /// This just groups the sink and stream into a single type, and attaches the
-// /// information about the service type.
-// ///
-// /// Sink and stream are independent, so you can take the channel apart and use
-// /// them independently.
-// #[derive(Debug)]
-// pub struct RpcChannel<S: Service, C: ServiceEndpoint<S>> {
-//     /// Sink to send responses to the client.
-//     pub send: C::SendSink,
-//     /// Stream to receive requests from the client.
-//     pub recv: C::RecvStream,
-//     /// Phantom data to make the type parameter `S` non-instantiable.
-//     p: PhantomData<S>,
-// }
-
+/// A channel for requests and responses for a specific service.
 ///
+/// This just groups the sink and stream into a single type, and attaches the
+/// information about the service type.
+///
+/// Sink and stream are independent, so you can take the channel apart and use
+/// them independently.
 #[derive(Debug)]
 pub struct RpcChannel<S: IntoService<S2>, C: ServiceEndpoint<S>, S2: Service = S> {
     /// Sink to send responses to the client.
@@ -87,7 +76,7 @@ impl<S: IntoService<S2>, C: ServiceEndpoint<S>, S2: Service> RpcChannel<S, C, S2
     }
 
     /// Map this channel into a derivable service channel.
-    pub fn into_service<SN: Service>(self) -> RpcChannel<S, C, SN>
+    pub fn service<SN: Service>(self) -> RpcChannel<S, C, SN>
     where
         S: IntoService<SN>,
     {
@@ -150,7 +139,6 @@ impl<S: IntoService<S2>, C: ServiceEndpoint<S>, S2: Service> RpcChannel<S, C, S2
             // get the response
             let res = f(target, req, updates).await;
             // turn into a S::Res so we can send it
-            let res: S2::Res = res.into();
             let res = S::outer_res_from(res);
             // send it and return the error if any
             send.send(res).await.map_err(RpcServerError::SendError)
@@ -182,7 +170,6 @@ impl<S: IntoService<S2>, C: ServiceEndpoint<S>, S2: Service> RpcChannel<S, C, S2
             tokio::pin!(responses);
             while let Some(res) = responses.next().await {
                 // turn into a S::Res so we can send it
-                let res: S2::Res = res.into();
                 let res = S::outer_res_from(res);
                 // send it and return the error if any
                 send.send(res).await.map_err(RpcServerError::SendError)?;
@@ -221,7 +208,6 @@ impl<S: IntoService<S2>, C: ServiceEndpoint<S>, S2: Service> RpcChannel<S, C, S2
             tokio::pin!(responses);
             while let Some(response) = responses.next().await {
                 // turn into a S::Res so we can send it
-                let response: S2::Res = response.into();
                 let response = S::outer_res_from(response);
                 // send it and return the error if any
                 send.send(response)

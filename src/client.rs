@@ -65,8 +65,7 @@ where
     }
 
     fn start_send(self: Pin<&mut Self>, item: T) -> Result<(), Self::Error> {
-        let req: S2::Req = item.into();
-        let req = S::outer_req_from(req);
+        let req = S::outer_req_from(item);
         self.project().0.start_send_unpin(req)
     }
 
@@ -98,7 +97,7 @@ impl<S: Service + IntoService<S2>, C: ServiceConnection<S>, S2: Service> RpcClie
     }
 
     /// Map this channel into a derivable service channel.
-    pub fn into_service<SN: Service>(self) -> RpcClient<S, C, SN>
+    pub fn service<SN: Service>(self) -> RpcClient<S, C, SN>
     where
         S: IntoService<SN>,
     {
@@ -110,9 +109,7 @@ impl<S: Service + IntoService<S2>, C: ServiceConnection<S>, S2: Service> RpcClie
     where
         M: RpcMsg<S2>,
     {
-        let msg: S2::Req = msg.into();
         let msg = S::outer_req_from(msg);
-        let msg: <S as Service>::Req = msg.into();
         let (mut send, mut recv) = self.source.open_bi().await.map_err(RpcClientError::Open)?;
         send.send(msg).await.map_err(RpcClientError::<C>::Send)?;
         let res = recv
@@ -137,7 +134,6 @@ impl<S: Service + IntoService<S2>, C: ServiceConnection<S>, S2: Service> RpcClie
     where
         M: ServerStreamingMsg<S2>,
     {
-        let msg: S2::Req = msg.into();
         let msg = S::outer_req_from(msg);
         let (mut send, recv) = self
             .source
@@ -174,7 +170,6 @@ impl<S: Service + IntoService<S2>, C: ServiceConnection<S>, S2: Service> RpcClie
     where
         M: ClientStreamingMsg<S2>,
     {
-        let msg: S2::Req = msg.into();
         let msg = S::outer_req_from(msg);
         let (mut send, mut recv) = self
             .source
@@ -216,7 +211,6 @@ impl<S: Service + IntoService<S2>, C: ServiceConnection<S>, S2: Service> RpcClie
     where
         M: BidiStreamingMsg<S2>,
     {
-        let msg: S2::Req = msg.into();
         let msg = S::outer_req_from(msg);
         let (mut send, recv) = self.source.open_bi().await.map_err(BidiError::Open)?;
         send.send(msg).await.map_err(BidiError::<C>::Send)?;

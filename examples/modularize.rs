@@ -1,32 +1,26 @@
-use quic_rpc::{transport::flume, RpcServer, ServiceEndpoint};
+use quic_rpc::{transport::flume, RpcServer};
 use tracing::warn;
-
-async fn run_server(
-    server_ep: impl ServiceEndpoint<app::Service>,
-    handler: app::Handler,
-) -> anyhow::Result<()> {
-    let server = RpcServer::new(server_ep);
-    loop {
-        let (req, chan) = server.accept().await?;
-        let handler = handler.clone();
-        tokio::task::spawn(async move {
-            handler.handle(req, chan).await;
-        });
-    }
-}
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let (server_conn, client_conn) = flume::connection::<app::Request, app::Response>(1);
-    let handler = app::Handler::default();
-    let server_handle = tokio::task::spawn(async move {
-        if let Err(err) = run_server(server_conn, handler).await {
-            warn!(?err, "RPC server failed");
-        };
+
+    tokio::task::spawn(async move {
+        let server = RpcServer::new(server_conn);
+        let handler = app::Handler::default();
+        loop {
+            match server.accept().await {
+                Err(err) => warn!(?err, "server accept failed"),
+                Ok((req, chan)) => {
+                    let handler = handler.clone();
+                    tokio::task::spawn(handler.handle_rpc_request(req, chan));
+                }
+            }
+        }
     });
 
     app::client_demo(client_conn).await?;
-    server_handle.await?;
+
     Ok(())
 }
 
@@ -34,7 +28,8 @@ mod app {
     use super::{calc, clock};
     use anyhow::Result;
     use derive_more::{From, TryInto};
-    use quic_rpc::{server::RpcChannel, ServiceConnection, ServiceEndpoint};
+    use futures::StreamExt;
+    use quic_rpc::{server::RpcChannel, RpcClient, ServiceConnection, ServiceEndpoint};
     use serde::{Deserialize, Serialize};
 
     #[derive(Debug, Serialize, Deserialize, From, TryInto)]
@@ -50,8 +45,8 @@ mod app {
     }
 
     #[derive(Copy, Clone, Debug)]
-    pub struct Service;
-    impl quic_rpc::Service for Service {
+    pub struct AppService;
+    impl quic_rpc::Service for AppService {
         type Req = Request;
         type Res = Response;
     }
@@ -63,29 +58,45 @@ mod app {
     }
 
     impl Handler {
-        pub async fn handle<E: ServiceEndpoint<Service>>(
-            &self,
+        pub async fn handle_rpc_request<E: ServiceEndpoint<AppService>>(
+            self,
             req: Request,
-            chan: RpcChannel<Service, E>,
+            chan: RpcChannel<AppService, E>,
         ) {
             let _res = match req {
-                Request::Calc(req) => self.calc.handle(req, chan).await,
-                Request::Clock(req) => self.clock.handle(req, chan).await,
+                Request::Calc(req) => self.calc.handle_rpc_request(req, chan).await,
+                Request::Clock(req) => self.clock.handle_rpc_request(req, chan).await,
             };
         }
     }
 
-    pub async fn client_demo<C: ServiceConnection<Service>>(conn: C) -> Result<()> {
-        let client = quic_rpc::RpcClient::<Service, _>::new(conn);
-        // examples for generic handlers
-        calc::run_client(client.clone()).await;
-        clock::run_client(client.clone()).await;
-        // example for using module structs directly
-        let res = client
-            .into_service::<calc::Service>()
-            .rpc(calc::AddRequest(21, 21))
-            .await?;
-        println!("rpc res: {res:?}");
+    #[derive(Debug, Clone)]
+    pub struct Client<C: ServiceConnection<AppService>> {
+        pub calc: calc::Client<AppService, C>,
+        pub clock: clock::Client<AppService, C>,
+    }
+
+    impl<C: ServiceConnection<AppService>> Client<C> {
+        pub fn new(conn: C) -> Self {
+            let client = RpcClient::<AppService, _>::new(conn);
+            Self {
+                calc: calc::Client::new(client.clone()),
+                clock: clock::Client::new(client.clone()),
+            }
+        }
+    }
+
+    pub async fn client_demo<C: ServiceConnection<AppService>>(conn: C) -> Result<()> {
+        let client = Client::new(conn);
+        println!("calc service: add");
+        let res = client.calc.add(40, 2).await?;
+        println!("calc service: res {res:?}");
+        println!("clock service: start tick");
+        let mut stream = client.clock.tick().await?;
+        while let Some(tick) = stream.next().await {
+            let tick = tick?;
+            println!("clock service: tick {tick}");
+        }
         Ok(())
     }
 }
@@ -102,7 +113,7 @@ mod calc {
     #[derive(Debug, Serialize, Deserialize)]
     pub struct AddRequest(pub i64, pub i64);
 
-    impl RpcMsg<Service> for AddRequest {
+    impl RpcMsg<CalcService> for AddRequest {
         type Response = AddResponse;
     }
 
@@ -120,8 +131,8 @@ mod calc {
     }
 
     #[derive(Copy, Clone, Debug)]
-    pub struct Service;
-    impl quic_rpc::Service for Service {
+    pub struct CalcService;
+    impl quic_rpc::Service for CalcService {
         type Req = Request;
         type Res = Response;
     }
@@ -130,13 +141,13 @@ mod calc {
     pub struct Handler;
 
     impl Handler {
-        pub async fn handle<S, E>(&self, req: Request, chan: RpcChannel<S, E>)
+        pub async fn handle_rpc_request<S, E>(&self, req: Request, chan: RpcChannel<S, E>)
         where
-            S: IntoService<Service>,
+            S: IntoService<CalcService>,
             E: ServiceEndpoint<S>,
         {
             let handler = self.clone();
-            let chan = chan.into_service::<Service>();
+            let chan = chan.service::<CalcService>();
             let _res = match req {
                 Request::Add(req) => chan.rpc(req, handler, Self::on_add).await,
             };
@@ -147,32 +158,36 @@ mod calc {
         }
     }
 
-    pub async fn run_client<C, S>(client: RpcClient<S, C>)
+    #[derive(Debug, Clone)]
+    pub struct Client<S, C>
     where
         C: ServiceConnection<S>,
-        S: IntoService<Service>,
+        S: IntoService<CalcService>,
     {
-        for i in 0..3 {
-            println!("a rpc call [{i}]");
-            let client = client.clone().into_service();
-            tokio::task::spawn(async move {
-                let res = client.rpc(AddRequest(2, i)).await;
-                println!("rpc res [{i}]: {res:?}");
-            });
-        }
+        client: RpcClient<S, C, CalcService>,
     }
 
-    #[allow(unused)]
-    pub async fn client_demo<C: ServiceConnection<Service>>(conn: C) {
-        let client = quic_rpc::RpcClient::<Service, _>::new(conn);
-        run_client(client).await;
+    impl<S, C> Client<S, C>
+    where
+        C: ServiceConnection<S>,
+        S: IntoService<CalcService>,
+    {
+        pub fn new(client: RpcClient<S, C>) -> Self {
+            Self {
+                client: client.service(),
+            }
+        }
+        pub async fn add(&self, a: i64, b: i64) -> anyhow::Result<i64> {
+            let res = self.client.rpc(AddRequest(a, b)).await?;
+            Ok(res.0)
+        }
     }
 }
 
 mod clock {
     use anyhow::Result;
     use derive_more::{From, TryInto};
-    use futures::{Stream, StreamExt};
+    use futures::{stream::BoxStream, Stream, StreamExt, TryStreamExt};
     use quic_rpc::{
         message::{Msg, ServerStreaming, ServerStreamingMsg},
         server::RpcChannel,
@@ -189,11 +204,11 @@ mod clock {
     #[derive(Debug, Serialize, Deserialize)]
     pub struct TickRequest;
 
-    impl Msg<Service> for TickRequest {
+    impl Msg<ClockService> for TickRequest {
         type Pattern = ServerStreaming;
     }
 
-    impl ServerStreamingMsg<Service> for TickRequest {
+    impl ServerStreamingMsg<ClockService> for TickRequest {
         type Response = TickResponse;
     }
 
@@ -213,8 +228,8 @@ mod clock {
     }
 
     #[derive(Copy, Clone, Debug)]
-    pub struct Service;
-    impl quic_rpc::Service for Service {
+    pub struct ClockService;
+    impl quic_rpc::Service for ClockService {
         type Req = Request;
         type Res = Response;
     }
@@ -248,13 +263,13 @@ mod clock {
             h
         }
 
-        pub async fn handle<S, E>(&self, req: Request, chan: RpcChannel<S, E>)
+        pub async fn handle_rpc_request<S, E>(&self, req: Request, chan: RpcChannel<S, E>)
         where
-            S: IntoService<Service>,
+            S: IntoService<ClockService>,
             E: ServiceEndpoint<S>,
         {
             let handler = self.clone();
-            let chan = chan.into_service::<Service>();
+            let chan = chan.service::<ClockService>();
             let _res = match req {
                 Request::Tick(req) => chan.server_streaming(req, handler, Self::on_tick).await,
             };
@@ -286,39 +301,28 @@ mod clock {
         }
     }
 
-    #[allow(unused)]
-    pub async fn client_demo<C: ServiceConnection<Service>>(conn: C) {
-        let client = RpcClient::<Service, _>::new(conn);
-        run_client(client).await
-    }
-
-    pub async fn run_client<C, S>(client: RpcClient<S, C>)
+    #[derive(Debug, Clone)]
+    pub struct Client<S, C>
     where
         C: ServiceConnection<S>,
-        S: IntoService<Service>,
+        S: IntoService<ClockService>,
     {
-        // a rpc call
-        for i in 0..3 {
-            println!("a rpc call [{i}]");
-            let client = client.clone().into_service();
-            tokio::task::spawn(async move {
-                if let Err(err) = run_tick(client, i).await {
-                    tracing::warn!(?err, "client: run_tick failed");
-                }
-            });
-        }
+        client: RpcClient<S, C, ClockService>,
     }
 
-    async fn run_tick<C, S>(client: RpcClient<S, C, Service>, id: usize) -> anyhow::Result<()>
+    impl<S, C> Client<S, C>
     where
         C: ServiceConnection<S>,
-        S: IntoService<Service>,
+        S: IntoService<ClockService>,
     {
-        let mut res = client.server_streaming(TickRequest).await?;
-        while let Some(res) = res.next().await {
-            println!("stream [{id}]: {res:?}");
+        pub fn new(client: RpcClient<S, C>) -> Self {
+            Self {
+                client: client.service(),
+            }
         }
-        println!("stream [{id}]: done");
-        Ok(())
+        pub async fn tick(&self) -> Result<BoxStream<'static, Result<usize>>> {
+            let res = self.client.server_streaming(TickRequest).await?;
+            Ok(res.map_ok(|r| r.tick).map_err(anyhow::Error::from).boxed())
+        }
     }
 }
