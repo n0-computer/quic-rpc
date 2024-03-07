@@ -7,7 +7,7 @@ use crate::{
     Service, ServiceConnection,
 };
 use futures::{
-    future::BoxFuture, stream::BoxStream, FutureExt, Sink, SinkExt, Stream, StreamExt, TryFutureExt,
+    future::BoxFuture, FutureExt, Sink, SinkExt, Stream, StreamExt, TryFutureExt,
 };
 use pin_project::pin_project;
 use std::{
@@ -18,6 +18,9 @@ use std::{
     result,
     task::{Context, Poll},
 };
+
+/// Sync version of `future::stream::BoxStream`.
+pub type BoxStreamSync<'a, T> = Pin<Box<dyn Stream<Item = T> + Send + Sync + 'a>>;
 
 /// A client for a specific service
 ///
@@ -108,7 +111,7 @@ impl<S: Service, C: ServiceConnection<S>> RpcClient<S, C> {
         &self,
         msg: M,
     ) -> result::Result<
-        BoxStream<'static, result::Result<M::Response, StreamingResponseItemError<C>>>,
+        BoxStreamSync<'static, result::Result<M::Response, StreamingResponseItemError<C>>>,
         StreamingResponseError<C>,
     >
     where
@@ -130,7 +133,7 @@ impl<S: Service, C: ServiceConnection<S>> RpcClient<S, C> {
             Err(e) => Err(StreamingResponseItemError::RecvError(e)),
         });
         // keep send alive so the request on the server side does not get cancelled
-        let recv = DeferDrop(recv, send).boxed();
+        let recv = Box::pin(DeferDrop(recv, send));
         Ok(recv)
     }
 
@@ -180,7 +183,7 @@ impl<S: Service, C: ServiceConnection<S>> RpcClient<S, C> {
     ) -> result::Result<
         (
             UpdateSink<S, C, M::Update>,
-            BoxStream<'static, result::Result<M::Response, BidiItemError<C>>>,
+            BoxStreamSync<'static, result::Result<M::Response, BidiItemError<C>>>,
         ),
         BidiError<C>,
     >
@@ -191,12 +194,11 @@ impl<S: Service, C: ServiceConnection<S>> RpcClient<S, C> {
         let (mut send, recv) = self.source.open_bi().await.map_err(BidiError::Open)?;
         send.send(msg).await.map_err(BidiError::<C>::Send)?;
         let send = UpdateSink(send, PhantomData);
-        let recv = recv
+        let recv = Box::pin(recv
             .map(|x| match x {
                 Ok(x) => M::Response::try_from(x).map_err(|_| BidiItemError::DowncastError),
                 Err(e) => Err(BidiItemError::RecvError(e)),
-            })
-            .boxed();
+            }));
         Ok((send, recv))
     }
 }
