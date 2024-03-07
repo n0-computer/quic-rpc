@@ -6,9 +6,7 @@ use crate::{
     transport::ConnectionErrors,
     Service, ServiceConnection,
 };
-use futures::{
-    future::BoxFuture, FutureExt, Sink, SinkExt, Stream, StreamExt, TryFutureExt,
-};
+use futures::{future::BoxFuture, FutureExt, Sink, SinkExt, Stream, StreamExt, TryFutureExt};
 use pin_project::pin_project;
 use std::{
     error,
@@ -194,11 +192,10 @@ impl<S: Service, C: ServiceConnection<S>> RpcClient<S, C> {
         let (mut send, recv) = self.source.open_bi().await.map_err(BidiError::Open)?;
         send.send(msg).await.map_err(BidiError::<C>::Send)?;
         let send = UpdateSink(send, PhantomData);
-        let recv = Box::pin(recv
-            .map(|x| match x {
-                Ok(x) => M::Response::try_from(x).map_err(|_| BidiItemError::DowncastError),
-                Err(e) => Err(BidiItemError::RecvError(e)),
-            }));
+        let recv = Box::pin(recv.map(|x| match x {
+            Ok(x) => M::Response::try_from(x).map_err(|_| BidiItemError::DowncastError),
+            Err(e) => Err(BidiItemError::RecvError(e)),
+        }));
         Ok((send, recv))
     }
 }
