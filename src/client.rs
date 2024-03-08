@@ -2,7 +2,7 @@
 //!
 //! The main entry point is [RpcClient].
 use crate::{
-    map::{ChainedMapper, IntoService, Mapper},
+    map::{ChainedMapper, MapService, Mapper},
     message::{BidiStreamingMsg, ClientStreamingMsg, RpcMsg, ServerStreamingMsg},
     transport::ConnectionErrors,
     Service, ServiceConnection,
@@ -28,7 +28,7 @@ use std::{
 #[derive(Debug)]
 pub struct RpcClient<S, C, S2 = S> {
     source: C,
-    map: Arc<dyn IntoService<S, S2>>,
+    map: Arc<dyn MapService<S, S2>>,
 }
 
 impl<S, C: Clone, S2> Clone for RpcClient<S, C, S2> {
@@ -47,7 +47,7 @@ impl<S, C: Clone, S2> Clone for RpcClient<S, C, S2> {
 pub struct UpdateSink<S, C, T, S2 = S>(
     #[pin] C::SendSink,
     PhantomData<T>,
-    Arc<dyn IntoService<S, S2>>,
+    Arc<dyn MapService<S, S2>>,
 )
 where
     S: Service,
@@ -112,15 +112,20 @@ where
 
     /// Map this channel's service into an inner service.
     ///
-    /// This method is available as long as the outer service implements [`IntoService`] for the
-    /// inner service.
+    /// This method is available if the required bounds are upheld:
+    /// S3::Req: Into<S2::Req> + TryFrom<S2::Req>,
+    /// S3::Res: Into<S2::Res> + TryFrom<S2::Res>,
+    ///
+    /// Where S3 is the new service to map to and S2 is the current inner service.
+    ///
+    /// This method can be chained infintely.
     pub fn map<S3>(self) -> RpcClient<S, C, S3>
     where
         S3: Service,
         S3::Req: Into<S2::Req> + TryFrom<S2::Req>,
         S3::Res: Into<S2::Res> + TryFrom<S2::Res>,
     {
-        let map = ChainedMapper::<S, S2, S3>::new(self.map);
+        let map = ChainedMapper::new(self.map);
         RpcClient {
             source: self.source,
             map: Arc::new(map),

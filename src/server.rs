@@ -2,7 +2,7 @@
 //!
 //! The main entry point is [RpcServer]
 use crate::{
-    map::{ChainedMapper, IntoService, Mapper},
+    map::{ChainedMapper, MapService, Mapper},
     message::{BidiStreamingMsg, ClientStreamingMsg, RpcMsg, ServerStreamingMsg},
     transport::ConnectionErrors,
     Service, ServiceEndpoint,
@@ -68,7 +68,7 @@ pub struct RpcChannel<S: Service, C: ServiceEndpoint<S>, S2: Service = S> {
     /// Stream to receive requests from the client.
     pub recv: C::RecvStream,
     /// Mapper to map between S and S2
-    map: Arc<dyn IntoService<S, S2>>,
+    map: Arc<dyn MapService<S, S2>>,
 }
 
 impl<S, C> RpcChannel<S, C, S>
@@ -94,8 +94,13 @@ where
 {
     /// Map this channel's service into an inner service.
     ///
-    /// This method is available as long as the outer service implements [`IntoService`] for the
-    /// inner service.
+    /// This method is available if the required bounds are upheld:
+    /// S3::Req: Into<S2::Req> + TryFrom<S2::Req>,
+    /// S3::Res: Into<S2::Res> + TryFrom<S2::Res>,
+    ///
+    /// Where S3 is the new service to map to and S2 is the current inner service.
+    ///
+    /// This method can be chained infintely.
     pub fn map<S3>(self) -> RpcChannel<S, C, S3>
     where
         S3: Service,
