@@ -14,10 +14,14 @@ use tracing::warn;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    // Spawn an inmemory connection.
+    // Could use quic equally (all code in this example is generic over the transport)
     let (server_conn, client_conn) = flume::connection::<app::Request, app::Response>(1);
 
+    // spawn the server
     tokio::task::spawn(async move {
         let server = RpcServer::new(server_conn);
+        // create our app handler which composes the other handlers
         let handler = app::Handler::default();
         loop {
             match server.accept().await {
@@ -25,7 +29,7 @@ async fn main() -> anyhow::Result<()> {
                 Ok((req, chan)) => {
                     let handler = handler.clone();
                     tokio::task::spawn(async move {
-                        if let Err(err) = handler.handle_rpc_request(req, chan) {
+                        if let Err(err) = handler.handle_rpc_request(req, chan).await {
                             warn!(?err, "internal rpc error");
                         }
                     });
@@ -34,6 +38,7 @@ async fn main() -> anyhow::Result<()> {
         }
     });
 
+    // run a client
     app::client_demo(client_conn).await?;
 
     Ok(())
@@ -42,12 +47,16 @@ async fn main() -> anyhow::Result<()> {
 mod app {
     //! This is the app-specific code.
     //!
-    //! It uses all of iroh (calc + clock) plus an app-specific endpoint
+    //! It composes all of `iroh` (which internally composes two other modules) and adds an
+    //! application specific RPC.
+    //!
+    //! It could also easily compose services from other crates or internal modules.
+
     use anyhow::Result;
     use derive_more::{From, TryInto};
     use futures::StreamExt;
     use quic_rpc::{
-        message::RpcMsg, server::RpcChannel, RpcClient, ServiceConnection, ServiceEndpoint,
+        message::RpcMsg, server::RpcChannel, RpcClient, Service, ServiceConnection, ServiceEndpoint,
     };
     use serde::{Deserialize, Serialize};
 
@@ -82,10 +91,19 @@ mod app {
         type Res = Response;
     }
 
-    #[derive(Clone, Default)]
+    #[derive(Clone)]
     pub struct Handler {
         iroh: iroh::Handler,
         app_version: String,
+    }
+
+    impl Default for Handler {
+        fn default() -> Self {
+            Self {
+                iroh: iroh::Handler::default(),
+                app_version: "v0.1-alpha".to_string(),
+            }
+        }
     }
 
     impl Handler {
@@ -101,22 +119,25 @@ mod app {
             Ok(())
         }
 
-        pub async fn on_version(self, req: AppVersionRequest) -> AppVersionResponse {
-            AppVersionResponse(self.version.clone())
+        pub async fn on_version(self, _req: AppVersionRequest) -> AppVersionResponse {
+            AppVersionResponse(self.app_version.clone())
         }
     }
 
     #[derive(Debug, Clone)]
-    pub struct Client<C: ServiceConnection<AppService>> {
-        pub iroh: iroh::Client<C>,
-        client: RpcClient<C, AppService>,
+    pub struct Client<S: Service, C: ServiceConnection<S>> {
+        pub iroh: iroh::Client<C, S>,
+        client: RpcClient<S, C, AppService>,
     }
 
-    impl<C: ServiceConnection<AppService>> Client<C> {
-        pub fn new(conn: C) -> Self {
-            let client = RpcClient::new(conn);
+    impl<S, C> Client<S, C>
+    where
+        S: Service,
+        C: ServiceConnection<S>,
+    {
+        pub fn new(client: RpcClient<S, C, AppService>) -> Self {
             Self {
-                iroh: iroh::Client::new(client.clone()),
+                iroh: iroh::Client::new(client.clone().map()),
                 client,
             }
         }
@@ -128,7 +149,8 @@ mod app {
     }
 
     pub async fn client_demo<C: ServiceConnection<AppService>>(conn: C) -> Result<()> {
-        let client = Client::new(conn);
+        let client = RpcClient::<AppService, _>::new(conn);
+        let client = Client::new(client);
         println!("app service: version");
         let res = client.app_version().await?;
         println!("app service: version res {res:?}");
@@ -146,14 +168,13 @@ mod app {
 }
 
 mod iroh {
-    //! This module composes two sub-services
+    //! This module composes two sub-services. Think `iroh` crate which exposes services and
+    //! clients for iroh-bytes and iroh-gossip or so.
+    //! It uses only the `calc` and `clock` modules and nothing else.
 
     use anyhow::Result;
     use derive_more::{From, TryInto};
-    use futures::StreamExt;
-    use quic_rpc::{
-        server::RpcChannel, IntoService, RpcClient, ServiceConnection, ServiceEndpoint,
-    };
+    use quic_rpc::{server::RpcChannel, RpcClient, Service, ServiceConnection, ServiceEndpoint};
     use serde::{Deserialize, Serialize};
 
     use super::{calc, clock};
@@ -190,7 +211,7 @@ mod iroh {
             chan: RpcChannel<S, E, IrohService>,
         ) -> Result<()>
         where
-            S: IntoService<IrohService>,
+            S: Service,
             E: ServiceEndpoint<S>,
         {
             match req {
@@ -210,24 +231,25 @@ mod iroh {
     impl<C, S> Client<C, S>
     where
         C: ServiceConnection<S>,
-        S: IntoService<IrohService>,
+        S: Service,
     {
-        pub fn new(conn: C) -> Self {
-            let client = RpcClient::new(conn);
+        pub fn new(client: RpcClient<S, C, IrohService>) -> Self {
             Self {
-                calc: calc::Client::new(client.clone()),
-                clock: clock::Client::new(client.clone()),
+                calc: calc::Client::new(client.clone().map()),
+                clock: clock::Client::new(client.clone().map()),
             }
         }
     }
 }
 
 mod calc {
+    //! This is a library providing a service, and a client. E.g. iroh-bytes or iroh-hypermerge.
+    //! It does not use any `super` imports, it is completely decoupled.
+
     use anyhow::Result;
     use derive_more::{From, TryInto};
     use quic_rpc::{
-        message::RpcMsg, server::RpcChannel, IntoService, RpcClient, ServiceConnection,
-        ServiceEndpoint,
+        message::RpcMsg, server::RpcChannel, RpcClient, Service, ServiceConnection, ServiceEndpoint,
     };
     use serde::{Deserialize, Serialize};
     use std::fmt::Debug;
@@ -269,7 +291,7 @@ mod calc {
             chan: RpcChannel<S, E, CalcService>,
         ) -> Result<()>
         where
-            S: IntoService<CalcService>,
+            S: Service,
             E: ServiceEndpoint<S>,
         {
             match req {
@@ -291,12 +313,10 @@ mod calc {
     impl<C, S> Client<C, S>
     where
         C: ServiceConnection<S>,
-        S: IntoService<CalcService>,
+        S: Service,
     {
-        pub fn new(client: RpcClient<S, C>) -> Self {
-            Self {
-                client: client.map(),
-            }
+        pub fn new(client: RpcClient<S, C, CalcService>) -> Self {
+            Self { client }
         }
         pub async fn add(&self, a: i64, b: i64) -> anyhow::Result<i64> {
             let res = self.client.rpc(AddRequest(a, b)).await?;
@@ -306,13 +326,16 @@ mod calc {
 }
 
 mod clock {
+    //! This is a library providing a service, and a client. E.g. iroh-bytes or iroh-hypermerge.
+    //! It does not use any `super` imports, it is completely decoupled.
+
     use anyhow::Result;
     use derive_more::{From, TryInto};
     use futures::{stream::BoxStream, Stream, StreamExt, TryStreamExt};
     use quic_rpc::{
         message::{Msg, ServerStreaming, ServerStreamingMsg},
         server::RpcChannel,
-        IntoService, RpcClient, ServiceConnection, ServiceEndpoint,
+        RpcClient, Service, ServiceConnection, ServiceEndpoint,
     };
     use serde::{Deserialize, Serialize};
     use std::{
@@ -390,7 +413,7 @@ mod clock {
             chan: RpcChannel<S, E, ClockService>,
         ) -> Result<()>
         where
-            S: IntoService<ClockService>,
+            S: Service,
             E: ServiceEndpoint<S>,
         {
             match req {
@@ -433,12 +456,10 @@ mod clock {
     impl<C, S> Client<C, S>
     where
         C: ServiceConnection<S>,
-        S: IntoService<ClockService>,
+        S: Service,
     {
-        pub fn new(client: RpcClient<S, C>) -> Self {
-            Self {
-                client: client.map(),
-            }
+        pub fn new(client: RpcClient<S, C, ClockService>) -> Self {
+            Self { client }
         }
         pub async fn tick(&self) -> Result<BoxStream<'static, Result<usize>>> {
             let res = self.client.server_streaming(TickRequest).await?;

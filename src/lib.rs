@@ -92,11 +92,7 @@
 #![deny(missing_docs)]
 #![deny(rustdoc::broken_intra_doc_links)]
 use serde::{de::DeserializeOwned, Serialize};
-use std::{
-    fmt::{Debug, Display},
-    marker::PhantomData,
-    sync::Arc,
-};
+use std::fmt::{Debug, Display};
 use transport::{Connection, ServerEndpoint};
 pub mod client;
 pub mod message;
@@ -106,6 +102,7 @@ pub use client::RpcClient;
 pub use server::RpcServer;
 #[cfg(feature = "macros")]
 mod macros;
+mod map;
 
 /// Requirements for a RPC message
 ///
