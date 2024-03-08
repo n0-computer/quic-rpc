@@ -92,7 +92,11 @@
 #![deny(missing_docs)]
 #![deny(rustdoc::broken_intra_doc_links)]
 use serde::{de::DeserializeOwned, Serialize};
-use std::fmt::{Debug, Display};
+use std::{
+    fmt::{Debug, Display},
+    marker::PhantomData,
+    sync::Arc,
+};
 use transport::{Connection, ServerEndpoint};
 pub mod client;
 pub mod message;
@@ -152,53 +156,6 @@ pub trait Service: Send + Sync + Debug + Clone + 'static {
     type Req: RpcMessage;
     /// Type of response messages
     type Res: RpcMessage;
-}
-
-/// Marker trait for services that can be mapped into another service.
-///
-/// This can be used in place of the usual `S: Service` generic to accept any service that can be
-/// mapped to the service in question.
-///
-/// There is usually no need to impl this trait manually, because it is auto-implemented as long as
-/// the inner service's Req and Res types implement [`Into`] and [`TryFrom`] to the outer service's types.
-///
-/// See `examples/modularize.rs` for an example of how to use this trait to decouple RPC services
-/// between different, independent modules or crates.
-///
-/// If an outer service impls [`IntoService`] for an inner service, the [`crate::RpcChannel`] and [`RpcClient`]
-pub trait IntoService<S: Service>: Service {
-    /// Convert the inner request into the outer request.
-    fn req_up(req: impl Into<S::Req>) -> Self::Req;
-    /// Convert the inner response into the outer response.
-    fn res_up(res: impl Into<S::Res>) -> Self::Res;
-    /// Try to convert the outer request into the inner request.
-    fn try_req_down(req: Self::Req) -> Result<S::Req, ()>;
-    /// Try to convert the outer response into the inner response.
-    fn try_res_down(res: Self::Res) -> Result<S::Res, ()>;
-}
-
-impl<S0, S2> IntoService<S2> for S0
-where
-    S0: Service,
-    S2: Service,
-    S2::Req: Into<S0::Req> + TryFrom<S0::Req> + Send + 'static,
-    S2::Res: Into<S0::Res> + TryFrom<S0::Res> + Send + 'static,
-{
-    fn req_up(req: impl Into<S2::Req>) -> S0::Req {
-        (req.into()).into()
-    }
-
-    fn res_up(res: impl Into<S2::Res>) -> S0::Res {
-        (res.into()).into()
-    }
-
-    fn try_req_down(req: Self::Req) -> Result<S2::Req, ()> {
-        req.try_into().map_err(|_| ())
-    }
-
-    fn try_res_down(res: Self::Res) -> Result<S2::Res, ()> {
-        res.try_into().map_err(|_| ())
-    }
 }
 
 /// A connection to a specific service on a specific remote machine

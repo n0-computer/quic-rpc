@@ -2,13 +2,18 @@
 //!
 //! The main entry point is [RpcServer]
 use crate::{
-    message::{BidiStreamingMsg, ClientStreamingMsg, RpcMsg, ServerStreamingMsg},
-    transport::ConnectionErrors,
-    IntoService, Service, ServiceEndpoint,
+    message::{BidiStreamingMsg, ClientStreamingMsg, RpcMsg, ServerStreamingMsg}, transport::ConnectionErrors, Service, ServiceEndpoint
 };
 use futures::{channel::oneshot, task, task::Poll, Future, FutureExt, SinkExt, Stream, StreamExt};
 use pin_project::pin_project;
-use std::{error, fmt, fmt::Debug, marker::PhantomData, pin::Pin, result};
+use std::{
+    error,
+    fmt::{self, Debug},
+    marker::PhantomData,
+    pin::Pin,
+    result,
+    sync::Arc,
+};
 
 /// A server channel for a specific service.
 ///
@@ -54,36 +59,52 @@ impl<S: Service, C: ServiceEndpoint<S>> RpcServer<S, C> {
 /// Sink and stream are independent, so you can take the channel apart and use
 /// them independently.
 #[derive(Debug)]
-pub struct RpcChannel<S: IntoService<S2>, C: ServiceEndpoint<S>, S2: Service = S> {
+pub struct RpcChannel<S: Service, C: ServiceEndpoint<S>, Sd: Service = S> {
     /// Sink to send responses to the client.
     pub send: C::SendSink,
     /// Stream to receive requests from the client.
     pub recv: C::RecvStream,
-    /// Phantom data to make the type parameter `S` non-instantiable.
-    p: PhantomData<S>,
-    p2: PhantomData<S2>,
+    /// Mapper to map between S and S2
+    map: Arc<dyn IntoService<Up = S, Down = Sd>>,
 }
 
-impl<S: IntoService<S2>, C: ServiceEndpoint<S>, S2: Service> RpcChannel<S, C, S2> {
-    /// Create a new channel from a sink and a stream.
+impl<S, C> RpcChannel<S, C>
+where
+    S: Service,
+    C: ServiceEndpoint<S>,
+{
     pub fn new(send: C::SendSink, recv: C::RecvStream) -> Self {
         Self {
             send,
             recv,
-            p: PhantomData,
-            p2: PhantomData,
+            map: Box::new(Mapper::new()),
         }
     }
+}
 
+impl<S, C, Sd> RpcChannel<S, C, Sd>
+where
+    S: Service,
+    C: ServiceEndpoint<S>,
+    Sd: Service,
+{
     /// Map this channel's service into an inner service.
     ///
     /// This method is available as long as the outer service implements [`IntoService`] for the
     /// inner service.
-    pub fn map<SN: Service>(self) -> RpcChannel<S, C, SN>
+    pub fn map<Sd2>(self) -> RpcChannel<S, C, Sd2>
     where
-        S: IntoService<SN>,
+        Sd2: Service,
+        Sd2::Req: Into<Sd::Req> + TryFrom<Sd::Req>,
+        Sd2::Res: Into<Sd::Res> + TryFrom<Sd::Req>,
     {
-        RpcChannel::<S, C, SN>::new(self.send, self.recv)
+        let mapper = Mapper::<Sd, Sd2>::new();
+        let map = ChainedMapper::new(self.map, mapper);
+        RpcChannel {
+            send: self.send,
+            recv: Self.recv,
+            map: Arc::new(map),
+        }
     }
 
     /// handle the message of type `M` using the given function on the target object
@@ -96,7 +117,7 @@ impl<S: IntoService<S2>, C: ServiceEndpoint<S>, S2: Service> RpcChannel<S, C, S2
         f: F,
     ) -> result::Result<(), RpcServerError<C>>
     where
-        M: RpcMsg<S2>,
+        M: RpcMsg<Sd>,
         F: FnOnce(T, M) -> Fut,
         Fut: Future<Output = M::Response>,
         T: Send + 'static,
@@ -113,7 +134,7 @@ impl<S: IntoService<S2>, C: ServiceEndpoint<S>, S2: Service> RpcChannel<S, C, S2
             // get the response
             let res = f(target, req).await;
             // turn into a S::Res so we can send it
-            let res = S::res_up(res);
+            let res = self.map.res_up(res);
             // send it and return the error if any
             send.send(res).await.map_err(RpcServerError::SendError)
         })
@@ -130,7 +151,7 @@ impl<S: IntoService<S2>, C: ServiceEndpoint<S>, S2: Service> RpcChannel<S, C, S2
         f: F,
     ) -> result::Result<(), RpcServerError<C>>
     where
-        M: ClientStreamingMsg<S2>,
+        M: ClientStreamingMsg<Sd>,
         F: FnOnce(T, M, UpdateStream<S, C, M::Update>) -> Fut + Send + 'static,
         Fut: Future<Output = M::Response> + Send + 'static,
         T: Send + 'static,
@@ -141,7 +162,7 @@ impl<S: IntoService<S2>, C: ServiceEndpoint<S>, S2: Service> RpcChannel<S, C, S2
             // get the response
             let res = f(target, req, updates).await;
             // turn into a S::Res so we can send it
-            let res = S::res_up(res);
+            let res = self.map.res_up(res);
             // send it and return the error if any
             send.send(res).await.map_err(RpcServerError::SendError)
         })
@@ -158,7 +179,7 @@ impl<S: IntoService<S2>, C: ServiceEndpoint<S>, S2: Service> RpcChannel<S, C, S2
         f: F,
     ) -> result::Result<(), RpcServerError<C>>
     where
-        M: BidiStreamingMsg<S2>,
+        M: BidiStreamingMsg<Sd>,
         F: FnOnce(T, M, UpdateStream<S, C, M::Update>) -> Str + Send + 'static,
         Str: Stream<Item = M::Response> + Send + 'static,
         T: Send + 'static,
@@ -172,9 +193,11 @@ impl<S: IntoService<S2>, C: ServiceEndpoint<S>, S2: Service> RpcChannel<S, C, S2
             tokio::pin!(responses);
             while let Some(response) = responses.next().await {
                 // turn into a S::Res so we can send it
-                let response = S::res_up(response);
+                let response = self.map.res_up(response);
                 // send it and return the error if any
-                send.send(response).await.map_err(RpcServerError::SendError)?;
+                send.send(response)
+                    .await
+                    .map_err(RpcServerError::SendError)?;
             }
             Ok(())
         })
@@ -191,7 +214,7 @@ impl<S: IntoService<S2>, C: ServiceEndpoint<S>, S2: Service> RpcChannel<S, C, S2
         f: F,
     ) -> result::Result<(), RpcServerError<C>>
     where
-        M: ServerStreamingMsg<S2>,
+        M: ServerStreamingMsg<Sd>,
         F: FnOnce(T, M) -> Str + Send + 'static,
         Str: Stream<Item = M::Response> + Send + 'static,
         T: Send + 'static,
@@ -210,7 +233,7 @@ impl<S: IntoService<S2>, C: ServiceEndpoint<S>, S2: Service> RpcChannel<S, C, S2
             tokio::pin!(responses);
             while let Some(response) = responses.next().await {
                 // turn into a S::Res so we can send it
-                let response = S::res_up(response);
+                let response = self.map.res_up(response);
                 // send it and return the error if any
                 send.send(response)
                     .await
@@ -232,7 +255,7 @@ impl<S: IntoService<S2>, C: ServiceEndpoint<S>, S2: Service> RpcChannel<S, C, S2
         f: F,
     ) -> result::Result<(), RpcServerError<C>>
     where
-        M: RpcMsg<S2, Response = result::Result<R, E2>>,
+        M: RpcMsg<Sd, Response = result::Result<R, E2>>,
         F: FnOnce(T, M) -> Fut,
         Fut: Future<Output = result::Result<R, E1>>,
         E2: From<E1>,
@@ -423,5 +446,136 @@ where
         let (req, chan) = server.accept().await?;
         let target = target.clone();
         handler(chan, req, target).await?;
+    }
+}
+
+trait IntoService: 'static {
+    type Up: Service;
+    type Down: Service;
+    fn req_up(&self, req: impl Into<<Self::Down as Service>::Req>) -> <Self::Up as Service>::Req;
+    fn res_up(&self, res: impl Into<<Self::Down as Service>::Res>) -> <Self::Up as Service>::Res;
+    fn try_req_down(
+        &self,
+        req: <Self::Up as Service>::Req,
+    ) -> Result<<Self::Down as Service>::Req, ()>;
+    fn try_res_down(
+        &self,
+        res: <Self::Up as Service>::Res,
+    ) -> Result<<Self::Down as Service>::Res, ()>;
+}
+
+struct Mapper<S1, S2> {
+    s1: PhantomData<S1>,
+    s2: PhantomData<S2>,
+}
+
+impl<S1, S2> Mapper<S1, S2>
+where
+    S1: Service,
+    S2: Service,
+    S2::Req: Into<S1::Req>,
+    S2::Res: Into<S1::Res>,
+{
+    pub fn new() -> Self {
+        Self {
+            s1: PhantomData,
+            s2: PhantomData,
+        }
+    }
+}
+
+impl<S1, S2> IntoService for Mapper<S1, S2>
+where
+    S1: Service,
+    S2: Service,
+    S2::Req: Into<S1::Req> + TryFrom<S1::Req>,
+    S2::Res: Into<S1::Res> + TryFrom<S1::Res>,
+{
+    type Up = S1;
+    type Down = S2;
+
+    fn req_up(&self, req: impl Into<<Self::Down as Service>::Req>) -> <Self::Up as Service>::Req {
+        (req.into()).into()
+    }
+
+    fn res_up(&self, res: impl Into<<Self::Down as Service>::Res>) -> <Self::Up as Service>::Res {
+        (res.into()).into()
+    }
+
+    fn try_req_down(
+        &self,
+        req: <Self::Up as Service>::Req,
+    ) -> Result<<Self::Down as Service>::Req, ()> {
+        req.try_into().map_err(|_| ())
+    }
+
+    fn try_res_down(
+        &self,
+        res: <Self::Up as Service>::Res,
+    ) -> Result<<Self::Down as Service>::Res, ()> {
+        res.try_into().map_err(|_| ())
+    }
+}
+
+struct ChainedMapper<S1, S2, M2>
+where
+    S1: Service,
+    S2: Service,
+    M2: IntoService,
+    <M2::Up as Service>::Req: Into<<S2 as Service>::Req>,
+{
+    m1: Arc<dyn IntoService<Up = S1, Down = S2>>,
+    m2: M2,
+}
+
+impl<S1, S2, M2> ChainedMapper<S1, S2, M2>
+where
+    S1: Service,
+    S2: Service,
+    M2: IntoService,
+    <M2::Up as Service>::Req: Into<<S2 as Service>::Req>,
+{
+    ///
+    pub fn new(m1: Arc<dyn IntoService<Up = S1, Down = S2>>, m2: M2) -> Self {
+        Self { m1, m2 }
+    }
+}
+
+impl<S1, S2, M2> IntoService for ChainedMapper<S1, S2, M2>
+where
+    S1: Service,
+    S2: Service,
+    M2: IntoService,
+    <M2::Up as Service>::Req: Into<<S2 as Service>::Req>,
+    <M2::Up as Service>::Res: Into<<S2 as Service>::Res>,
+{
+    type Up = S1;
+    type Down = <M2 as IntoService>::Down;
+    fn req_up(&self, req: <Self::Down as Service>::Req) -> <Self::Up as Service>::Req {
+        let req = self.m2.req_up(req);
+        let req = self.m1.req_up(req.into());
+        req
+    }
+    fn res_up(&self, res: <Self::Down as Service>::Res) -> <Self::Up as Service>::Res {
+        let res = self.m2.res_up(res);
+        let res = self.m1.res_up(res.into());
+        res
+    }
+    fn try_req_down(
+        &self,
+        req: <Self::Up as Service>::Req,
+    ) -> Result<<Self::Down as Service>::Req, ()> {
+        let req = self.m2.try_req_down(req);
+        let req = self.m1.try_req_down(req.into());
+        req
+    }
+
+    fn try_res_down(
+        &self,
+        res: <Self::Up as Service>::Res,
+    ) -> Result<<Self::Down as Service>::Res, ()> {
+        let res = self.m2.try_res_down(res);
+        let res = self.m1.try_res_down(res.into());
+        res
     }
 }
