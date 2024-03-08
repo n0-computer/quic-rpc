@@ -24,7 +24,7 @@ impl ConnectionErrors for DummyServerEndpoint {
 
 impl<In: RpcMessage, Out: RpcMessage> ConnectionCommon<In, Out> for DummyServerEndpoint {
     type RecvStream = stream::Pending<Result<In, Self::RecvError>>;
-    type SendSink = Box<dyn Sink<Out, Error = Self::SendError> + Unpin + Send>;
+    type SendSink = Box<dyn Sink<Out, Error = Self::SendError> + Unpin + Send + Sync>;
 }
 
 impl<In: RpcMessage, Out: RpcMessage> ServerEndpoint<In, Out> for DummyServerEndpoint {
