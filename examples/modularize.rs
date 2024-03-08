@@ -2,7 +2,7 @@
 //!
 //! The [`calc`] and [`clock`] modules both expose a [`quic_rpc::Service`] in a regular fashion.
 //! They do not `use` anything from `super` or `app` so they could live in their own crates
-//! unchanged. The only difference to other examples is that their handlers take a generic 
+//! unchanged. The only difference to other examples is that their handlers take a generic
 //! `S: IntoService<clock:ClockService>`, which allows to pass in any service that can be mapped to
 //! the module's service.
 //!
@@ -24,7 +24,11 @@ async fn main() -> anyhow::Result<()> {
                 Err(err) => warn!(?err, "server accept failed"),
                 Ok((req, chan)) => {
                     let handler = handler.clone();
-                    tokio::task::spawn(handler.handle_rpc_request(req, chan));
+                    tokio::task::spawn(async move {
+                        if let Err(err) = handler.handle_rpc_request(req, chan) {
+                            warn!(?err, "internal rpc error");
+                        }
+                    });
                 }
             }
         }
@@ -36,10 +40,120 @@ async fn main() -> anyhow::Result<()> {
 }
 
 mod app {
+    //! This is the app-specific code.
+    //!
+    //! It uses all of iroh (calc + clock) plus an app-specific endpoint
     use anyhow::Result;
     use derive_more::{From, TryInto};
     use futures::StreamExt;
-    use quic_rpc::{server::RpcChannel, RpcClient, ServiceConnection, ServiceEndpoint};
+    use quic_rpc::{
+        message::RpcMsg, server::RpcChannel, RpcClient, ServiceConnection, ServiceEndpoint,
+    };
+    use serde::{Deserialize, Serialize};
+
+    use super::iroh;
+
+    #[derive(Debug, Serialize, Deserialize, From, TryInto)]
+    pub enum Request {
+        Iroh(iroh::Request),
+        AppVersion(AppVersionRequest),
+    }
+
+    #[derive(Debug, Serialize, Deserialize, From, TryInto)]
+    pub enum Response {
+        Iroh(iroh::Response),
+        AppVersion(AppVersionResponse),
+    }
+
+    #[derive(Debug, Serialize, Deserialize)]
+    pub struct AppVersionRequest;
+
+    impl RpcMsg<AppService> for AppVersionRequest {
+        type Response = AppVersionResponse;
+    }
+
+    #[derive(Debug, Serialize, Deserialize)]
+    pub struct AppVersionResponse(pub String);
+
+    #[derive(Copy, Clone, Debug)]
+    pub struct AppService;
+    impl quic_rpc::Service for AppService {
+        type Req = Request;
+        type Res = Response;
+    }
+
+    #[derive(Clone, Default)]
+    pub struct Handler {
+        iroh: iroh::Handler,
+        app_version: String,
+    }
+
+    impl Handler {
+        pub async fn handle_rpc_request<E: ServiceEndpoint<AppService>>(
+            self,
+            req: Request,
+            chan: RpcChannel<AppService, E>,
+        ) -> Result<()> {
+            match req {
+                Request::Iroh(req) => self.iroh.handle_rpc_request(req, chan.map()).await?,
+                Request::AppVersion(req) => chan.rpc(req, self, Self::on_version).await?,
+            };
+            Ok(())
+        }
+
+        pub async fn on_version(self, req: AppVersionRequest) -> AppVersionResponse {
+            AppVersionResponse(self.version.clone())
+        }
+    }
+
+    #[derive(Debug, Clone)]
+    pub struct Client<C: ServiceConnection<AppService>> {
+        pub iroh: iroh::Client<C>,
+        client: RpcClient<C, AppService>,
+    }
+
+    impl<C: ServiceConnection<AppService>> Client<C> {
+        pub fn new(conn: C) -> Self {
+            let client = RpcClient::new(conn);
+            Self {
+                iroh: iroh::Client::new(client.clone()),
+                client,
+            }
+        }
+
+        pub async fn app_version(&self) -> Result<String> {
+            let res = self.client.rpc(AppVersionRequest).await?;
+            Ok(res.0)
+        }
+    }
+
+    pub async fn client_demo<C: ServiceConnection<AppService>>(conn: C) -> Result<()> {
+        let client = Client::new(conn);
+        println!("app service: version");
+        let res = client.app_version().await?;
+        println!("app service: version res {res:?}");
+        println!("calc service: add");
+        let res = client.iroh.calc.add(40, 2).await?;
+        println!("calc service: res {res:?}");
+        println!("clock service: start tick");
+        let mut stream = client.iroh.clock.tick().await?;
+        while let Some(tick) = stream.next().await {
+            let tick = tick?;
+            println!("clock service: tick {tick}");
+        }
+        Ok(())
+    }
+}
+
+mod iroh {
+    //! This module composes two sub-services
+
+    use anyhow::Result;
+    use derive_more::{From, TryInto};
+    use futures::StreamExt;
+    use quic_rpc::{
+        server::RpcChannel, IntoService, RpcClient, ServiceConnection, ServiceEndpoint,
+    };
     use serde::{Deserialize, Serialize};
 
     use super::{calc, clock};
@@ -57,8 +171,8 @@ mod app {
     }
 
     #[derive(Copy, Clone, Debug)]
-    pub struct AppService;
-    impl quic_rpc::Service for AppService {
+    pub struct IrohService;
+    impl quic_rpc::Service for IrohService {
         type Req = Request;
         type Res = Response;
     }
@@ -70,25 +184,34 @@ mod app {
     }
 
     impl Handler {
-        pub async fn handle_rpc_request<E: ServiceEndpoint<AppService>>(
+        pub async fn handle_rpc_request<S, E>(
             self,
             req: Request,
-            chan: RpcChannel<AppService, E>,
-        ) {
-            let _res = match req {
-                Request::Calc(req) => self.calc.handle_rpc_request(req, chan.map()).await,
-                Request::Clock(req) => self.clock.handle_rpc_request(req, chan.map()).await,
-            };
+            chan: RpcChannel<S, E, IrohService>,
+        ) -> Result<()>
+        where
+            S: IntoService<IrohService>,
+            E: ServiceEndpoint<S>,
+        {
+            match req {
+                Request::Calc(req) => self.calc.handle_rpc_request(req, chan.map()).await?,
+                Request::Clock(req) => self.clock.handle_rpc_request(req, chan.map()).await?,
+            }
+            Ok(())
         }
     }
 
     #[derive(Debug, Clone)]
-    pub struct Client<C: ServiceConnection<AppService>> {
-        pub calc: calc::Client<C, AppService>,
-        pub clock: clock::Client<C, AppService>,
+    pub struct Client<C, S = IrohService> {
+        pub calc: calc::Client<C, S>,
+        pub clock: clock::Client<C, S>,
     }
 
-    impl<C: ServiceConnection<AppService>> Client<C> {
+    impl<C, S> Client<C, S>
+    where
+        C: ServiceConnection<S>,
+        S: IntoService<IrohService>,
+    {
         pub fn new(conn: C) -> Self {
             let client = RpcClient::new(conn);
             Self {
@@ -97,23 +220,10 @@ mod app {
             }
         }
     }
-
-    pub async fn client_demo<C: ServiceConnection<AppService>>(conn: C) -> Result<()> {
-        let client = Client::new(conn);
-        println!("calc service: add");
-        let res = client.calc.add(40, 2).await?;
-        println!("calc service: res {res:?}");
-        println!("clock service: start tick");
-        let mut stream = client.clock.tick().await?;
-        while let Some(tick) = stream.next().await {
-            let tick = tick?;
-            println!("clock service: tick {tick}");
-        }
-        Ok(())
-    }
 }
 
 mod calc {
+    use anyhow::Result;
     use derive_more::{From, TryInto};
     use quic_rpc::{
         message::RpcMsg, server::RpcChannel, IntoService, RpcClient, ServiceConnection,
@@ -157,13 +267,15 @@ mod calc {
             self,
             req: Request,
             chan: RpcChannel<S, E, CalcService>,
-        ) where
+        ) -> Result<()>
+        where
             S: IntoService<CalcService>,
             E: ServiceEndpoint<S>,
         {
-            let _res = match req {
-                Request::Add(req) => chan.rpc(req, self, Self::on_add).await,
-            };
+            match req {
+                Request::Add(req) => chan.rpc(req, self, Self::on_add).await?,
+            }
+            Ok(())
         }
 
         pub async fn on_add(self, req: AddRequest) -> AddResponse {
@@ -276,13 +388,15 @@ mod clock {
             self,
             req: Request,
             chan: RpcChannel<S, E, ClockService>,
-        ) where
+        ) -> Result<()>
+        where
             S: IntoService<ClockService>,
             E: ServiceEndpoint<S>,
         {
-            let _res = match req {
-                Request::Tick(req) => chan.server_streaming(req, self, Self::on_tick).await,
-            };
+            match req {
+                Request::Tick(req) => chan.server_streaming(req, self, Self::on_tick).await?,
+            }
+            Ok(())
         }
 
         pub fn on_tick(

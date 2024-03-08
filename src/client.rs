@@ -65,7 +65,7 @@ where
     }
 
     fn start_send(self: Pin<&mut Self>, item: T) -> Result<(), Self::Error> {
-        let req = S::outer_req_from(item);
+        let req = S::req_up(item);
         self.project().0.start_send_unpin(req)
     }
 
@@ -112,7 +112,7 @@ impl<S: Service + IntoService<S2>, C: ServiceConnection<S>, S2: Service> RpcClie
     where
         M: RpcMsg<S2>,
     {
-        let msg = S::outer_req_from(msg);
+        let msg = S::req_up(msg);
         let (mut send, mut recv) = self.source.open_bi().await.map_err(RpcClientError::Open)?;
         send.send(msg).await.map_err(RpcClientError::<C>::Send)?;
         let res = recv
@@ -122,7 +122,7 @@ impl<S: Service + IntoService<S2>, C: ServiceConnection<S>, S2: Service> RpcClie
             .map_err(RpcClientError::<C>::RecvError)?;
         // keep send alive until we have the answer
         drop(send);
-        let res = S::try_inner_res_from(res).map_err(|_| RpcClientError::DowncastError)?;
+        let res = S::try_res_down(res).map_err(|_| RpcClientError::DowncastError)?;
         M::Response::try_from(res).map_err(|_| RpcClientError::DowncastError)
     }
 
@@ -137,7 +137,7 @@ impl<S: Service + IntoService<S2>, C: ServiceConnection<S>, S2: Service> RpcClie
     where
         M: ServerStreamingMsg<S2>,
     {
-        let msg = S::outer_req_from(msg);
+        let msg = S::req_up(msg);
         let (mut send, recv) = self
             .source
             .open_bi()
@@ -148,7 +148,7 @@ impl<S: Service + IntoService<S2>, C: ServiceConnection<S>, S2: Service> RpcClie
             .await?;
         let recv = recv.map(move |x| match x {
             Ok(x) => {
-                let x = S::try_inner_res_from(x)
+                let x = S::try_res_down(x)
                     .map_err(|_| StreamingResponseItemError::DowncastError)?;
                 M::Response::try_from(x).map_err(|_| StreamingResponseItemError::DowncastError)
             }
@@ -173,7 +173,7 @@ impl<S: Service + IntoService<S2>, C: ServiceConnection<S>, S2: Service> RpcClie
     where
         M: ClientStreamingMsg<S2>,
     {
-        let msg = S::outer_req_from(msg);
+        let msg = S::req_up(msg);
         let (mut send, mut recv) = self
             .source
             .open_bi()
@@ -189,7 +189,7 @@ impl<S: Service + IntoService<S2>, C: ServiceConnection<S>, S2: Service> RpcClie
 
             match item {
                 Ok(x) => {
-                    let x = S::try_inner_res_from(x)
+                    let x = S::try_res_down(x)
                         .map_err(|_| ClientStreamingItemError::DowncastError)?;
                     M::Response::try_from(x).map_err(|_| ClientStreamingItemError::DowncastError)
                 }
@@ -214,14 +214,14 @@ impl<S: Service + IntoService<S2>, C: ServiceConnection<S>, S2: Service> RpcClie
     where
         M: BidiStreamingMsg<S2>,
     {
-        let msg = S::outer_req_from(msg);
+        let msg = S::req_up(msg);
         let (mut send, recv) = self.source.open_bi().await.map_err(BidiError::Open)?;
         send.send(msg).await.map_err(BidiError::<C>::Send)?;
         let send = UpdateSink(send, PhantomData, PhantomData);
         let recv = recv
             .map(|x| match x {
                 Ok(x) => {
-                    let x = S::try_inner_res_from(x).map_err(|_| BidiItemError::DowncastError)?;
+                    let x = S::try_res_down(x).map_err(|_| BidiItemError::DowncastError)?;
                     M::Response::try_from(x).map_err(|_| BidiItemError::DowncastError)
                 }
                 Err(e) => Err(BidiItemError::RecvError(e)),

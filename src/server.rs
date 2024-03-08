@@ -113,7 +113,7 @@ impl<S: IntoService<S2>, C: ServiceEndpoint<S>, S2: Service> RpcChannel<S, C, S2
             // get the response
             let res = f(target, req).await;
             // turn into a S::Res so we can send it
-            let res = S::outer_res_from(res);
+            let res = S::res_up(res);
             // send it and return the error if any
             send.send(res).await.map_err(RpcServerError::SendError)
         })
@@ -141,7 +141,7 @@ impl<S: IntoService<S2>, C: ServiceEndpoint<S>, S2: Service> RpcChannel<S, C, S2
             // get the response
             let res = f(target, req, updates).await;
             // turn into a S::Res so we can send it
-            let res = S::outer_res_from(res);
+            let res = S::res_up(res);
             // send it and return the error if any
             send.send(res).await.map_err(RpcServerError::SendError)
         })
@@ -172,7 +172,7 @@ impl<S: IntoService<S2>, C: ServiceEndpoint<S>, S2: Service> RpcChannel<S, C, S2
             tokio::pin!(responses);
             while let Some(response) = responses.next().await {
                 // turn into a S::Res so we can send it
-                let response = S::outer_res_from(response);
+                let response = S::res_up(response);
                 // send it and return the error if any
                 send.send(response).await.map_err(RpcServerError::SendError)?;
             }
@@ -210,7 +210,7 @@ impl<S: IntoService<S2>, C: ServiceEndpoint<S>, S2: Service> RpcChannel<S, C, S2
             tokio::pin!(responses);
             while let Some(response) = responses.next().await {
                 // turn into a S::Res so we can send it
-                let response = S::outer_res_from(response);
+                let response = S::res_up(response);
                 // send it and return the error if any
                 send.send(response)
                     .await
