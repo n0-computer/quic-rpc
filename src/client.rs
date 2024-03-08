@@ -139,9 +139,7 @@ where
     {
         let msg = self.map.req_up(msg.into());
         let (mut send, mut recv) = self.source.open_bi().await.map_err(RpcClientError::Open)?;
-        send.send(msg.into())
-            .await
-            .map_err(RpcClientError::<C>::Send)?;
+        send.send(msg).await.map_err(RpcClientError::<C>::Send)?;
         let res = recv
             .next()
             .await
@@ -149,7 +147,7 @@ where
             .map_err(RpcClientError::<C>::RecvError)?;
         // keep send alive until we have the answer
         drop(send);
-        let res: S2::Res = self
+        let res = self
             .map
             .try_res_down(res)
             .map_err(|_| RpcClientError::DowncastError)?;
