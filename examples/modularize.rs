@@ -5,40 +5,72 @@
 //!
 //! The [`calc`] and [`clock`] modules both expose a [`quic_rpc::Service`] in a regular fashion.
 //! They do not `use` anything from `super` or `app` so they could live in their own crates
-//! unchanged. 
+//! unchanged.
 
-use quic_rpc::{transport::flume, RpcServer};
+use anyhow::Result;
+use futures::TryStreamExt;
+use quic_rpc::{transport::flume, RpcClient, RpcServer, ServiceConnection, ServiceEndpoint};
 use tracing::warn;
 
+use app::AppService;
+
 #[tokio::main]
-async fn main() -> anyhow::Result<()> {
+async fn main() -> Result<()> {
     // Spawn an inmemory connection.
     // Could use quic equally (all code in this example is generic over the transport)
     let (server_conn, client_conn) = flume::connection::<app::Request, app::Response>(1);
 
     // spawn the server
-    tokio::task::spawn(async move {
-        let server = RpcServer::new(server_conn);
-        // create our app handler which composes the other handlers
-        let handler = app::Handler::default();
-        loop {
-            match server.accept().await {
-                Err(err) => warn!(?err, "server accept failed"),
-                Ok((req, chan)) => {
-                    let handler = handler.clone();
-                    tokio::task::spawn(async move {
-                        if let Err(err) = handler.handle_rpc_request(req, chan).await {
-                            warn!(?err, "internal rpc error");
-                        }
-                    });
-                }
+    let handler = app::Handler::default();
+    tokio::task::spawn(run_server(server_conn, handler));
+
+    // run a client demo
+    client_demo(client_conn).await?;
+
+    Ok(())
+}
+
+async fn run_server<C: ServiceEndpoint<AppService>>(server_conn: C, handler: app::Handler) {
+    let server = RpcServer::new(server_conn);
+    loop {
+        match server.accept().await {
+            Err(err) => warn!(?err, "server accept failed"),
+            Ok((req, chan)) => {
+                let handler = handler.clone();
+                tokio::task::spawn(async move {
+                    if let Err(err) = handler.handle_rpc_request(req, chan).await {
+                        warn!(?err, "internal rpc error");
+                    }
+                });
             }
         }
-    });
+    }
+}
+pub async fn client_demo<C: ServiceConnection<AppService>>(conn: C) -> Result<()> {
+    let rpc_client = RpcClient::new(conn);
+    let client = app::Client::new(rpc_client.clone());
 
-    // run a client
-    app::client_demo(client_conn).await?;
+    // call a method from the top-level app client
+    let res = client.app_version().await?;
+    println!("app_version: {res:?}");
 
+    // call a method from the wrapped iroh.calc client
+    let res = client.iroh.calc.add(40, 2).await?;
+    println!("iroh.calc.add: {res:?}");
+
+    // can also do "raw" calls without using the wrapped clients
+    let res = rpc_client
+        .map::<iroh::IrohService>()
+        .map::<calc::CalcService>()
+        .rpc(calc::AddRequest(19, 4))
+        .await?;
+    println!("iroh.calc.add (raw): {res:?}");
+
+    // call a server-streaming method from the wrapped iroh.clock client
+    let mut stream = client.iroh.clock.tick().await?;
+    while let Some(tick) = stream.try_next().await? {
+        println!("iroh.clock.tick: {tick}");
+    }
     Ok(())
 }
 
@@ -52,7 +84,6 @@ mod app {
 
     use anyhow::Result;
     use derive_more::{From, TryInto};
-    use futures::StreamExt;
     use quic_rpc::{
         message::RpcMsg, server::RpcChannel, RpcClient, Service, ServiceConnection, ServiceEndpoint,
     };
@@ -84,7 +115,7 @@ mod app {
 
     #[derive(Copy, Clone, Debug)]
     pub struct AppService;
-    impl quic_rpc::Service for AppService {
+    impl Service for AppService {
         type Req = Request;
         type Res = Response;
     }
@@ -145,24 +176,6 @@ mod app {
             Ok(res.0)
         }
     }
-
-    pub async fn client_demo<C: ServiceConnection<AppService>>(conn: C) -> Result<()> {
-        let client = RpcClient::<AppService, _>::new(conn);
-        let client = Client::new(client);
-        println!("app service: version");
-        let res = client.app_version().await?;
-        println!("app service: version res {res:?}");
-        println!("calc service: add");
-        let res = client.iroh.calc.add(40, 2).await?;
-        println!("calc service: res {res:?}");
-        println!("clock service: start tick");
-        let mut stream = client.iroh.clock.tick().await?;
-        while let Some(tick) = stream.next().await {
-            let tick = tick?;
-            println!("clock service: tick {tick}");
-        }
-        Ok(())
-    }
 }
 
 mod iroh {
@@ -191,7 +204,7 @@ mod iroh {
 
     #[derive(Copy, Clone, Debug)]
     pub struct IrohService;
-    impl quic_rpc::Service for IrohService {
+    impl Service for IrohService {
         type Req = Request;
         type Res = Response;
     }
@@ -274,7 +287,7 @@ mod calc {
 
     #[derive(Copy, Clone, Debug)]
     pub struct CalcService;
-    impl quic_rpc::Service for CalcService {
+    impl Service for CalcService {
         type Req = Request;
         type Res = Response;
     }
@@ -371,7 +384,7 @@ mod clock {
 
     #[derive(Copy, Clone, Debug)]
     pub struct ClockService;
-    impl quic_rpc::Service for ClockService {
+    impl Service for ClockService {
         type Req = Request;
         type Res = Response;
     }

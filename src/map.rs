@@ -2,113 +2,148 @@ use std::{marker::PhantomData, sync::Arc};
 
 use crate::Service;
 
-pub trait MapService<S1: Service, S2: Service>: std::fmt::Debug + Send + Sync + 'static {
-    fn req_up(&self, req: S2::Req) -> S1::Req;
-    fn res_up(&self, res: S2::Res) -> S1::Res;
-    fn try_req_down(&self, req: S1::Req) -> Result<S2::Req, ()>;
-    fn try_res_down(&self, res: S1::Res) -> Result<S2::Res, ()>;
+/// Convert requests and responses between an outer and an inner service.
+///
+/// An "outer" service has request and response enums which wrap the requests and responses of an
+/// "inner" service. This trait is implemented on the [`Mapper`] and [`ChainedMapper`] structs
+/// to convert the requests and responses between the outer and inner services.
+pub trait MapService<SOuter: Service, SInner: Service>:
+    std::fmt::Debug + Send + Sync + 'static
+{
+    /// Convert an inner request into the outer request.
+    fn req_into_outer(&self, req: SInner::Req) -> SOuter::Req;
+
+    /// Convert an inner response into the outer response. 
+    fn res_into_outer(&self, res: SInner::Res) -> SOuter::Res;
+
+    /// Try to convert the outer request into the inner request.
+    ///
+    /// Returns an error if the request is not of the variant of the inner service.
+    fn req_try_into_inner(&self, req: SOuter::Req) -> Result<SInner::Req, ()>;
+
+    /// Try to convert the outer response into the inner request.
+    ///
+    /// Returns an error if the response is not of the variant of the inner service.
+    fn res_try_into_inner(&self, res: SOuter::Res) -> Result<SInner::Res, ()>;
 }
 
+/// Zero-sized struct to map between two services.
 #[derive(Debug)]
-pub struct Mapper<S1, S2> {
-    s1: PhantomData<S1>,
-    s2: PhantomData<S2>,
-}
+pub struct Mapper<SOuter, SInner>(PhantomData<SOuter>, PhantomData<SInner>);
 
-impl<S1, S2> Mapper<S1, S2>
+impl<SOuter, SInner> Mapper<SOuter, SInner>
 where
-    S1: Service,
-    S2: Service,
-    S2::Req: Into<S1::Req> + TryFrom<S1::Req>,
-    S2::Res: Into<S1::Res> + TryFrom<S1::Res>,
+    SOuter: Service,
+    SInner: Service,
+    SInner::Req: Into<SOuter::Req> + TryFrom<SOuter::Req>,
+    SInner::Res: Into<SOuter::Res> + TryFrom<SOuter::Res>,
 {
+    /// Create a new mapper between `SOuter` and `SInner` services.
+    ///
+    /// This method is availalbe if the required bounds to convert between the outer and inner
+    /// request and response enums are met:
+    /// `SInner::Req: Into<SOuter::Req> + TryFrom<SOuter::Req>`
+    /// `SInner::Res: Into<SOuter::Res> + TryFrom<SOuter::Res>`
     pub fn new() -> Self {
-        Self {
-            s1: PhantomData,
-            s2: PhantomData,
-        }
+        Self(PhantomData, PhantomData)
     }
 }
 
-impl<S1, S2> MapService<S1, S2> for Mapper<S1, S2>
+impl<SOuter, SInner> MapService<SOuter, SInner> for Mapper<SOuter, SInner>
 where
-    S1: Service,
-    S2: Service,
-    S2::Req: Into<S1::Req> + TryFrom<S1::Req>,
-    S2::Res: Into<S1::Res> + TryFrom<S1::Res>,
+    SOuter: Service,
+    SInner: Service,
+    SInner::Req: Into<SOuter::Req> + TryFrom<SOuter::Req>,
+    SInner::Res: Into<SOuter::Res> + TryFrom<SOuter::Res>,
 {
-    fn req_up(&self, req: S2::Req) -> S1::Req {
-        (req.into()).into()
+    fn req_into_outer(&self, req: SInner::Req) -> SOuter::Req {
+        req.into()
     }
 
-    fn res_up(&self, res: S2::Res) -> S1::Res {
-        (res.into()).into()
+    fn res_into_outer(&self, res: SInner::Res) -> SOuter::Res {
+        res.into()
     }
 
-    fn try_req_down(&self, req: S1::Req) -> Result<S2::Req, ()> {
+    fn req_try_into_inner(&self, req: SOuter::Req) -> Result<SInner::Req, ()> {
         req.try_into().map_err(|_| ())
     }
 
-    fn try_res_down(&self, res: S1::Res) -> Result<S2::Res, ()> {
+    fn res_try_into_inner(&self, res: SOuter::Res) -> Result<SInner::Res, ()> {
         res.try_into().map_err(|_| ())
     }
 }
 
+/// Map between an outer and an inner service with any number of intermediate services.
+///
+/// This uses an `Arc<dyn MapService>` to contain an unlimited chain of [`Mapper`]s.
 #[derive(Debug)]
-pub struct ChainedMapper<S1, S2, S3>
+pub struct ChainedMapper<SOuter, SMid, SInner>
 where
-    S1: Service,
-    S2: Service,
-    S3: Service,
-    S3::Req: Into<S2::Req> + TryFrom<S2::Req>,
+    SOuter: Service,
+    SMid: Service,
+    SInner: Service,
+    SInner::Req: Into<SMid::Req> + TryFrom<SMid::Req>,
 {
-    m1: Arc<dyn MapService<S1, S2>>,
-    m2: Mapper<S2, S3>,
+    map1: Arc<dyn MapService<SOuter, SMid>>,
+    map2: Mapper<SMid, SInner>,
 }
 
-impl<S1, S2, S3> ChainedMapper<S1, S2, S3>
+impl<SOuter, SMid, SInner> ChainedMapper<SOuter, SMid, SInner>
 where
-    S1: Service,
-    S2: Service,
-    S3: Service,
-    S3::Req: Into<S2::Req> + TryFrom<S2::Req>,
-    S3::Res: Into<S2::Res> + TryFrom<S2::Res>,
+    SOuter: Service,
+    SMid: Service,
+    SInner: Service,
+    SInner::Req: Into<SMid::Req> + TryFrom<SMid::Req>,
+    SInner::Res: Into<SMid::Res> + TryFrom<SMid::Res>,
 {
-    pub fn new(m1: Arc<dyn MapService<S1, S2>>) -> Self {
+    /// Create a new [`ChainedMapper`] by appending a service `SInner` to the existing `dyn
+    /// MapService<SOuter, SMid>`.
+    ///
+    /// Usage example:
+    /// ```ignore
+    /// // S1 is a Service and impls the Into and TryFrom traits to map to S2
+    /// // S2 is a Service and impls the Into and TryFrom traits to map to S3
+    /// // S3 is also a Service
+    ///
+    /// let mapper: Mapper<S1, S2> = Mapper::new();
+    /// let mapper: Arc<dyn MapService<S1, S2>> = Arc::new(mapper);
+    /// let chained_mapper: ChainedMapper<S1, S2, S3> = ChainedMapper::new(mapper);
+    /// ```
+    pub fn new(map1: Arc<dyn MapService<SOuter, SMid>>) -> Self {
         Self {
-            m1,
-            m2: Mapper::new(),
+            map1,
+            map2: Mapper::new(),
         }
     }
 }
 
-impl<S1, S2, S3> MapService<S1, S3> for ChainedMapper<S1, S2, S3>
+impl<SOuter, SMid, SInner> MapService<SOuter, SInner> for ChainedMapper<SOuter, SMid, SInner>
 where
-    S1: Service,
-    S2: Service,
-    S3: Service,
-    S3::Req: Into<S2::Req> + TryFrom<S2::Req>,
-    S3::Res: Into<S2::Res> + TryFrom<S2::Res>,
+    SOuter: Service,
+    SMid: Service,
+    SInner: Service,
+    SInner::Req: Into<SMid::Req> + TryFrom<SMid::Req>,
+    SInner::Res: Into<SMid::Res> + TryFrom<SMid::Res>,
 {
-    fn req_up(&self, req: S3::Req) -> S1::Req {
-        let req = self.m2.req_up(req);
-        let req = self.m1.req_up(req.into());
+    fn req_into_outer(&self, req: SInner::Req) -> SOuter::Req {
+        let req = self.map2.req_into_outer(req);
+        let req = self.map1.req_into_outer(req);
         req
     }
-    fn res_up(&self, res: S3::Res) -> S1::Res {
-        let res = self.m2.res_up(res);
-        let res = self.m1.res_up(res.into());
+    fn res_into_outer(&self, res: SInner::Res) -> SOuter::Res {
+        let res = self.map2.res_into_outer(res);
+        let res = self.map1.res_into_outer(res);
         res
     }
-    fn try_req_down(&self, req: S1::Req) -> Result<S3::Req, ()> {
-        let req = self.m1.try_req_down(req)?;
-        let req = self.m2.try_req_down(req.try_into().map_err(|_| ())?);
+    fn req_try_into_inner(&self, req: SOuter::Req) -> Result<SInner::Req, ()> {
+        let req = self.map1.req_try_into_inner(req)?;
+        let req = self.map2.req_try_into_inner(req);
         req
     }
 
-    fn try_res_down(&self, res: <S1 as Service>::Res) -> Result<<S3 as Service>::Res, ()> {
-        let res = self.m1.try_res_down(res)?;
-        let res = self.m2.try_res_down(res.try_into().map_err(|_| ())?);
+    fn res_try_into_inner(&self, res: SOuter::Res) -> Result<SInner::Res, ()> {
+        let res = self.map1.res_try_into_inner(res)?;
+        let res = self.map2.res_try_into_inner(res);
         res
     }
 }

@@ -62,13 +62,13 @@ impl<S: Service, C: ServiceEndpoint<S>> RpcServer<S, C> {
 /// Sink and stream are independent, so you can take the channel apart and use
 /// them independently.
 #[derive(Debug)]
-pub struct RpcChannel<S: Service, C: ServiceEndpoint<S>, S2: Service = S> {
+pub struct RpcChannel<S: Service, C: ServiceEndpoint<S>, SInner: Service = S> {
     /// Sink to send responses to the client.
     pub send: C::SendSink,
     /// Stream to receive requests from the client.
     pub recv: C::RecvStream,
     /// Mapper to map between S and S2
-    map: Arc<dyn MapService<S, S2>>,
+    map: Arc<dyn MapService<S, SInner>>,
 }
 
 impl<S, C> RpcChannel<S, C, S>
@@ -86,26 +86,26 @@ where
     }
 }
 
-impl<S, C, S2> RpcChannel<S, C, S2>
+impl<S, C, SInner> RpcChannel<S, C, SInner>
 where
     S: Service,
     C: ServiceEndpoint<S>,
-    S2: Service,
+    SInner: Service,
 {
     /// Map this channel's service into an inner service.
     ///
     /// This method is available if the required bounds are upheld:
-    /// S3::Req: Into<S2::Req> + TryFrom<S2::Req>,
-    /// S3::Res: Into<S2::Res> + TryFrom<S2::Res>,
+    /// SNext::Req: Into<SInner::Req> + TryFrom<SInner::Req>,
+    /// SNext::Res: Into<SInner::Res> + TryFrom<SInner::Res>,
     ///
-    /// Where S3 is the new service to map to and S2 is the current inner service.
+    /// Where SNext is the new service to map to and SInner is the current inner service.
     ///
     /// This method can be chained infintely.
-    pub fn map<S3>(self) -> RpcChannel<S, C, S3>
+    pub fn map<SNext>(self) -> RpcChannel<S, C, SNext>
     where
-        S3: Service,
-        S3::Req: Into<S2::Req> + TryFrom<S2::Req>,
-        S3::Res: Into<S2::Res> + TryFrom<S2::Res>,
+        SNext: Service,
+        SNext::Req: Into<SInner::Req> + TryFrom<SInner::Req>,
+        SNext::Res: Into<SInner::Res> + TryFrom<SInner::Res>,
     {
         let map = ChainedMapper::new(self.map);
         RpcChannel {
@@ -125,7 +125,7 @@ where
         f: F,
     ) -> result::Result<(), RpcServerError<C>>
     where
-        M: RpcMsg<S2>,
+        M: RpcMsg<SInner>,
         F: FnOnce(T, M) -> Fut,
         Fut: Future<Output = M::Response>,
         T: Send + 'static,
@@ -142,7 +142,7 @@ where
             // get the response
             let res = f(target, req).await;
             // turn into a S::Res so we can send it
-            let res = self.map.res_up(res.into());
+            let res = self.map.res_into_outer(res.into());
             // send it and return the error if any
             send.send(res).await.map_err(RpcServerError::SendError)
         })
@@ -159,7 +159,7 @@ where
         f: F,
     ) -> result::Result<(), RpcServerError<C>>
     where
-        M: ClientStreamingMsg<S2>,
+        M: ClientStreamingMsg<SInner>,
         F: FnOnce(T, M, UpdateStream<S, C, M::Update>) -> Fut + Send + 'static,
         Fut: Future<Output = M::Response> + Send + 'static,
         T: Send + 'static,
@@ -170,7 +170,7 @@ where
             // get the response
             let res = f(target, req, updates).await;
             // turn into a S::Res so we can send it
-            let res = self.map.res_up(res.into());
+            let res = self.map.res_into_outer(res.into());
             // send it and return the error if any
             send.send(res).await.map_err(RpcServerError::SendError)
         })
@@ -187,7 +187,7 @@ where
         f: F,
     ) -> result::Result<(), RpcServerError<C>>
     where
-        M: BidiStreamingMsg<S2>,
+        M: BidiStreamingMsg<SInner>,
         F: FnOnce(T, M, UpdateStream<S, C, M::Update>) -> Str + Send + 'static,
         Str: Stream<Item = M::Response> + Send + 'static,
         T: Send + 'static,
@@ -201,7 +201,7 @@ where
             tokio::pin!(responses);
             while let Some(response) = responses.next().await {
                 // turn into a S::Res so we can send it
-                let response = self.map.res_up(response.into());
+                let response = self.map.res_into_outer(response.into());
                 // send it and return the error if any
                 send.send(response)
                     .await
@@ -222,7 +222,7 @@ where
         f: F,
     ) -> result::Result<(), RpcServerError<C>>
     where
-        M: ServerStreamingMsg<S2>,
+        M: ServerStreamingMsg<SInner>,
         F: FnOnce(T, M) -> Str + Send + 'static,
         Str: Stream<Item = M::Response> + Send + 'static,
         T: Send + 'static,
@@ -241,7 +241,7 @@ where
             tokio::pin!(responses);
             while let Some(response) = responses.next().await {
                 // turn into a S::Res so we can send it
-                let response = self.map.res_up(response.into());
+                let response = self.map.res_into_outer(response.into());
                 // send it and return the error if any
                 send.send(response)
                     .await
@@ -263,7 +263,7 @@ where
         f: F,
     ) -> result::Result<(), RpcServerError<C>>
     where
-        M: RpcMsg<S2, Response = result::Result<R, E2>>,
+        M: RpcMsg<SInner, Response = result::Result<R, E2>>,
         F: FnOnce(T, M) -> Fut,
         Fut: Future<Output = result::Result<R, E1>>,
         E2: From<E1>,
