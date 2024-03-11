@@ -286,12 +286,11 @@ fn clear_line() {
     print!("\r{}\r", " ".repeat(80));
 }
 
-pub async fn bench<S, C>(
-    client: RpcClient<S, C, ComputeService>,
-    n: u64,
-) -> anyhow::Result<()>
+pub async fn bench<S, C>(client: RpcClient<S, C, ComputeService>, n: u64) -> anyhow::Result<()>
 where
-    C::SendError: std::error::Error, S: Service, C: ServiceConnection<S>
+    C::SendError: std::error::Error,
+    S: Service,
+    C: ServiceConnection<S>,
 {
     // individual RPCs
     {
