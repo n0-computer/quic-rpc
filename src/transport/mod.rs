@@ -34,9 +34,9 @@ pub trait ConnectionErrors: Debug + Clone + Send + Sync + 'static {
 /// Having this as a separate trait is useful when writing generic code that works with both.
 pub trait ConnectionCommon<In, Out>: ConnectionErrors {
     /// Receive side of a bidirectional typed channel
-    type RecvStream: Stream<Item = Result<In, Self::RecvError>> + Send + Unpin + 'static;
+    type RecvStream: Stream<Item = Result<In, Self::RecvError>> + Send + Sync + Unpin + 'static;
     /// Send side of a bidirectional typed channel
-    type SendSink: Sink<Out, Error = Self::SendError> + Send + Unpin + 'static;
+    type SendSink: Sink<Out, Error = Self::SendError> + Send + Sync + Unpin + 'static;
 }
 
 /// A connection to a specific remote machine

@@ -7,9 +7,7 @@ use crate::{
     transport::ConnectionErrors,
     Service, ServiceConnection,
 };
-use futures::{
-    future::BoxFuture, stream::BoxStream, FutureExt, Sink, SinkExt, Stream, StreamExt, TryFutureExt,
-};
+use futures::{future::BoxFuture, FutureExt, Sink, SinkExt, Stream, StreamExt, TryFutureExt};
 use pin_project::pin_project;
 use std::{
     error,
@@ -20,6 +18,9 @@ use std::{
     sync::Arc,
     task::{Context, Poll},
 };
+
+/// Sync version of `future::stream::BoxStream`.
+pub type BoxStreamSync<'a, T> = Pin<Box<dyn Stream<Item = T> + Send + Sync + 'a>>;
 
 /// A client for a specific service
 ///
@@ -159,7 +160,7 @@ where
         &self,
         msg: M,
     ) -> result::Result<
-        BoxStream<'static, result::Result<M::Response, StreamingResponseItemError<C>>>,
+        BoxStreamSync<'static, result::Result<M::Response, StreamingResponseItemError<C>>>,
         StreamingResponseError<C>,
     >
     where
@@ -185,7 +186,7 @@ where
             Err(e) => Err(StreamingResponseItemError::RecvError(e)),
         });
         // keep send alive so the request on the server side does not get cancelled
-        let recv = DeferDrop(recv, send).boxed();
+        let recv = Box::pin(DeferDrop(recv, send));
         Ok(recv)
     }
 
@@ -239,7 +240,7 @@ where
     ) -> result::Result<
         (
             UpdateSink<S, C, M::Update, SInner>,
-            BoxStream<'static, result::Result<M::Response, BidiItemError<C>>>,
+            BoxStreamSync<'static, result::Result<M::Response, BidiItemError<C>>>,
         ),
         BidiError<C>,
     >
@@ -251,7 +252,7 @@ where
         send.send(msg).await.map_err(BidiError::<C>::Send)?;
         let send = UpdateSink(send, PhantomData, Arc::clone(&self.map));
         let map = Arc::clone(&self.map);
-        let recv = recv
+        let recv = Box::pin(recv
             .map(move |x| match x {
                 Ok(x) => {
                     let x = map
@@ -260,8 +261,7 @@ where
                     M::Response::try_from(x).map_err(|_| BidiItemError::DowncastError)
                 }
                 Err(e) => Err(BidiItemError::RecvError(e)),
-            })
-            .boxed();
+            }));
         Ok((send, recv))
     }
 }
