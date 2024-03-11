@@ -252,16 +252,15 @@ where
         send.send(msg).await.map_err(BidiError::<C>::Send)?;
         let send = UpdateSink(send, PhantomData, Arc::clone(&self.map));
         let map = Arc::clone(&self.map);
-        let recv = Box::pin(recv
-            .map(move |x| match x {
-                Ok(x) => {
-                    let x = map
-                        .res_try_into_inner(x)
-                        .map_err(|_| BidiItemError::DowncastError)?;
-                    M::Response::try_from(x).map_err(|_| BidiItemError::DowncastError)
-                }
-                Err(e) => Err(BidiItemError::RecvError(e)),
-            }));
+        let recv = Box::pin(recv.map(move |x| match x {
+            Ok(x) => {
+                let x = map
+                    .res_try_into_inner(x)
+                    .map_err(|_| BidiItemError::DowncastError)?;
+                M::Response::try_from(x).map_err(|_| BidiItemError::DowncastError)
+            }
+            Err(e) => Err(BidiItemError::RecvError(e)),
+        }));
         Ok((send, recv))
     }
 }

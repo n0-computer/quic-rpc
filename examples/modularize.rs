@@ -8,7 +8,7 @@
 //! unchanged.
 
 use anyhow::Result;
-use futures::TryStreamExt;
+use futures::{SinkExt, TryStreamExt};
 use quic_rpc::{transport::flume, RpcClient, RpcServer, ServiceConnection, ServiceEndpoint};
 use tracing::warn;
 
@@ -60,11 +60,24 @@ pub async fn client_demo<C: ServiceConnection<AppService>>(conn: C) -> Result<()
 
     // can also do "raw" calls without using the wrapped clients
     let res = rpc_client
+        .clone()
         .map::<iroh::IrohService>()
         .map::<calc::CalcService>()
         .rpc(calc::AddRequest(19, 4))
         .await?;
     println!("iroh.calc.add (raw): {res:?}");
+
+    let (mut sink, res) = rpc_client
+        .map::<iroh::IrohService>()
+        .map::<calc::CalcService>()
+        .client_streaming(calc::SumRequest)
+        .await?;
+    sink.send(calc::SumUpdate(4)).await.unwrap();
+    sink.send(calc::SumUpdate(8)).await.unwrap();
+    sink.send(calc::SumUpdate(30)).await.unwrap();
+    drop(sink);
+    let res = res.await?;
+    println!("iroh.calc.sum (raw): {res:?}");
 
     // call a server-streaming method from the wrapped iroh.clock client
     let mut stream = client.iroh.clock.tick().await?;
@@ -257,10 +270,13 @@ mod calc {
     //! This is a library providing a service, and a client. E.g. iroh-bytes or iroh-hypermerge.
     //! It does not use any `super` imports, it is completely decoupled.
 
-    use anyhow::Result;
+    use anyhow::{bail, Result};
     use derive_more::{From, TryInto};
+    use futures::{Stream, StreamExt};
     use quic_rpc::{
-        message::RpcMsg, server::RpcChannel, RpcClient, Service, ServiceConnection, ServiceEndpoint,
+        message::{ClientStreaming, ClientStreamingMsg, Msg, RpcMsg},
+        server::RpcChannel,
+        RpcClient, Service, ServiceConnection, ServiceEndpoint,
     };
     use serde::{Deserialize, Serialize};
     use std::fmt::Debug;
@@ -275,14 +291,35 @@ mod calc {
     #[derive(Debug, Serialize, Deserialize)]
     pub struct AddResponse(pub i64);
 
+    #[derive(Debug, Serialize, Deserialize)]
+    pub struct SumRequest;
+
+    #[derive(Debug, Serialize, Deserialize)]
+    pub struct SumUpdate(pub i64);
+
+    impl Msg<CalcService> for SumRequest {
+        type Pattern = ClientStreaming;
+    }
+
+    impl ClientStreamingMsg<CalcService> for SumRequest {
+        type Update = SumUpdate;
+        type Response = SumResponse;
+    }
+
+    #[derive(Debug, Serialize, Deserialize)]
+    pub struct SumResponse(pub i64);
+
     #[derive(Debug, Serialize, Deserialize, From, TryInto)]
     pub enum Request {
         Add(AddRequest),
+        Sum(SumRequest),
+        SumUpdate(SumUpdate),
     }
 
     #[derive(Debug, Serialize, Deserialize, From, TryInto)]
     pub enum Response {
         Add(AddResponse),
+        Sum(SumResponse),
     }
 
     #[derive(Copy, Clone, Debug)]
@@ -307,12 +344,27 @@ mod calc {
         {
             match req {
                 Request::Add(req) => chan.rpc(req, self, Self::on_add).await?,
+                Request::Sum(req) => chan.client_streaming(req, self, Self::on_sum).await?,
+                Request::SumUpdate(_) => bail!("Unexpected update message at start of request"),
             }
             Ok(())
         }
 
         pub async fn on_add(self, req: AddRequest) -> AddResponse {
             AddResponse(req.0 + req.1)
+        }
+
+        pub async fn on_sum(
+            self,
+            _req: SumRequest,
+            updates: impl Stream<Item = SumUpdate>,
+        ) -> SumResponse {
+            let mut sum = 0i64;
+            tokio::pin!(updates);
+            while let Some(SumUpdate(n)) = updates.next().await {
+                sum += n;
+            }
+            SumResponse(sum)
         }
     }
 

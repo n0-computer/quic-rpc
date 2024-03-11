@@ -13,7 +13,7 @@ pub trait MapService<SOuter: Service, SInner: Service>:
     /// Convert an inner request into the outer request.
     fn req_into_outer(&self, req: SInner::Req) -> SOuter::Req;
 
-    /// Convert an inner response into the outer response. 
+    /// Convert an inner response into the outer response.
     fn res_into_outer(&self, res: SInner::Res) -> SOuter::Res;
 
     /// Try to convert the outer request into the inner request.

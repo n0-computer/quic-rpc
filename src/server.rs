@@ -160,12 +160,12 @@ where
     ) -> result::Result<(), RpcServerError<C>>
     where
         M: ClientStreamingMsg<SInner>,
-        F: FnOnce(T, M, UpdateStream<S, C, M::Update>) -> Fut + Send + 'static,
+        F: FnOnce(T, M, UpdateStream<S, C, M::Update, SInner>) -> Fut + Send + 'static,
         Fut: Future<Output = M::Response> + Send + 'static,
         T: Send + 'static,
     {
         let Self { mut send, recv, .. } = self;
-        let (updates, read_error) = UpdateStream::new(recv);
+        let (updates, read_error) = UpdateStream::new(recv, Arc::clone(&self.map));
         race2(read_error.map(Err), async move {
             // get the response
             let res = f(target, req, updates).await;
@@ -188,13 +188,13 @@ where
     ) -> result::Result<(), RpcServerError<C>>
     where
         M: BidiStreamingMsg<SInner>,
-        F: FnOnce(T, M, UpdateStream<S, C, M::Update>) -> Str + Send + 'static,
+        F: FnOnce(T, M, UpdateStream<S, C, M::Update, SInner>) -> Str + Send + 'static,
         Str: Stream<Item = M::Response> + Send + 'static,
         T: Send + 'static,
     {
         let Self { mut send, recv, .. } = self;
         // downcast the updates
-        let (updates, read_error) = UpdateStream::new(recv);
+        let (updates, read_error) = UpdateStream::new(recv, Arc::clone(&self.map));
         // get the response
         let responses = f(target, req, updates);
         race2(read_error.map(Err), async move {
@@ -326,23 +326,40 @@ impl<S: Service, C: ServiceEndpoint<S>> AsRef<C> for RpcServer<S, C> {
 /// cause a termination of the RPC call.
 #[pin_project]
 #[derive(Debug)]
-pub struct UpdateStream<S: Service, C: ServiceEndpoint<S>, T>(
+pub struct UpdateStream<S, C, T, SInner = S>(
     #[pin] C::RecvStream,
     Option<oneshot::Sender<RpcServerError<C>>>,
     PhantomData<T>,
-);
+    Arc<dyn MapService<S, SInner>>,
+)
+where
+    S: Service,
+    SInner: Service,
+    C: ServiceEndpoint<S>;
 
-impl<S: Service, C: ServiceEndpoint<S>, T> UpdateStream<S, C, T> {
-    fn new(recv: C::RecvStream) -> (Self, UnwrapToPending<RpcServerError<C>>) {
+impl<S, C, T, SInner> UpdateStream<S, C, T, SInner>
+where
+    S: Service,
+    SInner: Service,
+    C: ServiceEndpoint<S>,
+    T: TryFrom<SInner::Req>,
+{
+    fn new(
+        recv: C::RecvStream,
+        map: Arc<dyn MapService<S, SInner>>,
+    ) -> (Self, UnwrapToPending<RpcServerError<C>>) {
         let (error_send, error_recv) = oneshot::channel();
         let error_recv = UnwrapToPending(error_recv);
-        (Self(recv, Some(error_send), PhantomData), error_recv)
+        (Self(recv, Some(error_send), PhantomData, map), error_recv)
     }
 }
 
-impl<S: Service, C: ServiceEndpoint<S>, T> Stream for UpdateStream<S, C, T>
+impl<S, C, T, SInner> Stream for UpdateStream<S, C, T, SInner>
 where
-    T: TryFrom<S::Req>,
+    S: Service,
+    SInner: Service,
+    C: ServiceEndpoint<S>,
+    T: TryFrom<SInner::Req>,
 {
     type Item = T;
 
@@ -350,16 +367,20 @@ where
         let mut this = self.project();
         match this.0.poll_next_unpin(cx) {
             Poll::Ready(Some(msg)) => match msg {
-                Ok(msg) => match T::try_from(msg) {
-                    Ok(msg) => Poll::Ready(Some(msg)),
-                    Err(_cause) => {
-                        // we were unable to downcast, so we need to send an error
-                        if let Some(tx) = this.1.take() {
-                            let _ = tx.send(RpcServerError::UnexpectedUpdateMessage);
+                Ok(msg) => {
+                    let msg = this.3.req_try_into_inner(msg);
+                    let msg = msg.and_then(|msg| T::try_from(msg).map_err(|_cause| ()));
+                    match msg {
+                        Ok(msg) => Poll::Ready(Some(msg)),
+                        Err(_cause) => {
+                            // we were unable to downcast, so we need to send an error
+                            if let Some(tx) = this.1.take() {
+                                let _ = tx.send(RpcServerError::UnexpectedUpdateMessage);
+                            }
+                            Poll::Pending
                         }
-                        Poll::Pending
                     }
-                },
+                }
                 Err(cause) => {
                     // we got a recv error, so return pending and send the error
                     if let Some(tx) = this.1.take() {
