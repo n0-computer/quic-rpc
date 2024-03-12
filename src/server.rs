@@ -20,7 +20,7 @@ use std::{
 
 /// A server channel for a specific service.
 ///
-/// This is a wrapper around a [ServiceEndpoint](crate::ServiceEndpoint) that serves as the entry point for the server DSL.
+/// This is a wrapper around a [ServiceEndpoint] that serves as the entry point for the server DSL.
 /// `S` is the service type, `C` is the channel type.
 #[derive(Debug)]
 pub struct RpcServer<S, C> {
