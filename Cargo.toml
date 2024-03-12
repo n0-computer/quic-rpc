@@ -54,7 +54,7 @@ quinn-transport = ["flume", "quinn", "bincode", "tokio-serde", "tokio-util"]
 flume-transport = ["flume"]
 combined-transport = []
 macros = []
-default = []
+default = ["flume-transport"]
 
 [package.metadata.docs.rs]
 all-features = true
@@ -69,7 +69,7 @@ required-features = ["flume-transport", "macros"]
 
 [[example]]
 name = "store"
-required-features = ["flume-transport"]
+required-features = ["flume-transport", "macros"]
 
 [[example]]
 name = "modularize"
