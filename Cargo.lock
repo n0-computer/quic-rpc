@@ -701,7 +701,7 @@ dependencies = [
 
 [[package]]
 name = "quic-rpc"
-version = "0.6.3"
+version = "0.7.0"
 dependencies = [
  "anyhow",
  "async-stream",
