@@ -1,4 +1,4 @@
-#![cfg(all(feature = "flume-transport", feature = "macros"))]
+#![cfg(feature = "flume-transport")]
 mod math;
 use math::*;
 use quic_rpc::{

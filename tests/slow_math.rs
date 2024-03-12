@@ -1,10 +1,7 @@
-#![cfg(all(
-    any(
-        feature = "flume-transport",
-        feature = "hyper-transport",
-        feature = "quinn-transport"
-    ),
-    feature = "macros"
+#![cfg(any(
+    feature = "flume-transport",
+    feature = "hyper-transport",
+    feature = "quinn-transport"
 ))]
 mod math;
 use std::result;
@@ -13,8 +10,12 @@ use async_stream::stream;
 use futures::{Stream, StreamExt};
 use math::*;
 use quic_rpc::{
-    declare_bidi_streaming, declare_client_streaming, declare_rpc, declare_server_streaming,
-    server::RpcServerError, RpcServer, Service, ServiceEndpoint,
+    message::{
+        BidiStreaming, BidiStreamingMsg, ClientStreaming, ClientStreamingMsg, Msg, RpcMsg,
+        ServerStreaming, ServerStreamingMsg,
+    },
+    server::RpcServerError,
+    RpcServer, Service, ServiceEndpoint,
 };
 
 #[derive(Debug, Clone)]
@@ -25,10 +26,35 @@ impl Service for ComputeService {
     type Res = ComputeResponse;
 }
 
-declare_rpc!(ComputeService, Sqr, SqrResponse);
-declare_client_streaming!(ComputeService, Sum, SumUpdate, SumResponse);
-declare_server_streaming!(ComputeService, Fibonacci, FibonacciResponse);
-declare_bidi_streaming!(ComputeService, Multiply, MultiplyUpdate, MultiplyResponse);
+impl RpcMsg<ComputeService> for Sqr {
+    type Response = SqrResponse;
+}
+
+impl Msg<ComputeService> for Sum {
+    type Pattern = ClientStreaming;
+}
+
+impl ClientStreamingMsg<ComputeService> for Sum {
+    type Update = SumUpdate;
+    type Response = SumResponse;
+}
+
+impl Msg<ComputeService> for Fibonacci {
+    type Pattern = ServerStreaming;
+}
+
+impl ServerStreamingMsg<ComputeService> for Fibonacci {
+    type Response = FibonacciResponse;
+}
+
+impl Msg<ComputeService> for Multiply {
+    type Pattern = BidiStreaming;
+}
+
+impl BidiStreamingMsg<ComputeService> for Multiply {
+    type Update = MultiplyUpdate;
+    type Response = MultiplyResponse;
+}
 
 async fn sleep_ms(ms: u64) {
     tokio::time::sleep(std::time::Duration::from_millis(ms)).await;
