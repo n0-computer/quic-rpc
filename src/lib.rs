@@ -102,6 +102,7 @@ pub use client::RpcClient;
 pub use server::RpcServer;
 #[cfg(feature = "macros")]
 mod macros;
+mod map;
 
 /// Requirements for a RPC message
 ///

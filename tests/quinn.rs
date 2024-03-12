@@ -150,7 +150,7 @@ async fn server_away_and_back() -> anyhow::Result<()> {
     let client = make_client_endpoint("0.0.0.0:0".parse()?, &[&server_cert])?;
     let client_connection =
         transport::quinn::QuinnConnection::new(client, server_addr, "localhost".into());
-    let client = RpcClient::new(client_connection);
+    let client = RpcClient::<ComputeService, _>::new(client_connection);
 
     // send a request. No server available so it should fail
     client.rpc(Sqr(4)).await.unwrap_err();

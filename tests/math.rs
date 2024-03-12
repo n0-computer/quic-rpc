@@ -9,7 +9,8 @@ use derive_more::{From, TryInto};
 use futures::{SinkExt, Stream, StreamExt, TryStreamExt};
 use quic_rpc::{
     declare_bidi_streaming, declare_client_streaming, declare_rpc, declare_server_streaming,
-    server::RpcServerError, RpcClient, RpcServer, Service, ServiceConnection, ServiceEndpoint,
+    server::{RpcChannel, RpcServerError},
+    RpcClient, RpcServer, Service, ServiceConnection, ServiceEndpoint,
 };
 use serde::{Deserialize, Serialize};
 use std::{
@@ -137,20 +138,30 @@ impl ComputeService {
         loop {
             let (req, chan) = s.accept().await?;
             let service = service.clone();
-            tokio::spawn(async move {
-                use ComputeRequest::*;
-                #[rustfmt::skip]
-                match req {
-                    Sqr(msg) => chan.rpc(msg, service, ComputeService::sqr).await,
-                    Sum(msg) => chan.client_streaming(msg, service, ComputeService::sum).await,
-                    Fibonacci(msg) => chan.server_streaming(msg, service, ComputeService::fibonacci).await,
-                    Multiply(msg) => chan.bidi_streaming(msg, service, ComputeService::multiply).await,
-                    SumUpdate(_) => Err(RpcServerError::UnexpectedStartMessage)?,
-                    MultiplyUpdate(_) => Err(RpcServerError::UnexpectedStartMessage)?,
-                }?;
-                Ok::<_, RpcServerError<C>>(())
-            });
+            tokio::spawn(async move { Self::handle_rpc_request(service, req, chan).await });
         }
+    }
+
+    pub async fn handle_rpc_request<S, E>(
+        service: ComputeService,
+        req: ComputeRequest,
+        chan: RpcChannel<S, E, ComputeService>,
+    ) -> Result<(), RpcServerError<E>>
+    where
+        S: Service,
+        E: ServiceEndpoint<S>,
+    {
+        use ComputeRequest::*;
+        #[rustfmt::skip]
+        match req {
+            Sqr(msg) => chan.rpc(msg, service, ComputeService::sqr).await,
+            Sum(msg) => chan.client_streaming(msg, service, ComputeService::sum).await,
+            Fibonacci(msg) => chan.server_streaming(msg, service, ComputeService::fibonacci).await,
+            Multiply(msg) => chan.bidi_streaming(msg, service, ComputeService::multiply).await,
+            MultiplyUpdate(_) => Err(RpcServerError::UnexpectedStartMessage)?,
+            SumUpdate(_) => Err(RpcServerError::UnexpectedStartMessage)?,
+        }?;
+        Ok(())
     }
 
     /// Runs the service until `count` requests have been received.
@@ -275,12 +286,11 @@ fn clear_line() {
     print!("\r{}\r", " ".repeat(80));
 }
 
-pub async fn bench<C: ServiceConnection<ComputeService>>(
-    client: RpcClient<ComputeService, C>,
-    n: u64,
-) -> anyhow::Result<()>
+pub async fn bench<S, C>(client: RpcClient<S, C, ComputeService>, n: u64) -> anyhow::Result<()>
 where
     C::SendError: std::error::Error,
+    S: Service,
+    C: ServiceConnection<S>,
 {
     // individual RPCs
     {

@@ -2,6 +2,7 @@
 //!
 //! The main entry point is [RpcClient].
 use crate::{
+    map::{ChainedMapper, MapService, Mapper},
     message::{BidiStreamingMsg, ClientStreamingMsg, RpcMsg, ServerStreamingMsg},
     transport::ConnectionErrors,
     Service, ServiceConnection,
@@ -14,6 +15,7 @@ use std::{
     marker::PhantomData,
     pin::Pin,
     result,
+    sync::Arc,
     task::{Context, Poll},
 };
 
@@ -25,16 +27,16 @@ pub type BoxStreamSync<'a, T> = Pin<Box<dyn Stream<Item = T> + Send + Sync + 'a>
 /// This is a wrapper around a [ServiceConnection] that serves as the entry point
 /// for the client DSL. `S` is the service type, `C` is the substream source.
 #[derive(Debug)]
-pub struct RpcClient<S, C> {
+pub struct RpcClient<S, C, SInner = S> {
     source: C,
-    p: PhantomData<S>,
+    map: Arc<dyn MapService<S, SInner>>,
 }
 
-impl<S, C: Clone> Clone for RpcClient<S, C> {
+impl<S, C: Clone, SInner> Clone for RpcClient<S, C, SInner> {
     fn clone(&self) -> Self {
         Self {
             source: self.source.clone(),
-            p: PhantomData,
+            map: Arc::clone(&self.map),
         }
     }
 }
@@ -43,12 +45,24 @@ impl<S, C: Clone> Clone for RpcClient<S, C> {
 /// that support it, [crate::message::ClientStreaming] and [crate::message::BidiStreaming].
 #[pin_project]
 #[derive(Debug)]
-pub struct UpdateSink<S: Service, C: ServiceConnection<S>, T: Into<S::Req>>(
+pub struct UpdateSink<S, C, T, SInner = S>(
     #[pin] C::SendSink,
     PhantomData<T>,
-);
+    Arc<dyn MapService<S, SInner>>,
+)
+where
+    S: Service,
+    SInner: Service,
+    C: ServiceConnection<S>,
+    T: Into<SInner::Req>;
 
-impl<S: Service, C: ServiceConnection<S>, T: Into<S::Req>> Sink<T> for UpdateSink<S, C, T> {
+impl<S, C, T, SInner> Sink<T> for UpdateSink<S, C, T, SInner>
+where
+    S: Service,
+    SInner: Service,
+    C: ServiceConnection<S>,
+    T: Into<SInner::Req>,
+{
     type Error = C::SendError;
 
     fn poll_ready(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
@@ -56,7 +70,7 @@ impl<S: Service, C: ServiceConnection<S>, T: Into<S::Req>> Sink<T> for UpdateSin
     }
 
     fn start_send(self: Pin<&mut Self>, item: T) -> Result<(), Self::Error> {
-        let req: S::Req = item.into();
+        let req = self.2.req_into_outer(item.into());
         self.project().0.start_send_unpin(req)
     }
 
@@ -69,7 +83,11 @@ impl<S: Service, C: ServiceConnection<S>, T: Into<S::Req>> Sink<T> for UpdateSin
     }
 }
 
-impl<S: Service, C: ServiceConnection<S>> RpcClient<S, C> {
+impl<S, C> RpcClient<S, C, S>
+where
+    S: Service,
+    C: ServiceConnection<S>,
+{
     /// Create a new rpc client for a specific [Service] given a compatible
     /// [ServiceConnection].
     ///
@@ -77,21 +95,50 @@ impl<S: Service, C: ServiceConnection<S>> RpcClient<S, C> {
     pub fn new(source: C) -> Self {
         Self {
             source,
-            p: PhantomData,
+            map: Arc::new(Mapper::new()),
         }
     }
+}
 
+impl<S, C, SInner> RpcClient<S, C, SInner>
+where
+    S: Service,
+    C: ServiceConnection<S>,
+    SInner: Service,
+{
     /// Get the underlying connection
     pub fn into_inner(self) -> C {
         self.source
     }
 
+    /// Map this channel's service into an inner service.
+    ///
+    /// This method is available if the required bounds are upheld:
+    /// SNext::Req: Into<SInner::Req> + TryFrom<SInner::Req>,
+    /// SNext::Res: Into<SInner::Res> + TryFrom<SInner::Res>,
+    ///
+    /// Where SNext is the new service to map to and SInner is the current inner service.
+    ///
+    /// This method can be chained infintely.
+    pub fn map<SNext>(self) -> RpcClient<S, C, SNext>
+    where
+        SNext: Service,
+        SNext::Req: Into<SInner::Req> + TryFrom<SInner::Req>,
+        SNext::Res: Into<SInner::Res> + TryFrom<SInner::Res>,
+    {
+        let map = ChainedMapper::new(self.map);
+        RpcClient {
+            source: self.source,
+            map: Arc::new(map),
+        }
+    }
+
     /// RPC call to the server, single request, single response
     pub async fn rpc<M>(&self, msg: M) -> result::Result<M::Response, RpcClientError<C>>
     where
-        M: RpcMsg<S>,
+        M: RpcMsg<SInner>,
     {
-        let msg = msg.into();
+        let msg = self.map.req_into_outer(msg.into());
         let (mut send, mut recv) = self.source.open_bi().await.map_err(RpcClientError::Open)?;
         send.send(msg).await.map_err(RpcClientError::<C>::Send)?;
         let res = recv
@@ -101,6 +148,10 @@ impl<S: Service, C: ServiceConnection<S>> RpcClient<S, C> {
             .map_err(RpcClientError::<C>::RecvError)?;
         // keep send alive until we have the answer
         drop(send);
+        let res = self
+            .map
+            .res_try_into_inner(res)
+            .map_err(|_| RpcClientError::DowncastError)?;
         M::Response::try_from(res).map_err(|_| RpcClientError::DowncastError)
     }
 
@@ -113,9 +164,9 @@ impl<S: Service, C: ServiceConnection<S>> RpcClient<S, C> {
         StreamingResponseError<C>,
     >
     where
-        M: ServerStreamingMsg<S>,
+        M: ServerStreamingMsg<SInner>,
     {
-        let msg = msg.into();
+        let msg = self.map.req_into_outer(msg.into());
         let (mut send, recv) = self
             .source
             .open_bi()
@@ -124,8 +175,12 @@ impl<S: Service, C: ServiceConnection<S>> RpcClient<S, C> {
         send.send(msg)
             .map_err(StreamingResponseError::<C>::Send)
             .await?;
+        let map = Arc::clone(&self.map);
         let recv = recv.map(move |x| match x {
             Ok(x) => {
+                let x = map
+                    .res_try_into_inner(x)
+                    .map_err(|_| StreamingResponseItemError::DowncastError)?;
                 M::Response::try_from(x).map_err(|_| StreamingResponseItemError::DowncastError)
             }
             Err(e) => Err(StreamingResponseItemError::RecvError(e)),
@@ -141,22 +196,23 @@ impl<S: Service, C: ServiceConnection<S>> RpcClient<S, C> {
         msg: M,
     ) -> result::Result<
         (
-            UpdateSink<S, C, M::Update>,
+            UpdateSink<S, C, M::Update, SInner>,
             BoxFuture<'static, result::Result<M::Response, ClientStreamingItemError<C>>>,
         ),
         ClientStreamingError<C>,
     >
     where
-        M: ClientStreamingMsg<S>,
+        M: ClientStreamingMsg<SInner>,
     {
-        let msg = msg.into();
+        let msg = self.map.req_into_outer(msg.into());
         let (mut send, mut recv) = self
             .source
             .open_bi()
             .await
             .map_err(ClientStreamingError::Open)?;
         send.send(msg).map_err(ClientStreamingError::Send).await?;
-        let send = UpdateSink::<S, C, M::Update>(send, PhantomData);
+        let send = UpdateSink::<S, C, M::Update, SInner>(send, PhantomData, Arc::clone(&self.map));
+        let map = Arc::clone(&self.map);
         let recv = async move {
             let item = recv
                 .next()
@@ -165,6 +221,9 @@ impl<S: Service, C: ServiceConnection<S>> RpcClient<S, C> {
 
             match item {
                 Ok(x) => {
+                    let x = map
+                        .res_try_into_inner(x)
+                        .map_err(|_| ClientStreamingItemError::DowncastError)?;
                     M::Response::try_from(x).map_err(|_| ClientStreamingItemError::DowncastError)
                 }
                 Err(e) => Err(ClientStreamingItemError::RecvError(e)),
@@ -180,27 +239,38 @@ impl<S: Service, C: ServiceConnection<S>> RpcClient<S, C> {
         msg: M,
     ) -> result::Result<
         (
-            UpdateSink<S, C, M::Update>,
+            UpdateSink<S, C, M::Update, SInner>,
             BoxStreamSync<'static, result::Result<M::Response, BidiItemError<C>>>,
         ),
         BidiError<C>,
     >
     where
-        M: BidiStreamingMsg<S>,
+        M: BidiStreamingMsg<SInner>,
     {
-        let msg = msg.into();
+        let msg = self.map.req_into_outer(msg.into());
         let (mut send, recv) = self.source.open_bi().await.map_err(BidiError::Open)?;
         send.send(msg).await.map_err(BidiError::<C>::Send)?;
-        let send = UpdateSink(send, PhantomData);
-        let recv = Box::pin(recv.map(|x| match x {
-            Ok(x) => M::Response::try_from(x).map_err(|_| BidiItemError::DowncastError),
+        let send = UpdateSink(send, PhantomData, Arc::clone(&self.map));
+        let map = Arc::clone(&self.map);
+        let recv = Box::pin(recv.map(move |x| match x {
+            Ok(x) => {
+                let x = map
+                    .res_try_into_inner(x)
+                    .map_err(|_| BidiItemError::DowncastError)?;
+                M::Response::try_from(x).map_err(|_| BidiItemError::DowncastError)
+            }
             Err(e) => Err(BidiItemError::RecvError(e)),
         }));
         Ok((send, recv))
     }
 }
 
-impl<S: Service, C: ServiceConnection<S>> AsRef<C> for RpcClient<S, C> {
+impl<S, C, SInner> AsRef<C> for RpcClient<S, C, SInner>
+where
+    S: Service,
+    C: ServiceConnection<S>,
+    SInner: Service,
+{
     fn as_ref(&self) -> &C {
         &self.source
     }

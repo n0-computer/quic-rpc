@@ -68,6 +68,10 @@ required-features = ["flume-transport", "macros"]
 name = "store"
 required-features = ["flume-transport"]
 
+[[example]]
+name = "modularize"
+required-features = ["flume-transport"]
+
 [workspace]
 members = ["examples/split/types", "examples/split/server", "examples/split/client"]
 
