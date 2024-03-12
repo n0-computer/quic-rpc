@@ -127,23 +127,19 @@ where
 {
     fn req_into_outer(&self, req: SInner::Req) -> SOuter::Req {
         let req = self.map2.req_into_outer(req);
-        let req = self.map1.req_into_outer(req);
-        req
+        self.map1.req_into_outer(req)
     }
     fn res_into_outer(&self, res: SInner::Res) -> SOuter::Res {
         let res = self.map2.res_into_outer(res);
-        let res = self.map1.res_into_outer(res);
-        res
+        self.map1.res_into_outer(res)
     }
     fn req_try_into_inner(&self, req: SOuter::Req) -> Result<SInner::Req, ()> {
         let req = self.map1.req_try_into_inner(req)?;
-        let req = self.map2.req_try_into_inner(req);
-        req
+        self.map2.req_try_into_inner(req)
     }
 
     fn res_try_into_inner(&self, res: SOuter::Res) -> Result<SInner::Res, ()> {
         let res = self.map1.res_try_into_inner(res)?;
-        let res = self.map2.res_try_into_inner(res);
-        res
+        self.map2.res_try_into_inner(res)
     }
 }
