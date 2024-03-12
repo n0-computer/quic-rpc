@@ -1,5 +1,5 @@
 #![cfg(feature = "hyper-transport")]
-use std::{net::SocketAddr, result};
+use std::{assert, net::SocketAddr, result};
 
 use ::hyper::Uri;
 use derive_more::{From, TryInto};
@@ -283,7 +283,7 @@ async fn hyper_channel_errors() -> anyhow::Result<()> {
 
     // response small - should succeed
     let res = client.rpc(BigResponseRequest(10_000_000)).await;
-    assert_matches!(res, Ok(_));
+    assert!(res.is_ok());
     assert_server_result!(Ok(()));
 
     // response big - should fail
