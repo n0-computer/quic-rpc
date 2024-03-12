@@ -1,4 +1,4 @@
-#![cfg(feature = "quinn-transport")]
+#![cfg(all(feature = "quinn-transport", feature = "macros"))]
 use std::{
     net::{Ipv4Addr, SocketAddr, SocketAddrV4},
     sync::Arc,

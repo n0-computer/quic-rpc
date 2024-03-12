@@ -1,5 +1,5 @@
-#![cfg(feature = "hyper-transport")]
-use std::{net::SocketAddr, result};
+#![cfg(all(feature = "hyper-transport", feature = "macros"))]
+use std::{assert, net::SocketAddr, result};
 
 use ::hyper::Uri;
 use derive_more::{From, TryInto};
