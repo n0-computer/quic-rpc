@@ -28,8 +28,8 @@ pub type BoxStreamSync<'a, T> = Pin<Box<dyn Stream<Item = T> + Send + Sync + 'a>
 /// for the client DSL. `S` is the service type, `C` is the substream source.
 #[derive(Debug)]
 pub struct RpcClient<S, C, SInner = S> {
-    source: C,
-    map: Arc<dyn MapService<S, SInner>>,
+    pub(crate) source: C,
+    pub(crate) map: Arc<dyn MapService<S, SInner>>,
 }
 
 impl<S, C: Clone, SInner> Clone for RpcClient<S, C, SInner> {
@@ -405,7 +405,7 @@ impl<S: ConnectionErrors> error::Error for StreamingResponseItemError<S> {}
 
 /// Wrap a stream with an additional item that is kept alive until the stream is dropped
 #[pin_project]
-struct DeferDrop<S: Stream, X>(#[pin] S, X);
+pub(crate) struct DeferDrop<S: Stream, X>(#[pin] pub S, pub X);
 
 impl<S: Stream, X> Stream for DeferDrop<S, X> {
     type Item = S::Item;

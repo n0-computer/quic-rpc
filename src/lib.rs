@@ -104,6 +104,8 @@ pub use server::RpcServer;
 mod macros;
 mod map;
 
+pub mod pattern;
+
 /// Requirements for a RPC message
 ///
 /// Even when just using the mem transport, we require messages to be Serializable and Deserializable.

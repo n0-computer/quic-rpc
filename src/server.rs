@@ -68,7 +68,7 @@ pub struct RpcChannel<S: Service, C: ServiceEndpoint<S>, SInner: Service = S> {
     /// Stream to receive requests from the client.
     pub recv: C::RecvStream,
     /// Mapper to map between S and S2
-    map: Arc<dyn MapService<S, SInner>>,
+    pub map: Arc<dyn MapService<S, SInner>>,
 }
 
 impl<S, C> RpcChannel<S, C, S>
@@ -447,7 +447,7 @@ impl<T> Future for UnwrapToPending<T> {
     }
 }
 
-async fn race2<T, A: Future<Output = T>, B: Future<Output = T>>(f1: A, f2: B) -> T {
+pub(crate) async fn race2<T, A: Future<Output = T>, B: Future<Output = T>>(f1: A, f2: B) -> T {
     tokio::select! {
         x = f1 => x,
         x = f2 => x,
