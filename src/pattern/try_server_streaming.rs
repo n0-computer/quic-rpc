@@ -17,7 +17,10 @@ use std::{
     sync::Arc,
 };
 
+/// A guard message to indicate that the stream has been created.
 ///
+/// This is so we can dinstinguish between an error creating the stream and
+/// an error in the first item produced by the stream.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct StreamCreated;
 
@@ -27,11 +30,11 @@ pub struct TryServerStreaming;
 
 impl InteractionPattern for TryServerStreaming {}
 
-/// Same as [ServerStreamingMsg], but with lazy stream creation and the error type explicitly defined.
+/// Same as ServerStreamingMsg, but with lazy stream creation and the error type explicitly defined.
 pub trait TryServerStreamingMsg<S: Service>: Msg<S, Pattern = TryServerStreaming>
 where
-    std::result::Result<Self::Item, Self::ItemError>: Into<S::Res> + TryFrom<S::Res>,
-    std::result::Result<StreamCreated, Self::CreateError>: Into<S::Res> + TryFrom<S::Res>,
+    result::Result<Self::Item, Self::ItemError>: Into<S::Res> + TryFrom<S::Res>,
+    result::Result<StreamCreated, Self::CreateError>: Into<S::Res> + TryFrom<S::Res>,
 {
     /// Error when creating the stream
     type CreateError: Debug + Send + 'static;
@@ -39,9 +42,7 @@ where
     /// Error for stream items
     type ItemError: Debug + Send + 'static;
 
-    /// The type for the response
-    ///
-    /// For requests that can produce errors, this can be set to [Result<T, E>](std::result::Result).
+    /// Successful response item
     type Item: Send + 'static;
 }
 
@@ -74,7 +75,9 @@ impl<S: ConnectionErrors, E: Debug> fmt::Display for Error<S, E> {
 
 impl<S: ConnectionErrors, E: Debug> error::Error for Error<S, E> {}
 
-/// Client error when handling responses from a server streaming request
+/// Client error when handling responses from a server streaming request.
+///
+/// This combines network errors with application errors.
 #[derive(Debug)]
 pub enum ItemError<S: ConnectionErrors, E: Debug> {
     /// Unable to receive the response from the server
