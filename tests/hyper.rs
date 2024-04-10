@@ -5,7 +5,6 @@ use ::hyper::Uri;
 use derive_more::{From, TryInto};
 use flume::Receiver;
 use quic_rpc::{
-    client::RpcClientError,
     declare_rpc,
     server::RpcServerError,
     transport::hyper::{self, HyperConnection, HyperServerEndpoint, RecvError},
@@ -247,7 +246,9 @@ async fn hyper_channel_errors() -> anyhow::Result<()> {
     let res = client.rpc(BigRequest(vec![0; 20_000_000])).await;
     assert_matches!(
         res,
-        Err(RpcClientError::Send(hyper::SendError::SizeError(_)))
+        Err(quic_rpc::pattern::rpc::Error::Send(
+            hyper::SendError::SizeError(_)
+        ))
     );
     assert_server_result!(Err(RpcServerError::EarlyClose));
 
@@ -255,20 +256,22 @@ async fn hyper_channel_errors() -> anyhow::Result<()> {
     let res = client.rpc(NoSerRequest(NoSer)).await;
     assert_matches!(
         res,
-        Err(RpcClientError::Send(hyper::SendError::SerializeError(_)))
+        Err(quic_rpc::pattern::rpc::Error::Send(
+            hyper::SendError::SerializeError(_)
+        ))
     );
     assert_server_result!(Err(RpcServerError::EarlyClose));
 
     // not deserializable - should fail on the server side
     let res = client.rpc(NoDeserRequest(NoDeser)).await;
-    assert_matches!(res, Err(RpcClientError::EarlyClose));
+    assert_matches!(res, Err(quic_rpc::pattern::rpc::Error::EarlyClose));
     assert_server_result!(Err(RpcServerError::RecvError(
         hyper::RecvError::DeserializeError(_)
     )));
 
     // response not serializable - should fail on the server side
     let res = client.rpc(NoSerResponseRequest).await;
-    assert_matches!(res, Err(RpcClientError::EarlyClose));
+    assert_matches!(res, Err(quic_rpc::pattern::rpc::Error::EarlyClose));
     assert_server_result!(Err(RpcServerError::SendError(
         hyper::SendError::SerializeError(_)
     )));
@@ -277,7 +280,9 @@ async fn hyper_channel_errors() -> anyhow::Result<()> {
     let res = client.rpc(NoDeserResponseRequest).await;
     assert_matches!(
         res,
-        Err(RpcClientError::RecvError(RecvError::DeserializeError(_)))
+        Err(quic_rpc::pattern::rpc::Error::RecvError(
+            RecvError::DeserializeError(_)
+        ))
     );
     assert_server_result!(Ok(()));
 
@@ -288,7 +293,7 @@ async fn hyper_channel_errors() -> anyhow::Result<()> {
 
     // response big - should fail
     let res = client.rpc(BigResponseRequest(20_000_000)).await;
-    assert_matches!(res, Err(RpcClientError::EarlyClose));
+    assert_matches!(res, Err(quic_rpc::pattern::rpc::Error::EarlyClose));
     assert_server_result!(Err(RpcServerError::SendError(hyper::SendError::SizeError(
         _
     ))));
