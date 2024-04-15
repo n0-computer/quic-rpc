@@ -3,11 +3,12 @@ use crate::{
     transport::{Connection, ConnectionErrors, LocalAddr, ServerEndpoint},
     RpcMessage,
 };
-use futures::channel::oneshot;
-use futures::{Future, FutureExt, Sink, SinkExt, Stream, StreamExt};
+use futures_lite::{future, Future, Stream};
+use futures_sink::Sink;
 use pin_project::pin_project;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
+use tokio::sync::oneshot;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::task::{Context, Poll};
@@ -307,7 +308,7 @@ impl<In: RpcMessage, Out: RpcMessage> QuinnConnection<In, Out> {
             addr,
             name,
         };
-        futures::pin_mut!(reconnect);
+        tokio::pin!(reconnect);
 
         let mut receiver = Receiver::new(&requests);
 
@@ -320,8 +321,8 @@ impl<In: RpcMessage, Out: RpcMessage> QuinnConnection<In, Out> {
             let mut conn_result = None;
             let mut chann_result = None;
             if !reconnect.connected() && pending_request.is_none() {
-                match futures::future::select(reconnect.as_mut(), receiver.next()).await {
-                    futures::future::Either::Left((connection_result, _)) => {
+                match future::select(reconnect.as_mut(), receiver.next()).await {
+                    ::future::Either::Left((connection_result, _)) => {
                         conn_result = Some(connection_result)
                     }
                     futures::future::Either::Right((channel_result, _)) => {
@@ -554,7 +555,7 @@ impl<'a, T> Receiver<'a, T> {
     }
 }
 
-impl<'a, T> futures::stream::Stream for Receiver<'a, T> {
+impl<'a, T> Stream for Receiver<'a, T> {
     type Item = T;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {

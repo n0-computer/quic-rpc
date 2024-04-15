@@ -5,7 +5,9 @@ use crate::{
     map::{ChainedMapper, MapService, Mapper},
     Service, ServiceConnection,
 };
-use futures::{Sink, SinkExt, Stream};
+use futures_lite::Stream;
+use futures_sink::Sink;
+
 use pin_project::pin_project;
 use std::{
     fmt::Debug,
@@ -62,20 +64,20 @@ where
     type Error = C::SendError;
 
     fn poll_ready(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.project().0.poll_ready_unpin(cx)
+        self.project().0.poll_ready(cx)
     }
 
     fn start_send(self: Pin<&mut Self>, item: T) -> Result<(), Self::Error> {
         let req = self.2.req_into_outer(item.into());
-        self.project().0.start_send_unpin(req)
+        self.project().0.start_send(req)
     }
 
     fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.project().0.poll_flush_unpin(cx)
+        self.project().0.poll_flush(cx)
     }
 
     fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.project().0.poll_close_unpin(cx)
+        self.project().0.poll_close(cx)
     }
 }
 

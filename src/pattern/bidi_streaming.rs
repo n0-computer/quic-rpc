@@ -1,5 +1,6 @@
 //!
-use futures::{FutureExt, SinkExt, Stream, StreamExt};
+
+use futures_lite::{Stream, StreamExt};
 
 use crate::{
     client::{BoxStreamSync, UpdateSink},

@@ -4,7 +4,8 @@ use std::{
 };
 
 use bincode::Options;
-use futures::{Sink, SinkExt, Stream, StreamExt};
+use futures_lite::Stream;
+use futures_sink::Sink;
 use pin_project::pin_project;
 use serde::{de::DeserializeOwned, Serialize};
 use tokio::io::{AsyncRead, AsyncWrite};

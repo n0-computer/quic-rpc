@@ -1,5 +1,5 @@
 //!
-use futures::{future::BoxFuture, Future, FutureExt, SinkExt, StreamExt, TryFutureExt};
+use futures_lite::{future::Boxed, Future};
 
 use crate::{
     client::UpdateSink,
@@ -88,7 +88,7 @@ where
     ) -> result::Result<
         (
             UpdateSink<S, C, M::Update, SInner>,
-            BoxFuture<'static, result::Result<M::Response, ItemError<C>>>,
+            Boxed<result::Result<M::Response, ItemError<C>>>,
         ),
         Error<C>,
     >

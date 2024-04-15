@@ -1,12 +1,14 @@
 //! Memory transport implementation using [flume]
 //!
 //! [flume]: https://docs.rs/flume/
+use futures_lite::{Future, Stream};
+use futures_sink::Sink;
+
 use crate::{
     transport::{Connection, ConnectionErrors, LocalAddr, ServerEndpoint},
     RpcMessage,
 };
 use core::fmt;
-use futures::{Future, FutureExt, Sink, SinkExt, Stream, StreamExt};
 use std::{error, fmt::Display, marker::PhantomData, pin::Pin, result, task::Poll};
 
 use super::ConnectionCommon;

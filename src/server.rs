@@ -6,15 +6,16 @@ use crate::{
     transport::ConnectionErrors,
     Service, ServiceEndpoint,
 };
-use futures::{channel::oneshot, task, task::Poll, Future, FutureExt, Stream, StreamExt};
+use futures_lite::{Future, Stream};
 use pin_project::pin_project;
+use tokio::sync::oneshot;
 use std::{
     error,
     fmt::{self, Debug},
     marker::PhantomData,
     pin::Pin,
     result,
-    sync::Arc,
+    sync::Arc, task::{self, Poll},
 };
 
 /// A server channel for a specific service.
