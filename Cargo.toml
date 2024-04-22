@@ -57,7 +57,7 @@ quinn-transport = ["flume", "quinn", "bincode", "tokio-serde", "tokio-util"]
 flume-transport = ["flume"]
 combined-transport = []
 macros = []
-default = ["flume-transport", "quinn-transport", "flume-transport", "hyper-transport", "macros", "combined-transport"]
+default = ["flume-transport"]
 
 [package.metadata.docs.rs]
 all-features = true
