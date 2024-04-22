@@ -41,14 +41,14 @@ impl<T: RpcMessage> Sink<T> for SendSink<T> {
         mut self: Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> Poll<Result<(), Self::Error>> {
-        self.0
-            .poll_ready_unpin(cx)
+        Pin::new(&mut self.0)
+            .poll_ready(cx)
             .map_err(|_| SendError::ReceiverDropped)
     }
 
     fn start_send(mut self: Pin<&mut Self>, item: T) -> Result<(), Self::Error> {
-        self.0
-            .start_send_unpin(item)
+        Pin::new(&mut self.0)
+            .start_send(item)
             .map_err(|_| SendError::ReceiverDropped)
     }
 
@@ -56,8 +56,8 @@ impl<T: RpcMessage> Sink<T> for SendSink<T> {
         mut self: Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> Poll<Result<(), Self::Error>> {
-        self.0
-            .poll_flush_unpin(cx)
+        Pin::new(&mut self.0)
+            .poll_flush(cx)
             .map_err(|_| SendError::ReceiverDropped)
     }
 
@@ -65,8 +65,8 @@ impl<T: RpcMessage> Sink<T> for SendSink<T> {
         mut self: Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> Poll<Result<(), Self::Error>> {
-        self.0
-            .poll_close_unpin(cx)
+        Pin::new(&mut self.0)
+            .poll_close(cx)
             .map_err(|_| SendError::ReceiverDropped)
     }
 }
@@ -87,7 +87,7 @@ impl<T: RpcMessage> Stream for RecvStream<T> {
         mut self: Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> Poll<Option<Self::Item>> {
-        match self.0.poll_next_unpin(cx) {
+        match Pin::new(&mut self.0).poll_next(cx) {
             Poll::Ready(Some(v)) => Poll::Ready(Some(Ok(v))),
             Poll::Ready(None) => Poll::Ready(None),
             Poll::Pending => Poll::Pending,
@@ -158,7 +158,7 @@ impl<In: RpcMessage, Out: RpcMessage> Future for OpenBiFuture<In, Out> {
         mut self: Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Self::Output> {
-        match self.inner.poll_unpin(cx) {
+        match Pin::new(&mut self.inner).poll(cx) {
             Poll::Ready(Ok(())) => self
                 .res
                 .take()
@@ -186,7 +186,7 @@ impl<In: RpcMessage, Out: RpcMessage> Future for AcceptBiFuture<In, Out> {
     type Output = result::Result<(SendSink<Out>, RecvStream<In>), AcceptBiError>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
-        match self.wrapped.poll_unpin(cx) {
+        match Pin::new(&mut self.wrapped).poll(cx) {
             Poll::Ready(Ok((send, recv))) => Poll::Ready(Ok((send, recv))),
             Poll::Ready(Err(_)) => Poll::Ready(Err(AcceptBiError::RemoteDropped)),
             Poll::Pending => Poll::Pending,

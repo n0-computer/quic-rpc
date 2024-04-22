@@ -6,7 +6,9 @@
 #![allow(dead_code)]
 use async_stream::stream;
 use derive_more::{From, TryInto};
-use futures::{SinkExt, Stream, StreamExt, TryStreamExt};
+use futures_buffered::BufferedStreamExt;
+use futures_lite::{Stream, StreamExt};
+use futures_util::SinkExt;
 use quic_rpc::{
     message::{
         BidiStreaming, BidiStreamingMsg, ClientStreaming, ClientStreamingMsg, Msg, RpcMsg,
@@ -254,8 +256,8 @@ impl ComputeService {
             }
         });
         process_stream
-            .buffer_unordered(parallelism)
-            .for_each(|x| async move {
+            .buffered_unordered(parallelism)
+            .for_each(|x| {
                 if let Err(e) = x {
                     eprintln!("error: {e:?}");
                 }
@@ -289,7 +291,7 @@ pub async fn smoke_test<C: ServiceConnection<ComputeService>>(client: C) -> anyh
     // server streaming call
     tracing::debug!("calling server_streaming Fibonacci(10)");
     let s = client.server_streaming(Fibonacci(10)).await?;
-    let res = s.map_ok(|x| x.0).try_collect::<Vec<_>>().await?;
+    let res: Vec<_> = s.map(|x| x.map(|x| x.0)).try_collect().await?;
     tracing::debug!("got response {:?}", res);
     assert_eq!(res, vec![0, 1, 1, 2, 3, 5, 8, 13, 21, 34]);
 
@@ -302,7 +304,7 @@ pub async fn smoke_test<C: ServiceConnection<ComputeService>>(client: C) -> anyh
         }
         Ok::<_, C::SendError>(())
     });
-    let res = recv.map_ok(|x| x.0).try_collect::<Vec<_>>().await?;
+    let res: Vec<_> = recv.map(|x| x.map(|x| x.0)).try_collect().await?;
     tracing::debug!("got response {:?}", res);
     assert_eq!(res, vec![2, 4, 6]);
 
@@ -339,8 +341,8 @@ where
     // parallel RPCs
     {
         let t0 = std::time::Instant::now();
-        let reqs = futures::stream::iter((0..n).map(Sqr));
-        let resp = reqs
+        let reqs = futures_lite::stream::iter((0..n).map(Sqr));
+        let resp: Vec<_> = reqs
             .map(|x| {
                 let client = client.clone();
                 async move {
@@ -348,8 +350,8 @@ where
                     anyhow::Ok(res)
                 }
             })
-            .buffer_unordered(32)
-            .try_collect::<Vec<_>>()
+            .buffered_unordered(32)
+            .try_collect()
             .await?;
         let sum = resp.into_iter().sum::<u128>();
         let rps = ((n as f64) / t0.elapsed().as_secs_f64()).round();
@@ -362,8 +364,8 @@ where
         let t0 = std::time::Instant::now();
         let (send, recv) = client.bidi(Multiply(2)).await?;
         let handle = tokio::task::spawn(async move {
-            let requests = futures::stream::iter((0..n).map(MultiplyUpdate));
-            requests.map(Ok).forward(send).await?;
+            let requests = futures_lite::stream::iter((0..n).map(MultiplyUpdate));
+            futures_util::StreamExt::forward(requests.map(Ok), send).await?;
             anyhow::Result::<()>::Ok(())
         });
         let mut sum = 0;

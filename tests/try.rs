@@ -1,6 +1,6 @@
 #![cfg(feature = "flume-transport")]
 use derive_more::{From, TryInto};
-use futures::{Stream, StreamExt};
+use futures_lite::{Stream, StreamExt};
 use quic_rpc::{
     message::Msg,
     pattern::try_server_streaming::{StreamCreated, TryServerStreaming, TryServerStreamingMsg},

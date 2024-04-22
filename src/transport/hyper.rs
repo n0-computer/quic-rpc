@@ -2,15 +2,17 @@
 //!
 //! [hyper]: https://crates.io/crates/hyper/
 use std::{
-    convert::Infallible, error, fmt, io, marker::PhantomData, net::SocketAddr, pin::Pin, result,
-    sync::Arc, task::Poll,
+    convert::Infallible, error, fmt, future::Future, io, marker::PhantomData, net::SocketAddr,
+    pin::Pin, result, sync::Arc, task::Poll,
 };
 
 use crate::transport::{Connection, ConnectionErrors, LocalAddr, ServerEndpoint};
 use crate::RpcMessage;
 use bytes::Bytes;
 use flume::{r#async::RecvFut, Receiver, Sender};
-use futures::{future::FusedFuture, Future, FutureExt, Sink, SinkExt, StreamExt};
+use futures_lite::{Stream, StreamExt};
+use futures_sink::Sink;
+use futures_util::future::FusedFuture;
 use hyper::{
     client::{connect::Connect, HttpConnector, ResponseFuture},
     server::conn::{AddrIncoming, AddrStream},
@@ -411,14 +413,14 @@ impl<In: RpcMessage> Clone for RecvStream<In> {
     }
 }
 
-impl<Res: RpcMessage> futures::Stream for RecvStream<Res> {
+impl<Res: RpcMessage> Stream for RecvStream<Res> {
     type Item = Result<Res, RecvError>;
 
     fn poll_next(
         mut self: Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> Poll<Option<Self::Item>> {
-        self.recv.poll_next_unpin(cx)
+        Pin::new(&mut self.recv).poll_next(cx)
     }
 }
 
@@ -466,8 +468,8 @@ impl<Out: RpcMessage> Sink<Out> for SendSink<Out> {
         mut self: Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> Poll<Result<(), Self::Error>> {
-        self.sink
-            .poll_ready_unpin(cx)
+        Pin::new(&mut self.sink)
+            .poll_ready(cx)
             .map_err(|_| SendError::ReceiverDropped)
     }
 
@@ -481,8 +483,8 @@ impl<Out: RpcMessage> Sink<Out> for SendSink<Out> {
             ),
         };
         // attempt sending
-        self.sink
-            .start_send_unpin(send)
+        Pin::new(&mut self.sink)
+            .start_send(send)
             .map_err(|_| SendError::ReceiverDropped)?;
         res
     }
@@ -491,8 +493,8 @@ impl<Out: RpcMessage> Sink<Out> for SendSink<Out> {
         mut self: Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> Poll<Result<(), Self::Error>> {
-        self.sink
-            .poll_flush_unpin(cx)
+        Pin::new(&mut self.sink)
+            .poll_flush(cx)
             .map_err(|_| SendError::ReceiverDropped)
     }
 
@@ -500,8 +502,8 @@ impl<Out: RpcMessage> Sink<Out> for SendSink<Out> {
         mut self: Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> Poll<Result<(), Self::Error>> {
-        self.sink
-            .poll_close_unpin(cx)
+        Pin::new(&mut self.sink)
+            .poll_close(cx)
             .map_err(|_| SendError::ReceiverDropped)
     }
 }
@@ -606,7 +608,7 @@ impl<In: RpcMessage, Out: RpcMessage> Future for OpenBiFuture<In, Out> {
     ) -> std::task::Poll<Self::Output> {
         let this = self.project();
         match this.chan {
-            Some(Ok((fut, _, _))) => match fut.poll_unpin(cx) {
+            Some(Ok((fut, _, _))) => match Pin::new(fut).poll(cx) {
                 Poll::Ready(Ok(res)) => {
                     event!(Level::TRACE, "OpenBiFuture got response");
                     let (_, out_tx, config) = this.chan.take().unwrap().unwrap();
@@ -697,12 +699,12 @@ impl<In: RpcMessage, Out: RpcMessage> Future for AcceptBiFuture<In, Out> {
     type Output = result::Result<self::Socket<In, Out>, AcceptBiError>;
 
     fn poll(
-        self: std::pin::Pin<&mut Self>,
+        self: Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Self::Output> {
         let this = self.project();
         match this.chan {
-            Some((fut, _)) => match fut.poll_unpin(cx) {
+            Some((fut, _)) => match Pin::new(fut).poll(cx) {
                 Poll::Ready(Ok((recv, send))) => {
                     let (_, config) = this.chan.take().unwrap();
                     Poll::Ready(Ok((

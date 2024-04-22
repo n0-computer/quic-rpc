@@ -1,5 +1,6 @@
 //!
-use futures_lite::{Future, Stream};
+use futures_lite::{Future, Stream, StreamExt};
+use futures_util::{FutureExt, SinkExt, TryFutureExt};
 use serde::{Deserialize, Serialize};
 
 use crate::{

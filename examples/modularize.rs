@@ -8,7 +8,8 @@
 //! unchanged.
 
 use anyhow::Result;
-use futures::{SinkExt, TryStreamExt};
+use futures_lite::StreamExt;
+use futures_util::SinkExt;
 use quic_rpc::{transport::flume, RpcClient, RpcServer, ServiceConnection, ServiceEndpoint};
 use tracing::warn;
 
@@ -272,7 +273,7 @@ mod calc {
 
     use anyhow::{bail, Result};
     use derive_more::{From, TryInto};
-    use futures::{Stream, StreamExt};
+    use futures_lite::{Stream, StreamExt};
     use quic_rpc::{
         message::{ClientStreaming, ClientStreamingMsg, Msg, RpcMsg},
         server::RpcChannel,
@@ -394,7 +395,8 @@ mod clock {
 
     use anyhow::Result;
     use derive_more::{From, TryInto};
-    use futures::{stream::BoxStream, Stream, StreamExt, TryStreamExt};
+    use futures_lite::{stream::Boxed as BoxStream, Stream, StreamExt};
+    use futures_util::TryStreamExt;
     use quic_rpc::{
         message::{Msg, ServerStreaming, ServerStreamingMsg},
         server::RpcChannel,
@@ -524,7 +526,7 @@ mod clock {
         pub fn new(client: RpcClient<S, C, ClockService>) -> Self {
             Self { client }
         }
-        pub async fn tick(&self) -> Result<BoxStream<'static, Result<usize>>> {
+        pub async fn tick(&self) -> Result<BoxStream<Result<usize>>> {
             let res = self.client.server_streaming(TickRequest).await?;
             Ok(res.map_ok(|r| r.tick).map_err(anyhow::Error::from).boxed())
         }

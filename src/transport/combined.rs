@@ -1,10 +1,9 @@
 //! Transport that combines two other transports
 use super::{Connection, ConnectionCommon, ConnectionErrors, LocalAddr, ServerEndpoint};
 use crate::RpcMessage;
-use futures::{
-    future::{self, BoxFuture},
-    FutureExt, Sink, Stream, TryFutureExt,
-};
+use futures_lite::{future::Boxed as BoxFuture, Stream};
+use futures_sink::Sink;
+use futures_util::{FutureExt, TryFutureExt};
 use pin_project::pin_project;
 use std::{
     error, fmt,
@@ -284,11 +283,11 @@ impl<A: ConnectionErrors, B: ConnectionErrors> error::Error for AcceptBiError<A,
 
 /// Future returned by open_bi
 pub type OpenBiFuture<A, B, In, Out> =
-    BoxFuture<'static, result::Result<Socket<A, B, In, Out>, self::OpenBiError<A, B>>>;
+    BoxFuture<result::Result<Socket<A, B, In, Out>, self::OpenBiError<A, B>>>;
 
 /// Future returned by accept_bi
 pub type AcceptBiFuture<A, B, In, Out> =
-    BoxFuture<'static, result::Result<self::Socket<A, B, In, Out>, self::AcceptBiError<A, B>>>;
+    BoxFuture<result::Result<self::Socket<A, B, In, Out>, self::AcceptBiError<A, B>>>;
 
 type Socket<A, B, In, Out> = (
     self::SendSink<A, B, In, Out>,
@@ -324,7 +323,7 @@ impl<A: Connection<In, Out>, B: Connection<In, Out>, In: RpcMessage, Out: RpcMes
                 let (send, recv) = b.open_bi().await.map_err(OpenBiError::B)?;
                 Ok((SendSink::B(send), RecvStream::B(recv)))
             } else {
-                future::err(OpenBiError::NoChannel).await
+                std::future::ready(Err(OpenBiError::NoChannel)).await
             }
         }
         .boxed()
@@ -363,7 +362,7 @@ impl<A: ServerEndpoint<In, Out>, B: ServerEndpoint<In, Out>, In: RpcMessage, Out
                 .map_err(AcceptBiError::A)
                 .left_future()
         } else {
-            future::pending().right_future()
+            std::future::pending().right_future()
         };
         let b_fut = if let Some(b) = &self.b {
             b.accept_bi()
@@ -376,7 +375,7 @@ impl<A: ServerEndpoint<In, Out>, B: ServerEndpoint<In, Out>, In: RpcMessage, Out
                 .map_err(AcceptBiError::B)
                 .left_future()
         } else {
-            future::pending().right_future()
+            std::future::pending().right_future()
         };
         async move {
             tokio::select! {

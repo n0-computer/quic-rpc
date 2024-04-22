@@ -3,16 +3,17 @@ use crate::{
     transport::{Connection, ConnectionErrors, LocalAddr, ServerEndpoint},
     RpcMessage,
 };
-use futures_lite::{future, Future, Stream};
+use futures_lite::{Future, Stream, StreamExt};
 use futures_sink::Sink;
+use futures_util::FutureExt;
 use pin_project::pin_project;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
-use tokio::sync::oneshot;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::{fmt, io, marker::PhantomData, pin::Pin, result};
+use tokio::sync::oneshot;
 use tracing::{debug_span, Instrument};
 
 use super::{
@@ -317,15 +318,23 @@ impl<In: RpcMessage, Out: RpcMessage> QuinnConnection<In, Out> {
         > = None;
         let mut connection = None;
 
+        enum Racer {
+            Reconnect(Result<quinn::Connection, ReconnectErr>),
+            Channel(Option<oneshot::Sender<Result<SocketInner, quinn::ConnectionError>>>),
+        }
+
         loop {
             let mut conn_result = None;
             let mut chann_result = None;
             if !reconnect.connected() && pending_request.is_none() {
-                match future::select(reconnect.as_mut(), receiver.next()).await {
-                    ::future::Either::Left((connection_result, _)) => {
-                        conn_result = Some(connection_result)
-                    }
-                    futures::future::Either::Right((channel_result, _)) => {
+                match futures_lite::future::race(
+                    reconnect.as_mut().map(Racer::Reconnect),
+                    receiver.next().map(Racer::Channel),
+                )
+                .await
+                {
+                    Racer::Reconnect(connection_result) => conn_result = Some(connection_result),
+                    Racer::Channel(channel_result) => {
                         chann_result = Some(channel_result);
                     }
                 }
@@ -507,7 +516,8 @@ impl Future for ReconnectHandler {
                     Poll::Ready(Err(ReconnectErr::Connect(e)))
                 }
             },
-            ConnectionState::Connecting(mut connecting) => match connecting.poll_unpin(cx) {
+            ConnectionState::Connecting(mut connecting) => match Pin::new(&mut connecting).poll(cx)
+            {
                 Poll::Ready(res) => match res {
                     Ok(connection) => {
                         self.state = ConnectionState::Connected(connection.clone());
@@ -565,7 +575,7 @@ impl<'a, T> Stream for Receiver<'a, T> {
                 *self = Receiver::Receiving(recv, fut);
                 self.poll_next(cx)
             }
-            Receiver::Receiving(recv, mut fut) => match fut.poll_unpin(cx) {
+            Receiver::Receiving(recv, mut fut) => match Pin::new(&mut fut).poll(cx) {
                 Poll::Ready(Ok(t)) => {
                     *self = Receiver::PreReceive(recv);
                     Poll::Ready(Some(t))
@@ -661,25 +671,25 @@ impl<Out: Serialize> Sink<Out> for SendSink<Out> {
         self: Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Result<(), Self::Error>> {
-        self.project().0.poll_ready_unpin(cx)
+        Pin::new(&mut self.project().0).poll_ready(cx)
     }
 
     fn start_send(self: Pin<&mut Self>, item: Out) -> Result<(), Self::Error> {
-        self.project().0.start_send_unpin(item)
+        Pin::new(&mut self.project().0).start_send(item)
     }
 
     fn poll_flush(
         self: Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Result<(), Self::Error>> {
-        self.project().0.poll_flush_unpin(cx)
+        Pin::new(&mut self.project().0).poll_flush(cx)
     }
 
     fn poll_close(
         self: Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Result<(), Self::Error>> {
-        self.project().0.poll_close_unpin(cx)
+        Pin::new(&mut self.project().0).poll_close(cx)
     }
 }
 
@@ -718,7 +728,7 @@ impl<In: DeserializeOwned> Stream for RecvStream<In> {
         self: Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Option<Self::Item>> {
-        self.project().0.poll_next_unpin(cx)
+        Pin::new(&mut self.project().0).poll_next(cx)
     }
 }
 
@@ -766,7 +776,7 @@ impl<In: RpcMessage, Out: RpcMessage> Future for OpenBiFuture<In, Out> {
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         match self.0.take() {
-            OpenBiFutureState::Sending(mut fut, recever) => match fut.poll_unpin(cx) {
+            OpenBiFutureState::Sending(mut fut, recever) => match Pin::new(&mut fut).poll(cx) {
                 Poll::Ready(Ok(_)) => {
                     self.0 = OpenBiFutureState::Receiving(recever);
                     self.poll(cx)
@@ -777,7 +787,7 @@ impl<In: RpcMessage, Out: RpcMessage> Future for OpenBiFuture<In, Out> {
                 }
                 Poll::Ready(Err(_)) => Poll::Ready(Err(quinn::ConnectionError::LocallyClosed)),
             },
-            OpenBiFutureState::Receiving(mut fut) => match fut.poll_unpin(cx) {
+            OpenBiFutureState::Receiving(mut fut) => match Pin::new(&mut fut).poll(cx) {
                 Poll::Ready(Ok(Ok((send, recv)))) => {
                     let send = SendSink::new(send);
                     let recv = RecvStream::new(recv);
@@ -815,7 +825,7 @@ impl<In: RpcMessage, Out: RpcMessage> Future for AcceptBiFuture<In, Out> {
         self: Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Self::Output> {
-        self.project().0.poll_unpin(cx).map(|conn| {
+        Pin::new(&mut self.project().0).poll(cx).map(|conn| {
             let (send, recv) = conn.map_err(|e| {
                 tracing::warn!("accept_bi: error receiving connection: {}", e);
                 quinn::ConnectionError::LocallyClosed

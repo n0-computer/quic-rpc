@@ -58,7 +58,7 @@ impl<T: AsyncRead, In: DeserializeOwned> Stream for FramedBincodeRead<T, In> {
     type Item = Result<In, std::io::Error>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut task::Context<'_>) -> Poll<Option<Self::Item>> {
-        self.project().0.poll_next_unpin(cx)
+        Pin::new(&mut self.project().0).poll_next(cx)
     }
 }
 
@@ -110,25 +110,25 @@ impl<T: AsyncWrite, Out: Serialize> Sink<Out> for FramedBincodeWrite<T, Out> {
         self: Pin<&mut Self>,
         cx: &mut task::Context<'_>,
     ) -> Poll<Result<(), Self::Error>> {
-        self.project().0.poll_ready_unpin(cx)
+        Pin::new(&mut self.project().0).poll_ready(cx)
     }
 
     fn start_send(self: Pin<&mut Self>, item: Out) -> Result<(), Self::Error> {
-        self.project().0.start_send_unpin(item)
+        Pin::new(&mut self.project().0).start_send(item)
     }
 
     fn poll_flush(
         self: Pin<&mut Self>,
         cx: &mut task::Context<'_>,
     ) -> Poll<Result<(), Self::Error>> {
-        self.project().0.poll_flush_unpin(cx)
+        Pin::new(&mut self.project().0).poll_flush(cx)
     }
 
     fn poll_close(
         self: Pin<&mut Self>,
         cx: &mut task::Context<'_>,
     ) -> Poll<Result<(), Self::Error>> {
-        self.project().0.poll_close_unpin(cx)
+        Pin::new(&mut self.project().0).poll_close(cx)
     }
 }
 

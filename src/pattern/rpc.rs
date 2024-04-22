@@ -1,6 +1,7 @@
 //!
 
-use futures_lite::Future;
+use futures_lite::{Future, StreamExt};
+use futures_util::{FutureExt, SinkExt};
 
 use crate::{
     message::{InteractionPattern, Msg},

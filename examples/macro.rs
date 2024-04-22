@@ -49,7 +49,8 @@ mod store_rpc {
 }
 
 use async_stream::stream;
-use futures::{SinkExt, Stream, StreamExt};
+use futures_lite::{Stream, StreamExt};
+use futures_util::SinkExt;
 use quic_rpc::client::RpcClient;
 use quic_rpc::server::run_server_loop;
 use quic_rpc::transport::flume;
