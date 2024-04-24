@@ -25,7 +25,7 @@ hyper = { version = "0.14.16", features = ["full"], optional = true }
 pin-project = "1"
 quinn = { version = "0.10", optional = true }
 serde = { version = "1.0.183", features = ["derive"] }
-tokio = { version = "1", default-features = false, features = ["macros"] }
+tokio = { version = "1", default-features = false, features = ["macros", "sync"] }
 tokio-serde = { version = "0.8", features = ["bincode"], optional = true }
 tokio-util = { version = "0.7", features = ["codec"], optional = true }
 tracing = "0.1"
