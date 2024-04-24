@@ -6,7 +6,7 @@ use crate::{
     transport::ConnectionErrors,
     Service, ServiceEndpoint,
 };
-use futures::{channel::oneshot, task, task::Poll, Future, FutureExt, Stream, StreamExt};
+use futures_lite::{Future, Stream, StreamExt};
 use pin_project::pin_project;
 use std::{
     error,
@@ -15,7 +15,9 @@ use std::{
     pin::Pin,
     result,
     sync::Arc,
+    task::{self, Poll},
 };
+use tokio::sync::oneshot;
 
 /// A server channel for a specific service.
 ///
@@ -200,7 +202,7 @@ where
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut task::Context<'_>) -> Poll<Option<Self::Item>> {
         let mut this = self.project();
-        match this.0.poll_next_unpin(cx) {
+        match Pin::new(&mut this.0).poll_next(cx) {
             Poll::Ready(Some(msg)) => match msg {
                 Ok(msg) => {
                     let msg = this.3.req_try_into_inner(msg);
@@ -274,7 +276,7 @@ impl<T> Future for UnwrapToPending<T> {
     type Output = T;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut task::Context<'_>) -> Poll<Self::Output> {
-        match self.0.poll_unpin(cx) {
+        match Pin::new(&mut self.0).poll(cx) {
             Poll::Ready(Ok(x)) => Poll::Ready(x),
             Poll::Ready(Err(_)) => Poll::Pending,
             Poll::Pending => Poll::Pending,

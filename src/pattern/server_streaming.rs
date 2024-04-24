@@ -1,5 +1,7 @@
 //!
-use futures::{FutureExt, SinkExt, Stream, StreamExt, TryFutureExt};
+
+use futures_lite::{Stream, StreamExt};
+use futures_util::{FutureExt, SinkExt, TryFutureExt};
 
 use crate::{
     client::{BoxStreamSync, DeferDrop},

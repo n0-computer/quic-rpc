@@ -1,6 +1,8 @@
 //! Transports for quic-rpc
+use futures_lite::{Future, Stream};
+use futures_sink::Sink;
+
 use crate::RpcError;
-use futures::{Future, Sink, Stream};
 use std::{
     fmt::{self, Debug, Display},
     net::SocketAddr,

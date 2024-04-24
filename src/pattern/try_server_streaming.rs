@@ -1,5 +1,6 @@
 //!
-use futures::{FutureExt, SinkExt, Stream, StreamExt, TryFutureExt};
+use futures_lite::{Future, Stream, StreamExt};
+use futures_util::{FutureExt, SinkExt, TryFutureExt};
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -120,7 +121,7 @@ where
         std::result::Result<StreamCreated, M::CreateError>:
             Into<SInner::Res> + TryFrom<SInner::Res>,
         F: FnOnce(T, M) -> Fut + Send + 'static,
-        Fut: futures::Future<Output = std::result::Result<Str, M::CreateError>> + Send + 'static,
+        Fut: Future<Output = std::result::Result<Str, M::CreateError>> + Send + 'static,
         Str: Stream<Item = std::result::Result<M::Item, M::ItemError>> + Send + 'static,
         T: Send + 'static,
     {

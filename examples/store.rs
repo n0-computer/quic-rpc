@@ -1,7 +1,8 @@
 #![allow(clippy::enum_variant_names)]
 use async_stream::stream;
 use derive_more::{From, TryInto};
-use futures::{SinkExt, Stream, StreamExt};
+use futures_lite::{Stream, StreamExt};
+use futures_util::SinkExt;
 use quic_rpc::{
     server::RpcServerError,
     transport::{flume, Connection, ServerEndpoint},
