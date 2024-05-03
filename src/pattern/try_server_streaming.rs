@@ -1,4 +1,5 @@
-//!
+//! Fallible server streaming interaction pattern.
+
 use futures_lite::{Future, Stream, StreamExt};
 use futures_util::{FutureExt, SinkExt, TryFutureExt};
 use serde::{Deserialize, Serialize};
@@ -25,7 +26,7 @@ use std::{
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct StreamCreated;
 
-///
+/// Fallible server streaming interaction pattern.
 #[derive(Debug, Clone, Copy)]
 pub struct TryServerStreaming;
 

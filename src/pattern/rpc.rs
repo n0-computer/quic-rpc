@@ -1,4 +1,4 @@
-//!
+//! RPC interaction pattern.
 
 use futures_lite::{Future, StreamExt};
 use futures_util::{FutureExt, SinkExt};
