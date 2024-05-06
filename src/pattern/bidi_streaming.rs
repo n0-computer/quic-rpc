@@ -1,4 +1,4 @@
-//!
+//! Bidirectional stream interaction pattern.
 
 use futures_lite::{Stream, StreamExt};
 use futures_util::{FutureExt, SinkExt};

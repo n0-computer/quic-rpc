@@ -1,4 +1,5 @@
-//!
+//! Client streaming interaction pattern.
+
 use futures_lite::{future::Boxed, Future, StreamExt};
 use futures_util::{FutureExt, SinkExt, TryFutureExt};
 
