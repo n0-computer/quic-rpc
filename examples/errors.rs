@@ -55,9 +55,9 @@ impl Fs {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let fs = Fs;
-    let (server, client) = quic_rpc::transport::flume::connection(1);
-    let client = RpcClient::<IoService, _>::new(client);
-    let server = RpcServer::<IoService, _>::new(server);
+    let (server, client) = quic_rpc::transport::flume::connection::<IoService>(1);
+    let client = RpcClient::new(client);
+    let server = RpcServer::new(server);
     let handle = tokio::task::spawn(async move {
         for _ in 0..1 {
             let (req, chan) = server.accept().await?;
