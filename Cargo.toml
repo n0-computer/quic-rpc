@@ -52,7 +52,7 @@ proc-macro2 = "1.0.66"
 futures-buffered = "0.2.4"
 
 [features]
-hyper-transport = ["flume", "hyper", "bincode", "bytes"]
+hyper-transport = ["flume", "hyper", "bincode", "bytes", "tokio-serde", "tokio-util"]
 quinn-transport = ["flume", "quinn", "bincode", "tokio-serde", "tokio-util"]
 flume-transport = ["flume"]
 combined-transport = []

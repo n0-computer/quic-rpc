@@ -1,6 +1,6 @@
 //! Transport that combines two other transports
 use super::{Connection, ConnectionCommon, ConnectionErrors, LocalAddr, ServerEndpoint};
-use crate::RpcMessage;
+use crate::{RpcMessage, Service};
 use futures_lite::{future::Boxed as BoxFuture, Stream};
 use futures_sink::Sink;
 use futures_util::{FutureExt, TryFutureExt};
@@ -15,17 +15,17 @@ use std::{
 };
 
 /// A connection that combines two other connections
-pub struct CombinedConnection<A, B, In: RpcMessage, Out: RpcMessage> {
+pub struct CombinedConnection<A, B, S> {
     /// First connection
     pub a: Option<A>,
     /// Second connection
     pub b: Option<B>,
-    /// Phantom data so we can have `In` and `Out` as type parameters
-    _p: PhantomData<(In, Out)>,
+    /// Phantom data so we can have `S` as type parameters
+    _p: PhantomData<S>,
 }
 
-impl<A: Connection<In, Out>, B: Connection<In, Out>, In: RpcMessage, Out: RpcMessage>
-    CombinedConnection<A, B, In, Out>
+impl<A: Connection<S::Res, S::Req>, B: Connection<S::Res, S::Req>, S: Service>
+    CombinedConnection<A, B, S>
 {
     /// Create a combined connection from two other connections
     ///
@@ -38,9 +38,7 @@ impl<A: Connection<In, Out>, B: Connection<In, Out>, In: RpcMessage, Out: RpcMes
         }
     }
 }
-impl<A: Clone, B: Clone, In: RpcMessage, Out: RpcMessage> Clone
-    for CombinedConnection<A, B, In, Out>
-{
+impl<A: Clone, B: Clone, S: Service> Clone for CombinedConnection<A, B, S> {
     fn clone(&self) -> Self {
         Self {
             a: self.a.clone(),
@@ -50,9 +48,7 @@ impl<A: Clone, B: Clone, In: RpcMessage, Out: RpcMessage> Clone
     }
 }
 
-impl<A: Debug, B: Debug, In: RpcMessage, Out: RpcMessage> Debug
-    for CombinedConnection<A, B, In, Out>
-{
+impl<A: Debug, B: Debug, S: Service> Debug for CombinedConnection<A, B, S> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("CombinedConnection")
             .field("a", &self.a)
@@ -62,19 +58,19 @@ impl<A: Debug, B: Debug, In: RpcMessage, Out: RpcMessage> Debug
 }
 
 /// An endpoint that combines two other endpoints
-pub struct CombinedServerEndpoint<A, B, In: RpcMessage, Out: RpcMessage> {
+pub struct CombinedServerEndpoint<A, B, S: Service> {
     /// First endpoint
     pub a: Option<A>,
     /// Second endpoint
     pub b: Option<B>,
     /// Local addresses from all endpoints
     local_addr: Vec<LocalAddr>,
-    /// Phantom data so we can have `In` and `Out` as type parameters
-    _p: PhantomData<(In, Out)>,
+    /// Phantom data so we can have `S` as type parameters
+    _p: PhantomData<S>,
 }
 
-impl<A: ServerEndpoint<In, Out>, B: ServerEndpoint<In, Out>, In: RpcMessage, Out: RpcMessage>
-    CombinedServerEndpoint<A, B, In, Out>
+impl<A: ServerEndpoint<S::Req, S::Res>, B: ServerEndpoint<S::Req, S::Res>, S: Service>
+    CombinedServerEndpoint<A, B, S>
 {
     /// Create a combined server endpoint from two other server endpoints
     ///
@@ -104,9 +100,7 @@ impl<A: ServerEndpoint<In, Out>, B: ServerEndpoint<In, Out>, In: RpcMessage, Out
     }
 }
 
-impl<A: Clone, B: Clone, In: RpcMessage, Out: RpcMessage> Clone
-    for CombinedServerEndpoint<A, B, In, Out>
-{
+impl<A: Clone, B: Clone, S: Service> Clone for CombinedServerEndpoint<A, B, S> {
     fn clone(&self) -> Self {
         Self {
             a: self.a.clone(),
@@ -117,9 +111,7 @@ impl<A: Clone, B: Clone, In: RpcMessage, Out: RpcMessage> Clone
     }
 }
 
-impl<A: Debug, B: Debug, In: RpcMessage, Out: RpcMessage> Debug
-    for CombinedServerEndpoint<A, B, In, Out>
-{
+impl<A: Debug, B: Debug, S: Service> Debug for CombinedServerEndpoint<A, B, S> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("CombinedServerEndpoint")
             .field("a", &self.a)
@@ -294,25 +286,25 @@ type Socket<A, B, In, Out> = (
     self::RecvStream<A, B, In, Out>,
 );
 
-impl<A: ConnectionErrors, B: ConnectionErrors, In: RpcMessage, Out: RpcMessage> ConnectionErrors
-    for CombinedConnection<A, B, In, Out>
+impl<A: ConnectionErrors, B: ConnectionErrors, S: Service> ConnectionErrors
+    for CombinedConnection<A, B, S>
 {
     type SendError = self::SendError<A, B>;
     type RecvError = self::RecvError<A, B>;
     type OpenError = self::OpenBiError<A, B>;
 }
 
-impl<A: Connection<In, Out>, B: Connection<In, Out>, In: RpcMessage, Out: RpcMessage>
-    ConnectionCommon<In, Out> for CombinedConnection<A, B, In, Out>
+impl<A: Connection<S::Res, S::Req>, B: Connection<S::Res, S::Req>, S: Service>
+    ConnectionCommon<S::Res, S::Req> for CombinedConnection<A, B, S>
 {
-    type RecvStream = self::RecvStream<A, B, In, Out>;
-    type SendSink = self::SendSink<A, B, In, Out>;
+    type RecvStream = self::RecvStream<A, B, S::Res, S::Req>;
+    type SendSink = self::SendSink<A, B, S::Res, S::Req>;
 }
 
-impl<A: Connection<In, Out>, B: Connection<In, Out>, In: RpcMessage, Out: RpcMessage>
-    Connection<In, Out> for CombinedConnection<A, B, In, Out>
+impl<A: Connection<S::Res, S::Req>, B: Connection<S::Res, S::Req>, S: Service>
+    Connection<S::Res, S::Req> for CombinedConnection<A, B, S>
 {
-    fn open_bi(&self) -> OpenBiFuture<A, B, In, Out> {
+    fn open_bi(&self) -> OpenBiFuture<A, B, S::Res, S::Req> {
         let this = self.clone();
         async {
             // try a first, then b
@@ -329,34 +321,34 @@ impl<A: Connection<In, Out>, B: Connection<In, Out>, In: RpcMessage, Out: RpcMes
         .boxed()
     }
 
-    type OpenBiFut = OpenBiFuture<A, B, In, Out>;
+    type OpenBiFut = OpenBiFuture<A, B, S::Res, S::Req>;
 }
 
-impl<A: ConnectionErrors, B: ConnectionErrors, In: RpcMessage, Out: RpcMessage> ConnectionErrors
-    for CombinedServerEndpoint<A, B, In, Out>
+impl<A: ConnectionErrors, B: ConnectionErrors, S: Service> ConnectionErrors
+    for CombinedServerEndpoint<A, B, S>
 {
     type SendError = self::SendError<A, B>;
     type RecvError = self::RecvError<A, B>;
     type OpenError = self::AcceptBiError<A, B>;
 }
 
-impl<A: ServerEndpoint<In, Out>, B: ServerEndpoint<In, Out>, In: RpcMessage, Out: RpcMessage>
-    ConnectionCommon<In, Out> for CombinedServerEndpoint<A, B, In, Out>
+impl<A: ServerEndpoint<S::Req, S::Res>, B: ServerEndpoint<S::Req, S::Res>, S: Service>
+    ConnectionCommon<S::Req, S::Res> for CombinedServerEndpoint<A, B, S>
 {
-    type RecvStream = self::RecvStream<A, B, In, Out>;
-    type SendSink = self::SendSink<A, B, In, Out>;
+    type RecvStream = self::RecvStream<A, B, S::Req, S::Res>;
+    type SendSink = self::SendSink<A, B, S::Req, S::Res>;
 }
 
-impl<A: ServerEndpoint<In, Out>, B: ServerEndpoint<In, Out>, In: RpcMessage, Out: RpcMessage>
-    ServerEndpoint<In, Out> for CombinedServerEndpoint<A, B, In, Out>
+impl<A: ServerEndpoint<S::Req, S::Res>, B: ServerEndpoint<S::Req, S::Res>, S: Service>
+    ServerEndpoint<S::Req, S::Res> for CombinedServerEndpoint<A, B, S>
 {
-    fn accept_bi(&self) -> AcceptBiFuture<A, B, In, Out> {
+    fn accept_bi(&self) -> AcceptBiFuture<A, B, S::Req, S::Res> {
         let a_fut = if let Some(a) = &self.a {
             a.accept_bi()
                 .map_ok(|(send, recv)| {
                     (
-                        SendSink::<A, B, In, Out>::A(send),
-                        RecvStream::<A, B, In, Out>::A(recv),
+                        SendSink::<A, B, S::Req, S::Res>::A(send),
+                        RecvStream::<A, B, S::Req, S::Res>::A(recv),
                     )
                 })
                 .map_err(AcceptBiError::A)
@@ -368,8 +360,8 @@ impl<A: ServerEndpoint<In, Out>, B: ServerEndpoint<In, Out>, In: RpcMessage, Out
             b.accept_bi()
                 .map_ok(|(send, recv)| {
                     (
-                        SendSink::<A, B, In, Out>::B(send),
-                        RecvStream::<A, B, In, Out>::B(recv),
+                        SendSink::<A, B, S::Req, S::Res>::B(send),
+                        RecvStream::<A, B, S::Req, S::Res>::B(recv),
                     )
                 })
                 .map_err(AcceptBiError::B)
@@ -386,7 +378,7 @@ impl<A: ServerEndpoint<In, Out>, B: ServerEndpoint<In, Out>, In: RpcMessage, Out
         .boxed()
     }
 
-    type AcceptBiFut = AcceptBiFuture<A, B, In, Out>;
+    type AcceptBiFut = AcceptBiFuture<A, B, S::Req, S::Res>;
 
     fn local_addr(&self) -> &[LocalAddr] {
         &self.local_addr
@@ -403,13 +395,19 @@ mod tests {
         Connection,
     };
 
+    #[derive(Clone, Debug)]
+    struct Service;
+    impl crate::Service for Service {
+        type Req = ();
+        type Res = ();
+    }
+
     #[tokio::test]
     async fn open_empty_channel() {
         let channel = combined::CombinedConnection::<
-            flume::FlumeConnection<(), ()>,
-            flume::FlumeConnection<(), ()>,
-            (),
-            (),
+            flume::FlumeConnection<Service>,
+            flume::FlumeConnection<Service>,
+            Service,
         >::new(None, None);
         let res = channel.open_bi().await;
         assert!(matches!(res, Err(OpenBiError::NoChannel)));
