@@ -101,6 +101,7 @@ impl error::Error for RecvError {}
 ///
 /// Created using [connection].
 pub struct FlumeServerEndpoint<S: Service> {
+    #[allow(clippy::type_complexity)]
     stream: flume::Receiver<(SendSink<S::Res>, RecvStream<S::Req>)>,
 }
 
@@ -249,6 +250,7 @@ impl<S: Service> Connection<S::Res, S::Req> for FlumeConnection<S> {
 ///
 /// Created using [connection].
 pub struct FlumeConnection<S: Service> {
+    #[allow(clippy::type_complexity)]
     sink: flume::Sender<(SendSink<S::Res>, RecvStream<S::Req>)>,
 }
 
