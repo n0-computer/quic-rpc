@@ -1,3 +1,4 @@
+#![allow(unknown_lints, non_local_definitions)]
 use futures::sink::SinkExt;
 use futures::stream::StreamExt;
 use quic_rpc::transport::quinn::QuinnConnection;
