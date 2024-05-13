@@ -1,11 +1,12 @@
 //! Custom quinn transport that uses the interprocess crate to provide
 //! local interprocess communication via either Unix domain sockets or
 //! Windows named pipes.
-use std::{ffi::OsString, io, net::SocketAddr, path::Path};
+use std::{io, net::SocketAddr, path::Path};
 
 use super::quinn_flume_socket::{make_endpoint, FlumeSocket, Packet};
 use bytes::{Buf, Bytes, BytesMut};
 use futures::StreamExt;
+use interprocess::local_socket::{GenericFilePath, Name, ToFsName};
 use quinn::{Endpoint, EndpointConfig};
 use tokio::{
     io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
@@ -31,20 +32,15 @@ impl<'a> Iterator for FrameIter<'a> {
 }
 
 /// Automatically chooses name type based on OS support and preference.
-pub fn new_socket_name(root: impl AsRef<Path>, id: &str) -> OsString {
-    let namespaced = {
-        use interprocess::local_socket::NameTypeSupport;
-        let nts = NameTypeSupport::query();
-        match nts {
-            NameTypeSupport::OnlyPaths | NameTypeSupport::Both => false,
-            NameTypeSupport::OnlyNamespaced => true,
-        }
-    };
-
-    if namespaced {
-        format!("@quic-rpc-socket-{}.sock", id).into()
+pub fn new_socket_name(root: impl AsRef<Path>, id: &str) -> io::Result<Name<'static>> {
+    if cfg!(windows) {
+        format!("@quic-rpc-socket-{}.sock", id).to_fs_name::<GenericFilePath>()
+    } else if cfg!(unix) {
+        root.as_ref()
+            .join(format!("{id}.sock"))
+            .to_fs_name::<GenericFilePath>()
     } else {
-        root.as_ref().join(format!("{id}.sock")).into()
+        panic!("unsupported OS");
     }
 }
 

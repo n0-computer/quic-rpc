@@ -1,10 +1,12 @@
 //! Miscellaneous transport utilities
 
+use futures_lite::{future, stream};
+use futures_sink::Sink;
+
 use crate::{
     transport::{ConnectionErrors, ServerEndpoint},
     RpcMessage,
 };
-use futures::{future, stream, Sink};
 use std::convert::Infallible;
 
 use super::ConnectionCommon;
@@ -24,14 +26,14 @@ impl ConnectionErrors for DummyServerEndpoint {
 
 impl<In: RpcMessage, Out: RpcMessage> ConnectionCommon<In, Out> for DummyServerEndpoint {
     type RecvStream = stream::Pending<Result<In, Self::RecvError>>;
-    type SendSink = Box<dyn Sink<Out, Error = Self::SendError> + Unpin + Send>;
+    type SendSink = Box<dyn Sink<Out, Error = Self::SendError> + Unpin + Send + Sync>;
 }
 
 impl<In: RpcMessage, Out: RpcMessage> ServerEndpoint<In, Out> for DummyServerEndpoint {
     type AcceptBiFut = future::Pending<Result<(Self::SendSink, Self::RecvStream), Self::OpenError>>;
 
     fn accept_bi(&self) -> Self::AcceptBiFut {
-        futures::future::pending()
+        futures_lite::future::pending()
     }
 
     fn local_addr(&self) -> &[super::LocalAddr] {

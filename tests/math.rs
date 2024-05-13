@@ -7,13 +7,15 @@
 #![allow(dead_code)]
 use async_stream::stream;
 use derive_more::{From, TryInto};
-use futures::{SinkExt, Stream, StreamExt, TryStreamExt};
+use futures_buffered::BufferedStreamExt;
+use futures_lite::{Stream, StreamExt};
+use futures_util::SinkExt;
 use quic_rpc::{
     message::{
         BidiStreaming, BidiStreamingMsg, ClientStreaming, ClientStreamingMsg, Msg, RpcMsg,
         ServerStreaming, ServerStreamingMsg,
     },
-    server::RpcServerError,
+    server::{RpcChannel, RpcServerError},
     RpcClient, RpcServer, Service, ServiceConnection, ServiceEndpoint,
 };
 use serde::{Deserialize, Serialize};
@@ -167,8 +169,48 @@ impl ComputeService {
         loop {
             let (req, chan) = s.accept().await?;
             let service = service.clone();
+            tokio::spawn(async move { Self::handle_rpc_request(service, req, chan).await });
+        }
+    }
+
+    pub async fn handle_rpc_request<S, E>(
+        service: ComputeService,
+        req: ComputeRequest,
+        chan: RpcChannel<S, E, ComputeService>,
+    ) -> Result<(), RpcServerError<E>>
+    where
+        S: Service,
+        E: ServiceEndpoint<S>,
+    {
+        use ComputeRequest::*;
+        #[rustfmt::skip]
+        match req {
+            Sqr(msg) => chan.rpc(msg, service, ComputeService::sqr).await,
+            Sum(msg) => chan.client_streaming(msg, service, ComputeService::sum).await,
+            Fibonacci(msg) => chan.server_streaming(msg, service, ComputeService::fibonacci).await,
+            Multiply(msg) => chan.bidi_streaming(msg, service, ComputeService::multiply).await,
+            MultiplyUpdate(_) => Err(RpcServerError::UnexpectedStartMessage)?,
+            SumUpdate(_) => Err(RpcServerError::UnexpectedStartMessage)?,
+        }?;
+        Ok(())
+    }
+
+    /// Runs the service until `count` requests have been received.
+    pub async fn server_bounded<C: ServiceEndpoint<ComputeService>>(
+        server: RpcServer<ComputeService, C>,
+        count: usize,
+    ) -> result::Result<RpcServer<ComputeService, C>, RpcServerError<C>> {
+        tracing::info!(%count, "server running");
+        let s = server;
+        let mut received = 0;
+        let service = ComputeService;
+        while received < count {
+            received += 1;
+            let (req, chan) = s.accept().await?;
+            let service = service.clone();
             tokio::spawn(async move {
                 use ComputeRequest::*;
+                tracing::info!(?req, "got request");
                 #[rustfmt::skip]
                 match req {
                     Sqr(msg) => chan.rpc(msg, service, ComputeService::sqr).await,
@@ -181,6 +223,8 @@ impl ComputeService {
                 Ok::<_, RpcServerError<C>>(())
             });
         }
+        tracing::info!(%count, "server finished");
+        Ok(s)
     }
 
     pub async fn server_par<C: ServiceEndpoint<ComputeService>>(
@@ -213,8 +257,8 @@ impl ComputeService {
             }
         });
         process_stream
-            .buffer_unordered(parallelism)
-            .for_each(|x| async move {
+            .buffered_unordered(parallelism)
+            .for_each(|x| {
                 if let Err(e) = x {
                     eprintln!("error: {e:?}");
                 }
@@ -248,7 +292,7 @@ pub async fn smoke_test<C: ServiceConnection<ComputeService>>(client: C) -> anyh
     // server streaming call
     tracing::debug!("calling server_streaming Fibonacci(10)");
     let s = client.server_streaming(Fibonacci(10)).await?;
-    let res = s.map_ok(|x| x.0).try_collect::<Vec<_>>().await?;
+    let res: Vec<_> = s.map(|x| x.map(|x| x.0)).try_collect().await?;
     tracing::debug!("got response {:?}", res);
     assert_eq!(res, vec![0, 1, 1, 2, 3, 5, 8, 13, 21, 34]);
 
@@ -261,7 +305,7 @@ pub async fn smoke_test<C: ServiceConnection<ComputeService>>(client: C) -> anyh
         }
         Ok::<_, C::SendError>(())
     });
-    let res = recv.map_ok(|x| x.0).try_collect::<Vec<_>>().await?;
+    let res: Vec<_> = recv.map(|x| x.map(|x| x.0)).try_collect().await?;
     tracing::debug!("got response {:?}", res);
     assert_eq!(res, vec![2, 4, 6]);
 
@@ -273,12 +317,11 @@ fn clear_line() {
     print!("\r{}\r", " ".repeat(80));
 }
 
-pub async fn bench<C: ServiceConnection<ComputeService>>(
-    client: RpcClient<ComputeService, C>,
-    n: u64,
-) -> anyhow::Result<()>
+pub async fn bench<S, C>(client: RpcClient<S, C, ComputeService>, n: u64) -> anyhow::Result<()>
 where
     C::SendError: std::error::Error,
+    S: Service,
+    C: ServiceConnection<S>,
 {
     // individual RPCs
     {
@@ -299,8 +342,8 @@ where
     // parallel RPCs
     {
         let t0 = std::time::Instant::now();
-        let reqs = futures::stream::iter((0..n).map(Sqr));
-        let resp = reqs
+        let reqs = futures_lite::stream::iter((0..n).map(Sqr));
+        let resp: Vec<_> = reqs
             .map(|x| {
                 let client = client.clone();
                 async move {
@@ -308,8 +351,8 @@ where
                     anyhow::Ok(res)
                 }
             })
-            .buffer_unordered(32)
-            .try_collect::<Vec<_>>()
+            .buffered_unordered(32)
+            .try_collect()
             .await?;
         let sum = resp.into_iter().sum::<u128>();
         let rps = ((n as f64) / t0.elapsed().as_secs_f64()).round();
@@ -322,8 +365,8 @@ where
         let t0 = std::time::Instant::now();
         let (send, recv) = client.bidi(Multiply(2)).await?;
         let handle = tokio::task::spawn(async move {
-            let requests = futures::stream::iter((0..n).map(MultiplyUpdate));
-            requests.map(Ok).forward(send).await?;
+            let requests = futures_lite::stream::iter((0..n).map(MultiplyUpdate));
+            futures_util::StreamExt::forward(requests.map(Ok), send).await?;
             anyhow::Result::<()>::Ok(())
         });
         let mut sum = 0;

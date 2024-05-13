@@ -9,8 +9,13 @@ on:
     branches:
       - main
 
+
+concurrency:
+  group: tests-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+  
 env:
-  MSRV: "1.63"
+  MSRV: "1.76"
   RUST_BACKTRACE: 1
   RUSTFLAGS: -Dwarnings
 
@@ -50,8 +55,6 @@ jobs:
             name: "Windows GNU"
         channel:
           - "stable"
-          - "beta"
-          - "nightly"
     steps:
       - uses: actions/checkout@v2
       - uses: dtolnay/rust-toolchain@master
@@ -83,7 +86,6 @@ jobs:
         channel:
           - "stable"
           - "beta"
-          - "nightly"
     steps:
       - uses: actions/checkout@v2
       - uses: dtolnay/rust-toolchain@master

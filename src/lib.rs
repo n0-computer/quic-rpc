@@ -49,7 +49,7 @@
 //! }
 //!
 //! // create a transport channel, here a memory channel for testing
-//! let (server, client) = quic_rpc::transport::flume::connection::<PingRequest, PingResponse>(1);
+//! let (server, client) = quic_rpc::transport::flume::connection::<PingService>(1);
 //!
 //! // client side
 //! // create the rpc client given the channel and the service type
@@ -102,6 +102,9 @@ pub use client::RpcClient;
 pub use server::RpcServer;
 #[cfg(feature = "macros")]
 mod macros;
+mod map;
+
+pub mod pattern;
 
 /// Requirements for a RPC message
 ///

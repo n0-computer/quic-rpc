@@ -4,14 +4,14 @@ use std::{
     sync::Arc,
 };
 
-use futures::{io::BufReader, AsyncBufReadExt, AsyncWriteExt as _};
+use interprocess::local_socket::ListenerOptions;
 use quic_rpc::{
     transport::interprocess::{new_socket_name, tokio_io_endpoint},
     RpcClient, RpcServer,
 };
 use quinn::{ClientConfig, Endpoint, ServerConfig};
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::task::JoinHandle;
-use tokio_util::compat::{FuturesAsyncReadCompatExt, FuturesAsyncWriteCompatExt};
 
 mod math;
 use math::*;
@@ -104,7 +104,8 @@ pub fn make_endpoints() -> anyhow::Result<Endpoints> {
 
 fn run_server(server: quinn::Endpoint) -> JoinHandle<anyhow::Result<()>> {
     tokio::task::spawn(async move {
-        let connection = quic_rpc::transport::quinn::QuinnServerEndpoint::new(server)?;
+        let connection =
+            quic_rpc::transport::quinn::QuinnServerEndpoint::<ComputeService>::new(server)?;
         let server = RpcServer::<ComputeService, _>::new(connection);
         ComputeService::server(server).await?;
         anyhow::Ok(())
@@ -165,8 +166,11 @@ async fn quinn_flume_channel_bench() -> anyhow::Result<()> {
     tracing::debug!("Starting server");
     let server_handle = run_server(server);
     tracing::debug!("Starting client");
-    let client =
-        quic_rpc::transport::quinn::QuinnConnection::new(client, server_addr, "localhost".into());
+    let client = quic_rpc::transport::quinn::QuinnConnection::<ComputeService>::new(
+        client,
+        server_addr,
+        "localhost".into(),
+    );
     let client = RpcClient::<ComputeService, _>::new(client);
     tracing::debug!("Starting benchmark");
     bench(client, 50000).await?;
@@ -183,8 +187,11 @@ async fn quinn_flume_channel_smoke() -> anyhow::Result<()> {
         server_addr,
     } = make_endpoints()?;
     let server_handle = run_server(server);
-    let client_connection =
-        quic_rpc::transport::quinn::QuinnConnection::new(client, server_addr, "localhost".into());
+    let client_connection = quic_rpc::transport::quinn::QuinnConnection::<ComputeService>::new(
+        client,
+        server_addr,
+        "localhost".into(),
+    );
     smoke_test(client_connection).await?;
     server_handle.abort();
     Ok(())
@@ -195,10 +202,12 @@ async fn quinn_flume_channel_smoke() -> anyhow::Result<()> {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn interprocess_accept_connect_raw() -> anyhow::Result<()> {
     tracing_subscriber::fmt::try_init().ok();
-    use interprocess::local_socket::tokio::*;
+    use interprocess::local_socket::tokio::prelude::*;
     let dir = tempfile::tempdir()?;
-    let socket_name = new_socket_name(dir.path(), "interprocess-accept-connect-raw");
-    let socket = LocalSocketListener::bind(socket_name.clone())?;
+    let socket_name = new_socket_name(dir.path(), "interprocess-accept-connect-raw")?;
+    let socket = ListenerOptions::new()
+        .name(socket_name.clone())
+        .create_tokio()?;
     let socket_name_2 = socket_name.clone();
     let server = tokio::spawn(async move {
         tracing::info!("server: spawn");
@@ -249,20 +258,20 @@ async fn interprocess_accept_connect_raw() -> anyhow::Result<()> {
 #[tokio::test]
 async fn interprocess_quinn_accept_connect_raw() -> anyhow::Result<()> {
     tracing_subscriber::fmt::try_init().ok();
-    use interprocess::local_socket::tokio::*;
+    use interprocess::local_socket::tokio::prelude::*;
     let (server_config, server_certs) = configure_server()?;
     let client_config = configure_client(&[&server_certs])?;
 
     let dir = tempfile::tempdir()?;
-    let socket_name = new_socket_name(dir.path(), "interprocess-quinn-accet-connect-raw");
-    let socket = LocalSocketListener::bind(socket_name.clone())?;
+    let socket_name = new_socket_name(dir.path(), "interprocess-quinn-accet-connect-raw")?;
+    let socket = ListenerOptions::new()
+        .name(socket_name.clone())
+        .create_tokio()?;
     let local = SocketAddrV4::new(Ipv4Addr::LOCALHOST, 1).into();
     let remote = SocketAddrV4::new(Ipv4Addr::LOCALHOST, 2).into();
     let server = tokio::spawn(async move {
         let stream = socket.accept().await?;
         let (r, w) = stream.split();
-        let r = r.compat();
-        let w = w.compat_write();
         let (endpoint, _s, _r) = tokio_io_endpoint(r, w, remote, local, Some(server_config))?;
         tracing::debug!("server accepting connection");
         let connection = endpoint.accept().await.unwrap().await?;
@@ -278,8 +287,6 @@ async fn interprocess_quinn_accept_connect_raw() -> anyhow::Result<()> {
     let client = tokio::spawn(async move {
         let stream = LocalSocketStream::connect(socket_name).await?;
         let (r, w) = stream.split();
-        let r = r.compat();
-        let w = w.compat_write();
         let (mut endpoint, _s, _r) = tokio_io_endpoint(r, w, local, remote, None)?;
         endpoint.set_default_client_config(client_config);
         tracing::debug!("client connecting to server at {} using localhost", remote);
@@ -313,20 +320,20 @@ async fn interprocess_quinn_accept_connect_raw() -> anyhow::Result<()> {
 #[tokio::test]
 async fn interprocess_quinn_smoke() -> anyhow::Result<()> {
     tracing_subscriber::fmt::try_init().ok();
-    use interprocess::local_socket::tokio::*;
+    use interprocess::local_socket::tokio::prelude::*;
     let (server_config, server_certs) = configure_server()?;
     let client_config = configure_client(&[&server_certs])?;
 
     let dir = tempfile::tempdir()?;
-    let socket_name = new_socket_name(dir.path(), "interprocess-quinn-smoke");
-    let socket = LocalSocketListener::bind(socket_name.clone())?;
+    let socket_name = new_socket_name(dir.path(), "interprocess-quinn-smoke")?;
+    let socket = ListenerOptions::new()
+        .name(socket_name.clone())
+        .create_tokio()?;
     let local = SocketAddrV4::new(Ipv4Addr::LOCALHOST, 1).into();
     let remote = SocketAddrV4::new(Ipv4Addr::LOCALHOST, 2).into();
     let server = tokio::spawn(async move {
         let stream = socket.accept().await?;
         let (r, w) = stream.split();
-        let r = r.compat();
-        let w = w.compat_write();
         let (endpoint, _s, _r) = tokio_io_endpoint(r, w, remote, local, Some(server_config))?;
         // run rpc server on endpoint
         tracing::debug!("creating test rpc server");
@@ -336,15 +343,13 @@ async fn interprocess_quinn_smoke() -> anyhow::Result<()> {
     let client = tokio::spawn(async move {
         let stream = LocalSocketStream::connect(socket_name).await?;
         let (r, w) = stream.split();
-        let r = r.compat();
-        let w = w.compat_write();
         let (mut endpoint, _s, _r) = tokio_io_endpoint(r, w, local, remote, None)?;
         endpoint.set_default_client_config(client_config);
         tracing::debug!(
             "creating test rpc client, connecting to server at {} using localhost",
             remote
         );
-        let client: quic_rpc::transport::quinn::QuinnConnection<ComputeResponse, ComputeRequest> =
+        let client: quic_rpc::transport::quinn::QuinnConnection<ComputeService> =
             quic_rpc::transport::quinn::QuinnConnection::new(endpoint, remote, "localhost".into());
         smoke_test(client).await?;
         anyhow::Ok(())
@@ -358,20 +363,20 @@ async fn interprocess_quinn_smoke() -> anyhow::Result<()> {
 #[tokio::test]
 async fn interprocess_quinn_bench() -> anyhow::Result<()> {
     tracing_subscriber::fmt::try_init().ok();
-    use interprocess::local_socket::tokio::*;
+    use interprocess::local_socket::tokio::prelude::*;
     let (server_config, server_certs) = configure_server()?;
     let client_config = configure_client(&[&server_certs])?;
 
     let dir = tempfile::tempdir()?;
-    let socket_name = new_socket_name(dir.path(), "interprocess-quinn-bench");
-    let socket = LocalSocketListener::bind(socket_name.clone())?;
+    let socket_name = new_socket_name(dir.path(), "interprocess-quinn-bench")?;
+    let socket = ListenerOptions::new()
+        .name(socket_name.clone())
+        .create_tokio()?;
     let local = SocketAddrV4::new(Ipv4Addr::LOCALHOST, 1).into();
     let remote = SocketAddrV4::new(Ipv4Addr::LOCALHOST, 2).into();
     let server = tokio::spawn(async move {
         let stream = socket.accept().await?;
         let (r, w) = stream.split();
-        let r = r.compat();
-        let w = w.compat_write();
         let (endpoint, _s, _r) = tokio_io_endpoint(r, w, remote, local, Some(server_config))?;
         // run rpc server on endpoint
         tracing::debug!("creating test rpc server");
@@ -381,15 +386,13 @@ async fn interprocess_quinn_bench() -> anyhow::Result<()> {
     let client = tokio::spawn(async move {
         let stream = LocalSocketStream::connect(socket_name).await?;
         let (r, w) = stream.split();
-        let r = r.compat();
-        let w = w.compat_write();
         let (mut endpoint, _s, _r) = tokio_io_endpoint(r, w, local, remote, None)?;
         endpoint.set_default_client_config(client_config);
         tracing::debug!(
             "creating test rpc client, connecting to server at {} using localhost",
             remote
         );
-        let client: quic_rpc::transport::quinn::QuinnConnection<ComputeResponse, ComputeRequest> =
+        let client: quic_rpc::transport::quinn::QuinnConnection<ComputeService> =
             quic_rpc::transport::quinn::QuinnConnection::new(endpoint, remote, "localhost".into());
         let client = RpcClient::new(client);
         bench(client, 50000).await?;

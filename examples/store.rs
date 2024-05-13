@@ -1,11 +1,12 @@
 #![allow(clippy::enum_variant_names)]
 use async_stream::stream;
 use derive_more::{From, TryInto};
-use futures::{SinkExt, Stream, StreamExt};
+use futures_lite::{Stream, StreamExt};
+use futures_util::SinkExt;
 use quic_rpc::{
     server::RpcServerError,
     transport::{flume, Connection, ServerEndpoint},
-    Service, ServiceEndpoint, *,
+    *,
 };
 use serde::{Deserialize, Serialize};
 use std::{fmt::Debug, result};
@@ -183,7 +184,7 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
-    let (server, client) = flume::connection::<StoreRequest, StoreResponse>(1);
+    let (server, client) = flume::connection::<StoreService>(1);
     let client = RpcClient::<StoreService, _>::new(client);
     let server = RpcServer::<StoreService, _>::new(server);
     let server_handle = tokio::task::spawn(server_future(server));
@@ -230,7 +231,13 @@ async fn main() -> anyhow::Result<()> {
 }
 
 async fn _main_unsugared() -> anyhow::Result<()> {
-    let (server, client) = flume::connection::<u64, String>(1);
+    #[derive(Clone, Debug)]
+    struct Service;
+    impl crate::Service for Service {
+        type Req = u64;
+        type Res = String;
+    }
+    let (server, client) = flume::connection::<Service>(1);
     let to_string_service = tokio::spawn(async move {
         let (mut send, mut recv) = server.accept_bi().await?;
         while let Some(item) = recv.next().await {
