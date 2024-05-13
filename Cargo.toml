@@ -39,7 +39,7 @@ version = "0.4.20"
 [dev-dependencies]
 anyhow = "1.0.73"
 async-stream = "0.3.3"
-derive_more = { version = "1.0.0-beta.1", features = ["full"] }
+derive_more = { version = "1.0.0-beta.6", features = ["full"] }
 serde = { version = "1", features = ["derive"] }
 tokio = { version = "1", features = ["full"] }
 quinn = "0.10"
