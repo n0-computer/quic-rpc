@@ -1,4 +1,5 @@
 #![cfg(feature = "flume-transport")]
+#![allow(non_local_definitions)]
 mod math;
 use math::*;
 use quic_rpc::{
