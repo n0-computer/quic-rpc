@@ -10,7 +10,7 @@ repository = "https://github.com/n0-computer/quic-rpc"
 description = "A streaming rpc system based on quic"
 
 # Sadly this also needs to be updated in .github/workflows/ci.yml
-rust-version = "1.65"
+rust-version = "1.76"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
