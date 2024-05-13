@@ -19,7 +19,7 @@ use app::AppService;
 async fn main() -> Result<()> {
     // Spawn an inmemory connection.
     // Could use quic equally (all code in this example is generic over the transport)
-    let (server_conn, client_conn) = flume::connection::<app::Request, app::Response>(1);
+    let (server_conn, client_conn) = flume::connection::<AppService>(1);
 
     // spawn the server
     let handler = app::Handler::default();

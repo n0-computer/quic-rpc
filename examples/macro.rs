@@ -105,7 +105,7 @@ create_store_dispatch!(Store, dispatch_store_request);
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let (server, client) = flume::connection::<StoreRequest, StoreResponse>(1);
+    let (server, client) = flume::connection::<StoreService>(1);
     let server_handle = tokio::task::spawn(async move {
         let target = Store;
         run_server_loop(StoreService, server, target, dispatch_store_request).await

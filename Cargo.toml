@@ -10,13 +10,14 @@ repository = "https://github.com/n0-computer/quic-rpc"
 description = "A streaming rpc system based on quic"
 
 # Sadly this also needs to be updated in .github/workflows/ci.yml
-rust-version = "1.65"
+rust-version = "1.76"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
 bincode = { version = "1.3.3", optional = true }
 bytes = { version = "1", optional = true }
+derive_more = "0.99.17"
 flume = { version = "0.11", optional = true }
 futures-lite = "2.3.0"
 futures-sink = "0.3.30"
@@ -39,7 +40,7 @@ version = "0.4.20"
 [dev-dependencies]
 anyhow = "1.0.73"
 async-stream = "0.3.3"
-derive_more = { version = "1.0.0-beta.1", features = ["full"] }
+
 serde = { version = "1", features = ["derive"] }
 tokio = { version = "1", features = ["full"] }
 quinn = { package = "iroh-quinn", version = "0.10" }
@@ -52,7 +53,7 @@ proc-macro2 = "1.0.66"
 futures-buffered = "0.2.4"
 
 [features]
-hyper-transport = ["flume", "hyper", "bincode", "bytes"]
+hyper-transport = ["flume", "hyper", "bincode", "bytes", "tokio-serde", "tokio-util"]
 quinn-transport = ["flume", "quinn", "bincode", "tokio-serde", "tokio-util"]
 flume-transport = ["flume"]
 combined-transport = []

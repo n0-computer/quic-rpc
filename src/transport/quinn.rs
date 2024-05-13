@@ -1,7 +1,7 @@
 //! QUIC transport implementation based on [quinn](https://crates.io/crates/quinn)
 use crate::{
     transport::{Connection, ConnectionErrors, LocalAddr, ServerEndpoint},
-    RpcMessage,
+    RpcMessage, Service,
 };
 use futures_lite::{Future, Stream, StreamExt};
 use futures_sink::Sink;
@@ -55,12 +55,12 @@ impl Drop for ServerEndpointInner {
 
 /// A server endpoint using a quinn connection
 #[derive(Debug)]
-pub struct QuinnServerEndpoint<In: RpcMessage, Out: RpcMessage> {
+pub struct QuinnServerEndpoint<S: Service> {
     inner: Arc<ServerEndpointInner>,
-    _phantom: PhantomData<(In, Out)>,
+    _phantom: PhantomData<S>,
 }
 
-impl<In: RpcMessage, Out: RpcMessage> QuinnServerEndpoint<In, Out> {
+impl<S: Service> QuinnServerEndpoint<S> {
     /// handles RPC requests from a connection
     ///
     /// to cleanly shutdown the handler, drop the receiver side of the sender.
@@ -177,7 +177,7 @@ impl<In: RpcMessage, Out: RpcMessage> QuinnServerEndpoint<In, Out> {
     }
 }
 
-impl<In: RpcMessage, Out: RpcMessage> Clone for QuinnServerEndpoint<In, Out> {
+impl<S: Service> Clone for QuinnServerEndpoint<S> {
     fn clone(&self) -> Self {
         Self {
             inner: self.inner.clone(),
@@ -186,7 +186,7 @@ impl<In: RpcMessage, Out: RpcMessage> Clone for QuinnServerEndpoint<In, Out> {
     }
 }
 
-impl<In: RpcMessage, Out: RpcMessage> ConnectionErrors for QuinnServerEndpoint<In, Out> {
+impl<S: Service> ConnectionErrors for QuinnServerEndpoint<S> {
     type SendError = io::Error;
 
     type RecvError = io::Error;
@@ -194,13 +194,13 @@ impl<In: RpcMessage, Out: RpcMessage> ConnectionErrors for QuinnServerEndpoint<I
     type OpenError = quinn::ConnectionError;
 }
 
-impl<In: RpcMessage, Out: RpcMessage> ConnectionCommon<In, Out> for QuinnServerEndpoint<In, Out> {
-    type RecvStream = self::RecvStream<In>;
-    type SendSink = self::SendSink<Out>;
+impl<S: Service> ConnectionCommon<S::Req, S::Res> for QuinnServerEndpoint<S> {
+    type SendSink = self::SendSink<S::Res>;
+    type RecvStream = self::RecvStream<S::Req>;
 }
 
-impl<In: RpcMessage, Out: RpcMessage> ServerEndpoint<In, Out> for QuinnServerEndpoint<In, Out> {
-    type AcceptBiFut = AcceptBiFuture<In, Out>;
+impl<S: Service> ServerEndpoint<S::Req, S::Res> for QuinnServerEndpoint<S> {
+    type AcceptBiFut = AcceptBiFuture<S::Req, S::Res>;
 
     fn accept_bi(&self) -> Self::AcceptBiFut {
         AcceptBiFuture(self.inner.receiver.clone().into_recv_async(), PhantomData)
@@ -247,12 +247,12 @@ impl Drop for ClientConnectionInner {
 }
 
 /// A connection using a quinn connection
-pub struct QuinnConnection<In: RpcMessage, Out: RpcMessage> {
+pub struct QuinnConnection<S: Service> {
     inner: Arc<ClientConnectionInner>,
-    _phantom: PhantomData<(In, Out)>,
+    _phantom: PhantomData<S>,
 }
 
-impl<In: RpcMessage, Out: RpcMessage> QuinnConnection<In, Out> {
+impl<S: Service> QuinnConnection<S> {
     async fn single_connection_handler_inner(
         connection: quinn::Connection,
         requests: flume::Receiver<oneshot::Sender<Result<SocketInner, quinn::ConnectionError>>>,
@@ -594,7 +594,7 @@ impl<'a, T> Stream for Receiver<'a, T> {
     }
 }
 
-impl<In: RpcMessage, Out: RpcMessage> fmt::Debug for QuinnConnection<In, Out> {
+impl<S: Service> fmt::Debug for QuinnConnection<S> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ClientChannel")
             .field("inner", &self.inner)
@@ -602,7 +602,7 @@ impl<In: RpcMessage, Out: RpcMessage> fmt::Debug for QuinnConnection<In, Out> {
     }
 }
 
-impl<In: RpcMessage, Out: RpcMessage> Clone for QuinnConnection<In, Out> {
+impl<S: Service> Clone for QuinnConnection<S> {
     fn clone(&self) -> Self {
         Self {
             inner: self.inner.clone(),
@@ -611,7 +611,7 @@ impl<In: RpcMessage, Out: RpcMessage> Clone for QuinnConnection<In, Out> {
     }
 }
 
-impl<In: RpcMessage, Out: RpcMessage> ConnectionErrors for QuinnConnection<In, Out> {
+impl<S: Service> ConnectionErrors for QuinnConnection<S> {
     type SendError = io::Error;
 
     type RecvError = io::Error;
@@ -619,13 +619,13 @@ impl<In: RpcMessage, Out: RpcMessage> ConnectionErrors for QuinnConnection<In, O
     type OpenError = quinn::ConnectionError;
 }
 
-impl<In: RpcMessage, Out: RpcMessage> ConnectionCommon<In, Out> for QuinnConnection<In, Out> {
-    type SendSink = self::SendSink<Out>;
-    type RecvStream = self::RecvStream<In>;
+impl<S: Service> ConnectionCommon<S::Res, S::Req> for QuinnConnection<S> {
+    type SendSink = self::SendSink<S::Req>;
+    type RecvStream = self::RecvStream<S::Res>;
 }
 
-impl<In: RpcMessage, Out: RpcMessage> Connection<In, Out> for QuinnConnection<In, Out> {
-    type OpenBiFut = OpenBiFuture<In, Out>;
+impl<S: Service> Connection<S::Res, S::Req> for QuinnConnection<S> {
+    type OpenBiFut = OpenBiFuture<S::Res, S::Req>;
 
     fn open_bi(&self) -> Self::OpenBiFut {
         let (sender, receiver) = oneshot::channel();
