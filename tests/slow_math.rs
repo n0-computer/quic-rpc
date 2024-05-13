@@ -7,7 +7,7 @@ mod math;
 use std::result;
 
 use async_stream::stream;
-use futures::{Stream, StreamExt};
+use futures_lite::{Stream, StreamExt};
 use math::*;
 use quic_rpc::{
     message::{

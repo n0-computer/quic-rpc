@@ -2,17 +2,26 @@
 //!
 //! The main entry point is [RpcServer]
 use crate::{
-    message::{BidiStreamingMsg, ClientStreamingMsg, RpcMsg, ServerStreamingMsg},
+    map::{ChainedMapper, MapService, Mapper},
     transport::ConnectionErrors,
     Service, ServiceEndpoint,
 };
-use futures::{channel::oneshot, task, task::Poll, Future, FutureExt, SinkExt, Stream, StreamExt};
+use futures_lite::{Future, Stream, StreamExt};
 use pin_project::pin_project;
-use std::{error, fmt, fmt::Debug, marker::PhantomData, pin::Pin, result};
+use std::{
+    error,
+    fmt::{self, Debug},
+    marker::PhantomData,
+    pin::Pin,
+    result,
+    sync::Arc,
+    task::{self, Poll},
+};
+use tokio::sync::oneshot;
 
 /// A server channel for a specific service.
 ///
-/// This is a wrapper around a [ServiceEndpoint](crate::ServiceEndpoint) that serves as the entry point for the server DSL.
+/// This is a wrapper around a [ServiceEndpoint] that serves as the entry point for the server DSL.
 /// `S` is the service type, `C` is the channel type.
 #[derive(Debug)]
 pub struct RpcServer<S, C> {
@@ -54,187 +63,57 @@ impl<S: Service, C: ServiceEndpoint<S>> RpcServer<S, C> {
 /// Sink and stream are independent, so you can take the channel apart and use
 /// them independently.
 #[derive(Debug)]
-pub struct RpcChannel<S: Service, C: ServiceEndpoint<S>> {
+pub struct RpcChannel<S: Service, C: ServiceEndpoint<S>, SInner: Service = S> {
     /// Sink to send responses to the client.
     pub send: C::SendSink,
     /// Stream to receive requests from the client.
     pub recv: C::RecvStream,
-    /// Phantom data to make the type parameter `S` non-instantiable.
-    p: PhantomData<S>,
+    /// Mapper to map between S and S2
+    pub map: Arc<dyn MapService<S, SInner>>,
 }
 
-impl<S: Service, C: ServiceEndpoint<S>> RpcChannel<S, C> {
-    /// Create a new channel from a sink and a stream.
+impl<S, C> RpcChannel<S, C, S>
+where
+    S: Service,
+    C: ServiceEndpoint<S>,
+{
+    /// Create a new RPC channel.
     pub fn new(send: C::SendSink, recv: C::RecvStream) -> Self {
         Self {
             send,
             recv,
-            p: PhantomData,
+            map: Arc::new(Mapper::new()),
         }
     }
+}
 
-    /// handle the message of type `M` using the given function on the target object
+impl<S, C, SInner> RpcChannel<S, C, SInner>
+where
+    S: Service,
+    C: ServiceEndpoint<S>,
+    SInner: Service,
+{
+    /// Map this channel's service into an inner service.
     ///
-    /// If you want to support concurrent requests, you need to spawn this on a tokio task yourself.
-    pub async fn rpc<M, F, Fut, T>(
-        self,
-        req: M,
-        target: T,
-        f: F,
-    ) -> result::Result<(), RpcServerError<C>>
-    where
-        M: RpcMsg<S>,
-        F: FnOnce(T, M) -> Fut,
-        Fut: Future<Output = M::Response>,
-        T: Send + 'static,
-    {
-        let Self {
-            mut send, mut recv, ..
-        } = self;
-        // cancel if we get an update, no matter what it is
-        let cancel = recv
-            .next()
-            .map(|_| RpcServerError::UnexpectedUpdateMessage::<C>);
-        // race the computation and the cancellation
-        race2(cancel.map(Err), async move {
-            // get the response
-            let res = f(target, req).await;
-            // turn into a S::Res so we can send it
-            let res: S::Res = res.into();
-            // send it and return the error if any
-            send.send(res).await.map_err(RpcServerError::SendError)
-        })
-        .await
-    }
-
-    /// handle the message M using the given function on the target object
+    /// This method is available if the required bounds are upheld:
+    /// SNext::Req: Into<SInner::Req> + TryFrom<SInner::Req>,
+    /// SNext::Res: Into<SInner::Res> + TryFrom<SInner::Res>,
     ///
-    /// If you want to support concurrent requests, you need to spawn this on a tokio task yourself.
-    pub async fn client_streaming<M, F, Fut, T>(
-        self,
-        req: M,
-        target: T,
-        f: F,
-    ) -> result::Result<(), RpcServerError<C>>
-    where
-        M: ClientStreamingMsg<S>,
-        F: FnOnce(T, M, UpdateStream<S, C, M::Update>) -> Fut + Send + 'static,
-        Fut: Future<Output = M::Response> + Send + 'static,
-        T: Send + 'static,
-    {
-        let Self { mut send, recv, .. } = self;
-        let (updates, read_error) = UpdateStream::new(recv);
-        race2(read_error.map(Err), async move {
-            // get the response
-            let res = f(target, req, updates).await;
-            // turn into a S::Res so we can send it
-            let res: S::Res = res.into();
-            // send it and return the error if any
-            send.send(res).await.map_err(RpcServerError::SendError)
-        })
-        .await
-    }
-
-    /// handle the message M using the given function on the target object
+    /// Where SNext is the new service to map to and SInner is the current inner service.
     ///
-    /// If you want to support concurrent requests, you need to spawn this on a tokio task yourself.
-    pub async fn bidi_streaming<M, F, Str, T>(
-        self,
-        req: M,
-        target: T,
-        f: F,
-    ) -> result::Result<(), RpcServerError<C>>
+    /// This method can be chained infintely.
+    pub fn map<SNext>(self) -> RpcChannel<S, C, SNext>
     where
-        M: BidiStreamingMsg<S>,
-        F: FnOnce(T, M, UpdateStream<S, C, M::Update>) -> Str + Send + 'static,
-        Str: Stream<Item = M::Response> + Send + 'static,
-        T: Send + 'static,
+        SNext: Service,
+        SNext::Req: Into<SInner::Req> + TryFrom<SInner::Req>,
+        SNext::Res: Into<SInner::Res> + TryFrom<SInner::Res>,
     {
-        let Self { mut send, recv, .. } = self;
-        // downcast the updates
-        let (updates, read_error) = UpdateStream::new(recv);
-        // get the response
-        let responses = f(target, req, updates);
-        race2(read_error.map(Err), async move {
-            tokio::pin!(responses);
-            while let Some(response) = responses.next().await {
-                // turn into a S::Res so we can send it
-                let response: S::Res = response.into();
-                // send it and return the error if any
-                send.send(response)
-                    .await
-                    .map_err(RpcServerError::SendError)?;
-            }
-            Ok(())
-        })
-        .await
-    }
-
-    /// handle the message M using the given function on the target object
-    ///
-    /// If you want to support concurrent requests, you need to spawn this on a tokio task yourself.
-    pub async fn server_streaming<M, F, Str, T>(
-        self,
-        req: M,
-        target: T,
-        f: F,
-    ) -> result::Result<(), RpcServerError<C>>
-    where
-        M: ServerStreamingMsg<S>,
-        F: FnOnce(T, M) -> Str + Send + 'static,
-        Str: Stream<Item = M::Response> + Send + 'static,
-        T: Send + 'static,
-    {
-        let Self {
-            mut send, mut recv, ..
-        } = self;
-        // cancel if we get an update, no matter what it is
-        let cancel = recv
-            .next()
-            .map(|_| RpcServerError::UnexpectedUpdateMessage::<C>);
-        // race the computation and the cancellation
-        race2(cancel.map(Err), async move {
-            // get the response
-            let responses = f(target, req);
-            tokio::pin!(responses);
-            while let Some(response) = responses.next().await {
-                // turn into a S::Res so we can send it
-                let response: S::Res = response.into();
-                // send it and return the error if any
-                send.send(response)
-                    .await
-                    .map_err(RpcServerError::SendError)?;
-            }
-            Ok(())
-        })
-        .await
-    }
-
-    /// A rpc call that also maps the error from the user type to the wire type
-    ///
-    /// This is useful if you want to write your function with a convenient error type like anyhow::Error,
-    /// yet still use a serializable error type on the wire.
-    pub async fn rpc_map_err<M, F, Fut, T, R, E1, E2>(
-        self,
-        req: M,
-        target: T,
-        f: F,
-    ) -> result::Result<(), RpcServerError<C>>
-    where
-        M: RpcMsg<S, Response = result::Result<R, E2>>,
-        F: FnOnce(T, M) -> Fut,
-        Fut: Future<Output = result::Result<R, E1>>,
-        E2: From<E1>,
-        T: Send + 'static,
-    {
-        let fut = |target: T, msg: M| async move {
-            // call the inner fn
-            let res: Result<R, E1> = f(target, msg).await;
-            // convert the error type
-            let res: Result<R, E2> = res.map_err(E2::from);
-            res
-        };
-        self.rpc(req, target, fut).await
+        let map = ChainedMapper::new(self.map);
+        RpcChannel {
+            send: self.send,
+            recv: self.recv,
+            map: Arc::new(map),
+        }
     }
 }
 
@@ -284,40 +163,61 @@ impl<S: Service, C: ServiceEndpoint<S>> AsRef<C> for RpcServer<S, C> {
 /// cause a termination of the RPC call.
 #[pin_project]
 #[derive(Debug)]
-pub struct UpdateStream<S: Service, C: ServiceEndpoint<S>, T>(
+pub struct UpdateStream<S, C, T, SInner = S>(
     #[pin] C::RecvStream,
     Option<oneshot::Sender<RpcServerError<C>>>,
     PhantomData<T>,
-);
+    Arc<dyn MapService<S, SInner>>,
+)
+where
+    S: Service,
+    SInner: Service,
+    C: ServiceEndpoint<S>;
 
-impl<S: Service, C: ServiceEndpoint<S>, T> UpdateStream<S, C, T> {
-    fn new(recv: C::RecvStream) -> (Self, UnwrapToPending<RpcServerError<C>>) {
+impl<S, C, T, SInner> UpdateStream<S, C, T, SInner>
+where
+    S: Service,
+    SInner: Service,
+    C: ServiceEndpoint<S>,
+    T: TryFrom<SInner::Req>,
+{
+    pub(crate) fn new(
+        recv: C::RecvStream,
+        map: Arc<dyn MapService<S, SInner>>,
+    ) -> (Self, UnwrapToPending<RpcServerError<C>>) {
         let (error_send, error_recv) = oneshot::channel();
         let error_recv = UnwrapToPending(error_recv);
-        (Self(recv, Some(error_send), PhantomData), error_recv)
+        (Self(recv, Some(error_send), PhantomData, map), error_recv)
     }
 }
 
-impl<S: Service, C: ServiceEndpoint<S>, T> Stream for UpdateStream<S, C, T>
+impl<S, C, T, SInner> Stream for UpdateStream<S, C, T, SInner>
 where
-    T: TryFrom<S::Req>,
+    S: Service,
+    SInner: Service,
+    C: ServiceEndpoint<S>,
+    T: TryFrom<SInner::Req>,
 {
     type Item = T;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut task::Context<'_>) -> Poll<Option<Self::Item>> {
         let mut this = self.project();
-        match this.0.poll_next_unpin(cx) {
+        match Pin::new(&mut this.0).poll_next(cx) {
             Poll::Ready(Some(msg)) => match msg {
-                Ok(msg) => match T::try_from(msg) {
-                    Ok(msg) => Poll::Ready(Some(msg)),
-                    Err(_cause) => {
-                        // we were unable to downcast, so we need to send an error
-                        if let Some(tx) = this.1.take() {
-                            let _ = tx.send(RpcServerError::UnexpectedUpdateMessage);
+                Ok(msg) => {
+                    let msg = this.3.req_try_into_inner(msg);
+                    let msg = msg.and_then(|msg| T::try_from(msg).map_err(|_cause| ()));
+                    match msg {
+                        Ok(msg) => Poll::Ready(Some(msg)),
+                        Err(_cause) => {
+                            // we were unable to downcast, so we need to send an error
+                            if let Some(tx) = this.1.take() {
+                                let _ = tx.send(RpcServerError::UnexpectedUpdateMessage);
+                            }
+                            Poll::Pending
                         }
-                        Poll::Pending
                     }
-                },
+                }
                 Err(cause) => {
                     // we got a recv error, so return pending and send the error
                     if let Some(tx) = this.1.take() {
@@ -370,13 +270,13 @@ impl<C: ConnectionErrors> fmt::Display for RpcServerError<C> {
 impl<C: ConnectionErrors> error::Error for RpcServerError<C> {}
 
 /// Take an oneshot receiver and just return Pending the underlying future returns `Err(oneshot::Canceled)`
-struct UnwrapToPending<T>(oneshot::Receiver<T>);
+pub(crate) struct UnwrapToPending<T>(oneshot::Receiver<T>);
 
 impl<T> Future for UnwrapToPending<T> {
     type Output = T;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut task::Context<'_>) -> Poll<Self::Output> {
-        match self.0.poll_unpin(cx) {
+        match Pin::new(&mut self.0).poll(cx) {
             Poll::Ready(Ok(x)) => Poll::Ready(x),
             Poll::Ready(Err(_)) => Poll::Pending,
             Poll::Pending => Poll::Pending,
@@ -384,7 +284,7 @@ impl<T> Future for UnwrapToPending<T> {
     }
 }
 
-async fn race2<T, A: Future<Output = T>, B: Future<Output = T>>(f1: A, f2: B) -> T {
+pub(crate) async fn race2<T, A: Future<Output = T>, B: Future<Output = T>>(f1: A, f2: B) -> T {
     tokio::select! {
         x = f1 => x,
         x = f2 => x,

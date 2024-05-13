@@ -10,7 +10,7 @@ use std::{
 };
 
 use bytes::Bytes;
-use futures::{SinkExt, StreamExt};
+use futures::{StreamExt, SinkExt};
 use quinn::{AsyncUdpSocket, EndpointConfig};
 use quinn_udp::RecvMeta;
 

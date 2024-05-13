@@ -104,7 +104,7 @@ pub fn make_endpoints() -> anyhow::Result<Endpoints> {
 
 fn run_server(server: quinn::Endpoint) -> JoinHandle<anyhow::Result<()>> {
     tokio::task::spawn(async move {
-        let connection = quic_rpc::transport::quinn::QuinnServerEndpoint::new(server)?;
+        let connection = quic_rpc::transport::quinn::QuinnServerEndpoint::<ComputeService>::new(server)?;
         let server = RpcServer::<ComputeService, _>::new(connection);
         ComputeService::server(server).await?;
         anyhow::Ok(())
@@ -166,7 +166,7 @@ async fn quinn_flume_channel_bench() -> anyhow::Result<()> {
     let server_handle = run_server(server);
     tracing::debug!("Starting client");
     let client =
-        quic_rpc::transport::quinn::QuinnConnection::new(client, server_addr, "localhost".into());
+        quic_rpc::transport::quinn::QuinnConnection::<ComputeService>::new(client, server_addr, "localhost".into());
     let client = RpcClient::<ComputeService, _>::new(client);
     tracing::debug!("Starting benchmark");
     bench(client, 50000).await?;
@@ -184,7 +184,7 @@ async fn quinn_flume_channel_smoke() -> anyhow::Result<()> {
     } = make_endpoints()?;
     let server_handle = run_server(server);
     let client_connection =
-        quic_rpc::transport::quinn::QuinnConnection::new(client, server_addr, "localhost".into());
+        quic_rpc::transport::quinn::QuinnConnection::<ComputeService>::new(client, server_addr, "localhost".into());
     smoke_test(client_connection).await?;
     server_handle.abort();
     Ok(())
@@ -348,7 +348,7 @@ async fn interprocess_quinn_smoke() -> anyhow::Result<()> {
             "creating test rpc client, connecting to server at {} using localhost",
             remote
         );
-        let client: quic_rpc::transport::quinn::QuinnConnection<ComputeResponse, ComputeRequest> =
+        let client: quic_rpc::transport::quinn::QuinnConnection<ComputeService> =
             quic_rpc::transport::quinn::QuinnConnection::new(endpoint, remote, "localhost".into());
         smoke_test(client).await?;
         anyhow::Ok(())
@@ -393,7 +393,7 @@ async fn interprocess_quinn_bench() -> anyhow::Result<()> {
             "creating test rpc client, connecting to server at {} using localhost",
             remote
         );
-        let client: quic_rpc::transport::quinn::QuinnConnection<ComputeResponse, ComputeRequest> =
+        let client: quic_rpc::transport::quinn::QuinnConnection<ComputeService> =
             quic_rpc::transport::quinn::QuinnConnection::new(endpoint, remote, "localhost".into());
         let client = RpcClient::new(client);
         bench(client, 50000).await?;

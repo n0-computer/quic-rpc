@@ -2,15 +2,17 @@
 //!
 //! [hyper]: https://crates.io/crates/hyper/
 use std::{
-    convert::Infallible, error, fmt, io, marker::PhantomData, net::SocketAddr, pin::Pin, result,
-    sync::Arc, task::Poll,
+    convert::Infallible, error, fmt, future::Future, io, marker::PhantomData, net::SocketAddr,
+    pin::Pin, result, sync::Arc, task::Poll,
 };
 
 use crate::transport::{Connection, ConnectionErrors, LocalAddr, ServerEndpoint};
-use crate::RpcMessage;
+use crate::{RpcMessage, Service};
 use bytes::Bytes;
 use flume::{r#async::RecvFut, Receiver, Sender};
-use futures::{future::FusedFuture, Future, FutureExt, Sink, SinkExt, StreamExt};
+use futures_lite::{Stream, StreamExt};
+use futures_sink::Sink;
+use futures_util::future::FusedFuture;
 use hyper::{
     client::{connect::Connect, HttpConnector, ResponseFuture},
     server::conn::{AddrIncoming, AddrStream},
@@ -31,9 +33,10 @@ struct HyperConnectionInner {
 }
 
 /// Hyper based connection to a server
-pub struct HyperConnection<In: RpcMessage, Out: RpcMessage> {
+#[derive(Clone)]
+pub struct HyperConnection<S: Service> {
     inner: Arc<HyperConnectionInner>,
-    _p: PhantomData<(In, Out)>,
+    _p: PhantomData<S>,
 }
 
 /// Trait so we don't have to drag around the hyper internals
@@ -47,7 +50,7 @@ impl<C: Connect + Clone + Send + Sync + 'static> Requester for Client<C, Body> {
     }
 }
 
-impl<In: RpcMessage, Out: RpcMessage> HyperConnection<In, Out> {
+impl<S: Service> HyperConnection<S> {
     /// create a client given an uri and the default configuration
     pub fn new(uri: Uri) -> Self {
         Self::with_config(uri, ChannelConfig::default())
@@ -84,21 +87,12 @@ impl<In: RpcMessage, Out: RpcMessage> HyperConnection<In, Out> {
     }
 }
 
-impl<In: RpcMessage, Out: RpcMessage> fmt::Debug for HyperConnection<In, Out> {
+impl<S: Service> fmt::Debug for HyperConnection<S> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ClientChannel")
             .field("uri", &self.inner.uri)
             .field("config", &self.inner.config)
             .finish()
-    }
-}
-
-impl<In: RpcMessage, Out: RpcMessage> Clone for HyperConnection<In, Out> {
-    fn clone(&self) -> Self {
-        Self {
-            inner: self.inner.clone(),
-            _p: PhantomData,
-        }
     }
 }
 
@@ -179,9 +173,9 @@ impl Default for ChannelConfig {
 /// Creating this spawns a tokio task which runs the server, once dropped this task is shut
 /// down: no new connections will be accepted and existing channels will stop.
 #[derive(Debug)]
-pub struct HyperServerEndpoint<In: RpcMessage, Out: RpcMessage> {
+pub struct HyperServerEndpoint<S: Service> {
     /// The channel.
-    channel: Receiver<InternalChannel<In>>,
+    channel: Receiver<InternalChannel<S::Req>>,
     /// The configuration.
     config: Arc<ChannelConfig>,
     /// The sender to stop the server.
@@ -194,11 +188,11 @@ pub struct HyperServerEndpoint<In: RpcMessage, Out: RpcMessage> {
     /// This is useful when the listen address uses a random port, `:0`, to find out which
     /// port was bound by the kernel.
     local_addr: [LocalAddr; 1],
-    /// Phantom data for in and out
-    _p: PhantomData<(In, Out)>,
+    /// Phantom data for service
+    _p: PhantomData<S>,
 }
 
-impl<In: RpcMessage, Out: RpcMessage> HyperServerEndpoint<In, Out> {
+impl<S: Service> HyperServerEndpoint<S> {
     /// Creates a server listening on the [`SocketAddr`], with the default configuration.
     pub fn serve(addr: &SocketAddr) -> hyper::Result<Self> {
         Self::serve_with_config(addr, Default::default())
@@ -258,9 +252,9 @@ impl<In: RpcMessage, Out: RpcMessage> HyperServerEndpoint<In, Out> {
     /// response and sends them to the [`ServerChannel`].
     async fn handle_one_http2_request(
         req: Request<Body>,
-        accept_tx: Sender<InternalChannel<In>>,
+        accept_tx: Sender<InternalChannel<S::Req>>,
     ) -> Result<Response<Body>, String> {
-        let (req_tx, req_rx) = flume::bounded::<result::Result<In, RecvError>>(32);
+        let (req_tx, req_rx) = flume::bounded::<result::Result<S::Req, RecvError>>(32);
         let (res_tx, res_rx) = flume::bounded::<io::Result<Bytes>>(32);
         accept_tx
             .send_async((req_rx, res_tx))
@@ -371,7 +365,7 @@ fn spawn_recv_forwarder<In: RpcMessage>(
 // This does not want or need RpcMessage to be clone but still want to clone the
 // ServerChannel and it's containing channels itself.  The derive macro can't cope with this
 // so this needs to be written by hand.
-impl<In: RpcMessage, Out: RpcMessage> Clone for HyperServerEndpoint<In, Out> {
+impl<S: Service> Clone for HyperServerEndpoint<S> {
     fn clone(&self) -> Self {
         Self {
             channel: self.channel.clone(),
@@ -411,14 +405,14 @@ impl<In: RpcMessage> Clone for RecvStream<In> {
     }
 }
 
-impl<Res: RpcMessage> futures::Stream for RecvStream<Res> {
+impl<Res: RpcMessage> Stream for RecvStream<Res> {
     type Item = Result<Res, RecvError>;
 
     fn poll_next(
         mut self: Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> Poll<Option<Self::Item>> {
-        self.recv.poll_next_unpin(cx)
+        Pin::new(&mut self.recv).poll_next(cx)
     }
 }
 
@@ -466,8 +460,8 @@ impl<Out: RpcMessage> Sink<Out> for SendSink<Out> {
         mut self: Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> Poll<Result<(), Self::Error>> {
-        self.sink
-            .poll_ready_unpin(cx)
+        Pin::new(&mut self.sink)
+            .poll_ready(cx)
             .map_err(|_| SendError::ReceiverDropped)
     }
 
@@ -481,8 +475,8 @@ impl<Out: RpcMessage> Sink<Out> for SendSink<Out> {
             ),
         };
         // attempt sending
-        self.sink
-            .start_send_unpin(send)
+        Pin::new(&mut self.sink)
+            .start_send(send)
             .map_err(|_| SendError::ReceiverDropped)?;
         res
     }
@@ -491,8 +485,8 @@ impl<Out: RpcMessage> Sink<Out> for SendSink<Out> {
         mut self: Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> Poll<Result<(), Self::Error>> {
-        self.sink
-            .poll_flush_unpin(cx)
+        Pin::new(&mut self.sink)
+            .poll_flush(cx)
             .map_err(|_| SendError::ReceiverDropped)
     }
 
@@ -500,8 +494,8 @@ impl<Out: RpcMessage> Sink<Out> for SendSink<Out> {
         mut self: Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> Poll<Result<(), Self::Error>> {
-        self.sink
-            .poll_close_unpin(cx)
+        Pin::new(&mut self.sink)
+            .poll_close(cx)
             .map_err(|_| SendError::ReceiverDropped)
     }
 }
@@ -606,7 +600,7 @@ impl<In: RpcMessage, Out: RpcMessage> Future for OpenBiFuture<In, Out> {
     ) -> std::task::Poll<Self::Output> {
         let this = self.project();
         match this.chan {
-            Some(Ok((fut, _, _))) => match fut.poll_unpin(cx) {
+            Some(Ok((fut, _, _))) => match Pin::new(fut).poll(cx) {
                 Poll::Ready(Ok(res)) => {
                     event!(Level::TRACE, "OpenBiFuture got response");
                     let (_, out_tx, config) = this.chan.take().unwrap().unwrap();
@@ -697,12 +691,12 @@ impl<In: RpcMessage, Out: RpcMessage> Future for AcceptBiFuture<In, Out> {
     type Output = result::Result<self::Socket<In, Out>, AcceptBiError>;
 
     fn poll(
-        self: std::pin::Pin<&mut Self>,
+        self: Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Self::Output> {
         let this = self.project();
         match this.chan {
-            Some((fut, _)) => match fut.poll_unpin(cx) {
+            Some((fut, _)) => match Pin::new(fut).poll(cx) {
                 Poll::Ready(Ok((recv, send))) => {
                     let (_, config) = this.chan.take().unwrap();
                     Poll::Ready(Ok((
@@ -738,8 +732,8 @@ where
     }
 }
 
-impl<In: RpcMessage, Out: RpcMessage> HyperConnection<In, Out> {
-    fn open_bi(&self) -> OpenBiFuture<In, Out> {
+impl<S: Service> HyperConnection<S> {
+    fn open_bi(&self) -> OpenBiFuture<S::Res, S::Req> {
         event!(Level::TRACE, "open_bi {}", self.inner.uri);
         let (out_tx, out_rx) = flume::bounded::<io::Result<Bytes>>(32);
         let req: Result<Request<Body>, OpenBiError> = Request::post(&self.inner.uri)
@@ -756,7 +750,7 @@ impl<In: RpcMessage, Out: RpcMessage> HyperConnection<In, Out> {
     }
 }
 
-impl<In: RpcMessage, Out: RpcMessage> ConnectionErrors for HyperConnection<In, Out> {
+impl<S: Service> ConnectionErrors for HyperConnection<S> {
     type SendError = self::SendError;
 
     type RecvError = self::RecvError;
@@ -764,21 +758,21 @@ impl<In: RpcMessage, Out: RpcMessage> ConnectionErrors for HyperConnection<In, O
     type OpenError = OpenBiError;
 }
 
-impl<In: RpcMessage, Out: RpcMessage> ConnectionCommon<In, Out> for HyperConnection<In, Out> {
-    type RecvStream = self::RecvStream<In>;
+impl<S: Service> ConnectionCommon<S::Res, S::Req> for HyperConnection<S> {
+    type RecvStream = self::RecvStream<S::Res>;
 
-    type SendSink = self::SendSink<Out>;
+    type SendSink = self::SendSink<S::Req>;
 }
 
-impl<In: RpcMessage, Out: RpcMessage> Connection<In, Out> for HyperConnection<In, Out> {
-    type OpenBiFut = OpenBiFuture<In, Out>;
+impl<S: Service> Connection<S::Res, S::Req> for HyperConnection<S> {
+    type OpenBiFut = OpenBiFuture<S::Res, S::Req>;
 
     fn open_bi(&self) -> Self::OpenBiFut {
         self.open_bi()
     }
 }
 
-impl<In: RpcMessage, Out: RpcMessage> ConnectionErrors for HyperServerEndpoint<In, Out> {
+impl<S: Service> ConnectionErrors for HyperServerEndpoint<S> {
     type SendError = self::SendError;
 
     type RecvError = self::RecvError;
@@ -786,13 +780,13 @@ impl<In: RpcMessage, Out: RpcMessage> ConnectionErrors for HyperServerEndpoint<I
     type OpenError = AcceptBiError;
 }
 
-impl<In: RpcMessage, Out: RpcMessage> ConnectionCommon<In, Out> for HyperServerEndpoint<In, Out> {
-    type RecvStream = self::RecvStream<In>;
-    type SendSink = self::SendSink<Out>;
+impl<S: Service> ConnectionCommon<S::Req, S::Res> for HyperServerEndpoint<S> {
+    type RecvStream = self::RecvStream<S::Req>;
+    type SendSink = self::SendSink<S::Res>;
 }
 
-impl<In: RpcMessage, Out: RpcMessage> ServerEndpoint<In, Out> for HyperServerEndpoint<In, Out> {
-    type AcceptBiFut = AcceptBiFuture<In, Out>;
+impl<S: Service> ServerEndpoint<S::Req, S::Res> for HyperServerEndpoint<S> {
+    type AcceptBiFut = AcceptBiFuture<S::Req, S::Res>;
 
     fn local_addr(&self) -> &[LocalAddr] {
         &self.local_addr
