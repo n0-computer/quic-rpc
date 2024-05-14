@@ -13,15 +13,11 @@ on:
 concurrency:
   group: tests-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
-  
+
 env:
   MSRV: "1.76"
   RUST_BACKTRACE: 1
   RUSTFLAGS: -Dwarnings
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
 
 jobs:
   lint:
