@@ -1,16 +1,14 @@
 //! Transport that combines two other transports
 use super::{Connection, ConnectionCommon, ConnectionErrors, LocalAddr, ServerEndpoint};
 use crate::{RpcMessage, Service};
-use futures_lite::{future::Boxed as BoxFuture, Stream};
+use futures_lite::Stream;
 use futures_sink::Sink;
-use futures_util::{FutureExt, TryFutureExt};
 use pin_project::pin_project;
 use std::{
     error, fmt,
     fmt::Debug,
     marker::PhantomData,
     pin::Pin,
-    result,
     task::{Context, Poll},
 };
 
@@ -273,19 +271,6 @@ impl<A: ConnectionErrors, B: ConnectionErrors> fmt::Display for AcceptBiError<A,
 
 impl<A: ConnectionErrors, B: ConnectionErrors> error::Error for AcceptBiError<A, B> {}
 
-/// Future returned by open_bi
-pub type OpenBiFuture<A, B, In, Out> =
-    BoxFuture<result::Result<Socket<A, B, In, Out>, self::OpenBiError<A, B>>>;
-
-/// Future returned by accept_bi
-pub type AcceptBiFuture<A, B, In, Out> =
-    BoxFuture<result::Result<self::Socket<A, B, In, Out>, self::AcceptBiError<A, B>>>;
-
-type Socket<A, B, In, Out> = (
-    self::SendSink<A, B, In, Out>,
-    self::RecvStream<A, B, In, Out>,
-);
-
 impl<A: ConnectionErrors, B: ConnectionErrors, S: Service> ConnectionErrors
     for CombinedConnection<A, B, S>
 {
@@ -304,24 +289,19 @@ impl<A: Connection<S::Res, S::Req>, B: Connection<S::Res, S::Req>, S: Service>
 impl<A: Connection<S::Res, S::Req>, B: Connection<S::Res, S::Req>, S: Service>
     Connection<S::Res, S::Req> for CombinedConnection<A, B, S>
 {
-    fn open_bi(&self) -> OpenBiFuture<A, B, S::Res, S::Req> {
+    async fn open_bi(&self) -> Result<(Self::SendSink, Self::RecvStream), Self::OpenError> {
         let this = self.clone();
-        async {
-            // try a first, then b
-            if let Some(a) = this.a {
-                let (send, recv) = a.open_bi().await.map_err(OpenBiError::A)?;
-                Ok((SendSink::A(send), RecvStream::A(recv)))
-            } else if let Some(b) = this.b {
-                let (send, recv) = b.open_bi().await.map_err(OpenBiError::B)?;
-                Ok((SendSink::B(send), RecvStream::B(recv)))
-            } else {
-                std::future::ready(Err(OpenBiError::NoChannel)).await
-            }
+        // try a first, then b
+        if let Some(a) = this.a {
+            let (send, recv) = a.open_bi().await.map_err(OpenBiError::A)?;
+            Ok((SendSink::A(send), RecvStream::A(recv)))
+        } else if let Some(b) = this.b {
+            let (send, recv) = b.open_bi().await.map_err(OpenBiError::B)?;
+            Ok((SendSink::B(send), RecvStream::B(recv)))
+        } else {
+            Err(OpenBiError::NoChannel)
         }
-        .boxed()
     }
-
-    type OpenBiFut = OpenBiFuture<A, B, S::Res, S::Req>;
 }
 
 impl<A: ConnectionErrors, B: ConnectionErrors, S: Service> ConnectionErrors
@@ -342,32 +322,22 @@ impl<A: ServerEndpoint<S::Req, S::Res>, B: ServerEndpoint<S::Req, S::Res>, S: Se
 impl<A: ServerEndpoint<S::Req, S::Res>, B: ServerEndpoint<S::Req, S::Res>, S: Service>
     ServerEndpoint<S::Req, S::Res> for CombinedServerEndpoint<A, B, S>
 {
-    fn accept_bi(&self) -> AcceptBiFuture<A, B, S::Req, S::Res> {
-        let a_fut = if let Some(a) = &self.a {
-            a.accept_bi()
-                .map_ok(|(send, recv)| {
-                    (
-                        SendSink::<A, B, S::Req, S::Res>::A(send),
-                        RecvStream::<A, B, S::Req, S::Res>::A(recv),
-                    )
-                })
-                .map_err(AcceptBiError::A)
-                .left_future()
-        } else {
-            std::future::pending().right_future()
+    async fn accept_bi(&self) -> Result<(Self::SendSink, Self::RecvStream), Self::OpenError> {
+        let a_fut = async {
+            if let Some(a) = &self.a {
+                let (send, recv) = a.accept_bi().await.map_err(AcceptBiError::A)?;
+                Ok((SendSink::A(send), RecvStream::A(recv)))
+            } else {
+                std::future::pending().await
+            }
         };
-        let b_fut = if let Some(b) = &self.b {
-            b.accept_bi()
-                .map_ok(|(send, recv)| {
-                    (
-                        SendSink::<A, B, S::Req, S::Res>::B(send),
-                        RecvStream::<A, B, S::Req, S::Res>::B(recv),
-                    )
-                })
-                .map_err(AcceptBiError::B)
-                .left_future()
-        } else {
-            std::future::pending().right_future()
+        let b_fut = async {
+            if let Some(b) = &self.b {
+                let (send, recv) = b.accept_bi().await.map_err(AcceptBiError::B)?;
+                Ok((SendSink::B(send), RecvStream::B(recv)))
+            } else {
+                std::future::pending().await
+            }
         };
         async move {
             tokio::select! {
@@ -375,10 +345,8 @@ impl<A: ServerEndpoint<S::Req, S::Res>, B: ServerEndpoint<S::Req, S::Res>, S: Se
                 res = b_fut => res,
             }
         }
-        .boxed()
+        .await
     }
-
-    type AcceptBiFut = AcceptBiFuture<A, B, S::Req, S::Res>;
 
     fn local_addr(&self) -> &[LocalAddr] {
         &self.local_addr

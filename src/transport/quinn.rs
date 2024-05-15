@@ -1,7 +1,7 @@
 //! QUIC transport implementation based on [quinn](https://crates.io/crates/quinn)
 use crate::{
     transport::{Connection, ConnectionErrors, LocalAddr, ServerEndpoint},
-    RpcMessage, Service,
+    Service,
 };
 use futures_lite::{Future, Stream, StreamExt};
 use futures_sink::Sink;
@@ -20,8 +20,6 @@ use super::{
     util::{FramedBincodeRead, FramedBincodeWrite},
     ConnectionCommon,
 };
-
-type Socket<In, Out> = (SendSink<Out>, RecvStream<In>);
 
 const MAX_FRAME_LENGTH: usize = 1024 * 1024 * 16;
 
@@ -200,10 +198,14 @@ impl<S: Service> ConnectionCommon<S::Req, S::Res> for QuinnServerEndpoint<S> {
 }
 
 impl<S: Service> ServerEndpoint<S::Req, S::Res> for QuinnServerEndpoint<S> {
-    type AcceptBiFut = AcceptBiFuture<S::Req, S::Res>;
-
-    fn accept_bi(&self) -> Self::AcceptBiFut {
-        AcceptBiFuture(self.inner.receiver.clone().into_recv_async(), PhantomData)
+    async fn accept_bi(&self) -> Result<(Self::SendSink, Self::RecvStream), AcceptBiError> {
+        let (send, recv) = self
+            .inner
+            .receiver
+            .recv_async()
+            .await
+            .map_err(|_| quinn::ConnectionError::LocallyClosed)?;
+        Ok((SendSink::new(send), RecvStream::new(recv)))
     }
 
     fn local_addr(&self) -> &[LocalAddr] {
@@ -625,14 +627,17 @@ impl<S: Service> ConnectionCommon<S::Res, S::Req> for QuinnConnection<S> {
 }
 
 impl<S: Service> Connection<S::Res, S::Req> for QuinnConnection<S> {
-    type OpenBiFut = OpenBiFuture<S::Res, S::Req>;
-
-    fn open_bi(&self) -> Self::OpenBiFut {
+    async fn open_bi(&self) -> Result<(Self::SendSink, Self::RecvStream), Self::OpenError> {
         let (sender, receiver) = oneshot::channel();
-        OpenBiFuture(
-            OpenBiFutureState::Sending(self.inner.sender.clone().into_send_async(sender), receiver),
-            PhantomData,
-        )
+        self.inner
+            .sender
+            .send_async(sender)
+            .await
+            .map_err(|_| quinn::ConnectionError::LocallyClosed)?;
+        let (send, recv) = receiver
+            .await
+            .map_err(|_| quinn::ConnectionError::LocallyClosed)??;
+        Ok((SendSink::new(send), RecvStream::new(recv)))
     }
 }
 
@@ -737,105 +742,6 @@ pub type OpenBiError = quinn::ConnectionError;
 
 /// Error for accept_bi. Currently just a quinn::ConnectionError
 pub type AcceptBiError = quinn::ConnectionError;
-
-enum OpenBiFutureState {
-    /// Sending the oneshot sender to the server
-    Sending(
-        flume::r#async::SendFut<
-            'static,
-            oneshot::Sender<Result<(quinn::SendStream, quinn::RecvStream), quinn::ConnectionError>>,
-        >,
-        oneshot::Receiver<Result<(quinn::SendStream, quinn::RecvStream), quinn::ConnectionError>>,
-    ),
-    /// Receiving the channel from the server
-    Receiving(
-        oneshot::Receiver<Result<(quinn::SendStream, quinn::RecvStream), quinn::ConnectionError>>,
-    ),
-    /// Taken or done
-    Taken,
-}
-
-impl OpenBiFutureState {
-    fn take(&mut self) -> Self {
-        std::mem::replace(self, Self::Taken)
-    }
-}
-
-/// Future returned by open_bi
-#[pin_project]
-pub struct OpenBiFuture<In, Out>(OpenBiFutureState, PhantomData<(In, Out)>);
-
-impl<In: RpcMessage, Out: RpcMessage> fmt::Debug for OpenBiFuture<In, Out> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("OpenBiFuture").finish()
-    }
-}
-
-impl<In: RpcMessage, Out: RpcMessage> Future for OpenBiFuture<In, Out> {
-    type Output = result::Result<self::Socket<In, Out>, self::OpenBiError>;
-
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        match self.0.take() {
-            OpenBiFutureState::Sending(mut fut, recever) => match Pin::new(&mut fut).poll(cx) {
-                Poll::Ready(Ok(_)) => {
-                    self.0 = OpenBiFutureState::Receiving(recever);
-                    self.poll(cx)
-                }
-                Poll::Pending => {
-                    self.0 = OpenBiFutureState::Sending(fut, recever);
-                    Poll::Pending
-                }
-                Poll::Ready(Err(_)) => Poll::Ready(Err(quinn::ConnectionError::LocallyClosed)),
-            },
-            OpenBiFutureState::Receiving(mut fut) => match Pin::new(&mut fut).poll(cx) {
-                Poll::Ready(Ok(Ok((send, recv)))) => {
-                    let send = SendSink::new(send);
-                    let recv = RecvStream::new(recv);
-                    Poll::Ready(Ok((send, recv)))
-                }
-                Poll::Ready(Ok(Err(cause))) => Poll::Ready(Err(cause)),
-                Poll::Pending => {
-                    self.0 = OpenBiFutureState::Receiving(fut);
-                    Poll::Pending
-                }
-                Poll::Ready(Err(_)) => Poll::Ready(Err(quinn::ConnectionError::LocallyClosed)),
-            },
-            OpenBiFutureState::Taken => unreachable!(),
-        }
-    }
-}
-
-/// Future returned by accept_bi
-#[pin_project]
-pub struct AcceptBiFuture<In, Out>(
-    #[pin] flume::r#async::RecvFut<'static, SocketInner>,
-    PhantomData<(In, Out)>,
-);
-
-impl<In: RpcMessage, Out: RpcMessage> fmt::Debug for AcceptBiFuture<In, Out> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("AcceptBiFuture").finish()
-    }
-}
-
-impl<In: RpcMessage, Out: RpcMessage> Future for AcceptBiFuture<In, Out> {
-    type Output = result::Result<self::Socket<In, Out>, self::OpenBiError>;
-
-    fn poll(
-        self: Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Self::Output> {
-        Pin::new(&mut self.project().0).poll(cx).map(|conn| {
-            let (send, recv) = conn.map_err(|e| {
-                tracing::warn!("accept_bi: error receiving connection: {}", e);
-                quinn::ConnectionError::LocallyClosed
-            })?;
-            let send = SendSink::new(send);
-            let recv = RecvStream::new(recv);
-            Ok((send, recv))
-        })
-    }
-}
 
 /// CreateChannelError for quinn channels.
 #[derive(Debug, Clone)]
