@@ -30,6 +30,11 @@ tokio = { version = "1", default-features = false, features = ["macros", "sync"]
 tokio-serde = { version = "0.8", features = ["bincode"], optional = true }
 tokio-util = { version = "0.7", features = ["codec"], optional = true }
 tracing = "0.1"
+quinn-udp = { package = "iroh-quinn-udp", version = "0.4.0", optional = true }
+interprocess = { version = "2.1", features = ["tokio"], optional = true }
+hex = "0.4.3"
+blake3 = "1.4.1"
+futures = { version = "0.3.30", optional = true }
 
 [dependencies.educe]
 # This is an unused dependency, it is needed to make the minimal
@@ -53,10 +58,12 @@ proc-macro2 = "1.0.66"
 futures-buffered = "0.2.4"
 
 [features]
-hyper-transport = ["flume", "hyper", "bincode", "bytes", "tokio-serde", "tokio-util"]
-quinn-transport = ["flume", "quinn", "bincode", "tokio-serde", "tokio-util"]
-flume-transport = ["flume"]
+hyper-transport = ["dep:flume", "dep:hyper", "dep:bincode", "dep:bytes", "dep:tokio-serde", "dep:tokio-util"]
+quinn-transport = ["dep:flume", "dep:quinn", "dep:bincode", "dep:tokio-serde", "dep:tokio-util"]
+flume-transport = ["dep:flume"]
+interprocess-transport = ["quinn-transport", "quinn-flume-socket", "dep:quinn-udp", "dep:interprocess", "dep:bytes", "dep:tokio-util", "dep:futures"]
 combined-transport = []
+quinn-flume-socket = ["dep:flume", "dep:quinn", "dep:quinn-udp", "dep:bytes", "dep:tokio-util"]
 macros = []
 default = ["flume-transport"]
 
