@@ -6,7 +6,7 @@ use std::{io, net::SocketAddr, path::Path};
 use super::quinn_flume_socket::{make_endpoint, FlumeSocket, Packet};
 use bytes::{Buf, Bytes, BytesMut};
 use futures::StreamExt;
-use interprocess::local_socket::{GenericFilePath, Name, ToFsName};
+use interprocess::local_socket::{GenericFilePath, GenericNamespaced, Name, ToFsName, ToNsName};
 use quinn::{Endpoint, EndpointConfig};
 use tokio::{
     io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
@@ -34,7 +34,7 @@ impl<'a> Iterator for FrameIter<'a> {
 /// Automatically chooses name type based on OS support and preference.
 pub fn new_socket_name(root: impl AsRef<Path>, id: &str) -> io::Result<Name<'static>> {
     if cfg!(windows) {
-        format!("@quic-rpc-socket-{}.sock", id).to_fs_name::<GenericFilePath>()
+        format!("@quic-rpc-socket-{}.sock", id).to_ns_name::<GenericNamespaced>()
     } else if cfg!(unix) {
         root.as_ref()
             .join(format!("{id}.sock"))
