@@ -1,6 +1,6 @@
 //! Miscellaneous transport utilities
 
-use futures_lite::{future, stream};
+use futures_lite::stream;
 use futures_sink::Sink;
 
 use crate::{
@@ -30,10 +30,8 @@ impl<In: RpcMessage, Out: RpcMessage> ConnectionCommon<In, Out> for DummyServerE
 }
 
 impl<In: RpcMessage, Out: RpcMessage> ServerEndpoint<In, Out> for DummyServerEndpoint {
-    type AcceptBiFut = future::Pending<Result<(Self::SendSink, Self::RecvStream), Self::OpenError>>;
-
-    fn accept_bi(&self) -> Self::AcceptBiFut {
-        futures_lite::future::pending()
+    async fn accept_bi(&self) -> Result<(Self::SendSink, Self::RecvStream), Self::OpenError> {
+        futures_lite::future::pending().await
     }
 
     fn local_addr(&self) -> &[super::LocalAddr] {

@@ -49,11 +49,10 @@ pub trait ConnectionCommon<In, Out>: ConnectionErrors {
 ///
 /// A connection can be used to open bidirectional typed channels using [`Connection::open_bi`].
 pub trait Connection<In, Out>: ConnectionCommon<In, Out> {
-    /// The future that will resolve to a substream or an error
-    type OpenBiFut: Future<Output = Result<(Self::SendSink, Self::RecvStream), Self::OpenError>>
-        + Send;
-    /// Open a channel to the remote
-    fn open_bi(&self) -> Self::OpenBiFut;
+    /// Open a channel to the remote che
+    fn open_bi(
+        &self,
+    ) -> impl Future<Output = Result<(Self::SendSink, Self::RecvStream), Self::OpenError>> + Send;
 }
 
 /// A server endpoint that listens for connections
@@ -61,13 +60,11 @@ pub trait Connection<In, Out>: ConnectionCommon<In, Out> {
 /// A server endpoint can be used to accept bidirectional typed channels from any of the
 /// currently opened connections to clients, using [`ServerEndpoint::accept_bi`].
 pub trait ServerEndpoint<In, Out>: ConnectionCommon<In, Out> {
-    /// The future that will resolve to a substream or an error
-    type AcceptBiFut: Future<Output = Result<(Self::SendSink, Self::RecvStream), Self::OpenError>>
-        + Send;
-
     /// Accept a new typed bidirectional channel on any of the connections we
     /// have currently opened.
-    fn accept_bi(&self) -> Self::AcceptBiFut;
+    fn accept_bi(
+        &self,
+    ) -> impl Future<Output = Result<(Self::SendSink, Self::RecvStream), Self::OpenError>> + Send;
 
     /// The local addresses this endpoint is bound to.
     fn local_addr(&self) -> &[LocalAddr];

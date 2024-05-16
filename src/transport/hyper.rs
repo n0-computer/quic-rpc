@@ -2,24 +2,22 @@
 //!
 //! [hyper]: https://crates.io/crates/hyper/
 use std::{
-    convert::Infallible, error, fmt, future::Future, io, marker::PhantomData, net::SocketAddr,
-    pin::Pin, result, sync::Arc, task::Poll,
+    convert::Infallible, error, fmt, io, marker::PhantomData, net::SocketAddr, pin::Pin, result,
+    sync::Arc, task::Poll,
 };
 
 use crate::transport::{Connection, ConnectionErrors, LocalAddr, ServerEndpoint};
 use crate::{RpcMessage, Service};
 use bytes::Bytes;
-use flume::{r#async::RecvFut, Receiver, Sender};
+use flume::{Receiver, Sender};
 use futures_lite::{Stream, StreamExt};
 use futures_sink::Sink;
-use futures_util::future::FusedFuture;
 use hyper::{
     client::{connect::Connect, HttpConnector, ResponseFuture},
     server::conn::{AddrIncoming, AddrStream},
     service::{make_service_fn, service_fn},
     Body, Client, Request, Response, Server, StatusCode, Uri,
 };
-use pin_project::pin_project;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use tracing::{debug, event, trace, Level};
@@ -95,12 +93,6 @@ impl<S: Service> fmt::Debug for HyperConnection<S> {
             .finish()
     }
 }
-
-/// A pair of channels to send and receive messages on a single stream.
-///
-/// A socket here is an abstraction of a single stream to a single peer which sends and
-/// receives whole messages of the [`In`] and [`Out`] types.
-type Socket<In, Out> = (self::SendSink<Out>, self::RecvStream<In>);
 
 /// A flume sender and receiver tuple.
 type InternalChannel<In> = (
@@ -555,83 +547,6 @@ impl fmt::Display for OpenBiError {
 
 impl std::error::Error for OpenBiError {}
 
-/// Future returned by [open_bi](crate::transport::Connection::open_bi).
-#[allow(clippy::type_complexity)]
-#[pin_project]
-pub struct OpenBiFuture<In, Out> {
-    chan: Option<
-        Result<
-            (
-                ResponseFuture,
-                flume::Sender<io::Result<Bytes>>,
-                Arc<ChannelConfig>,
-            ),
-            OpenBiError,
-        >,
-    >,
-    _p: PhantomData<(In, Out)>,
-}
-
-#[allow(clippy::type_complexity)]
-impl<In: RpcMessage, Out: RpcMessage> OpenBiFuture<In, Out> {
-    fn new(
-        value: Result<
-            (
-                ResponseFuture,
-                flume::Sender<io::Result<Bytes>>,
-                Arc<ChannelConfig>,
-            ),
-            OpenBiError,
-        >,
-    ) -> Self {
-        Self {
-            chan: Some(value),
-            _p: PhantomData,
-        }
-    }
-}
-
-impl<In: RpcMessage, Out: RpcMessage> Future for OpenBiFuture<In, Out> {
-    type Output = result::Result<self::Socket<In, Out>, OpenBiError>;
-
-    fn poll(
-        self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Self::Output> {
-        let this = self.project();
-        match this.chan {
-            Some(Ok((fut, _, _))) => match Pin::new(fut).poll(cx) {
-                Poll::Ready(Ok(res)) => {
-                    event!(Level::TRACE, "OpenBiFuture got response");
-                    let (_, out_tx, config) = this.chan.take().unwrap().unwrap();
-                    let (in_tx, in_rx) = flume::bounded::<result::Result<In, RecvError>>(32);
-                    spawn_recv_forwarder(res.into_body(), in_tx);
-
-                    let out_tx = self::SendSink::new(out_tx, config);
-                    let in_rx = self::RecvStream::new(in_rx);
-                    Poll::Ready(Ok((out_tx, in_rx)))
-                }
-                Poll::Ready(Err(cause)) => {
-                    event!(Level::TRACE, "OpenBiFuture got error {}", cause);
-                    this.chan.take();
-                    Poll::Ready(Err(OpenBiError::Hyper(cause)))
-                }
-                Poll::Pending => Poll::Pending,
-            },
-            Some(Err(_)) => {
-                // this is guaranteed to work since we are in Some(Err(_))
-                let err = this.chan.take().unwrap().unwrap_err();
-                Poll::Ready(Err(err))
-            }
-            None => {
-                // return pending once the option is none, as per the contract
-                // for a fused future
-                Poll::Pending
-            }
-        }
-    }
-}
-
 /// AcceptBiError for hyper channels.
 ///
 /// There is not much that can go wrong with hyper channels.
@@ -651,105 +566,6 @@ impl fmt::Display for AcceptBiError {
 
 impl error::Error for AcceptBiError {}
 
-/// Future returned by [accept_bi](crate::transport::ServerEndpoint::accept_bi).
-#[allow(clippy::type_complexity)]
-#[pin_project]
-pub struct AcceptBiFuture<In: RpcMessage, Out: RpcMessage> {
-    chan: Option<(
-        RecvFut<
-            'static,
-            (
-                Receiver<result::Result<In, RecvError>>,
-                Sender<io::Result<Bytes>>,
-            ),
-        >,
-        Arc<ChannelConfig>,
-    )>,
-    _p: PhantomData<(In, Out)>,
-}
-
-impl<In: RpcMessage, Out: RpcMessage> AcceptBiFuture<In, Out> {
-    #[allow(clippy::type_complexity)]
-    fn new(
-        fut: RecvFut<
-            'static,
-            (
-                Receiver<result::Result<In, RecvError>>,
-                Sender<io::Result<Bytes>>,
-            ),
-        >,
-        config: Arc<ChannelConfig>,
-    ) -> Self {
-        Self {
-            chan: Some((fut, config)),
-            _p: PhantomData,
-        }
-    }
-}
-
-impl<In: RpcMessage, Out: RpcMessage> Future for AcceptBiFuture<In, Out> {
-    type Output = result::Result<self::Socket<In, Out>, AcceptBiError>;
-
-    fn poll(
-        self: Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Self::Output> {
-        let this = self.project();
-        match this.chan {
-            Some((fut, _)) => match Pin::new(fut).poll(cx) {
-                Poll::Ready(Ok((recv, send))) => {
-                    let (_, config) = this.chan.take().unwrap();
-                    Poll::Ready(Ok((
-                        self::SendSink::new(send, config),
-                        self::RecvStream::new(recv),
-                    )))
-                }
-                Poll::Ready(Err(_cause)) => {
-                    this.chan.take();
-                    Poll::Ready(Err(AcceptBiError::RemoteDropped))
-                }
-                Poll::Pending => Poll::Pending,
-            },
-            None => {
-                // return pending once the option is none, as per the contract
-                // for a fused future
-                Poll::Pending
-            }
-        }
-    }
-}
-
-impl<In, Out> FusedFuture for AcceptBiFuture<In, Out>
-where
-    In: RpcMessage,
-    Out: RpcMessage,
-{
-    fn is_terminated(&self) -> bool {
-        // TODO: why can't I project??
-        // let this = self.project();
-        // this.chan.is_none()
-        self.chan.is_none()
-    }
-}
-
-impl<S: Service> HyperConnection<S> {
-    fn open_bi(&self) -> OpenBiFuture<S::Res, S::Req> {
-        event!(Level::TRACE, "open_bi {}", self.inner.uri);
-        let (out_tx, out_rx) = flume::bounded::<io::Result<Bytes>>(32);
-        let req: Result<Request<Body>, OpenBiError> = Request::post(&self.inner.uri)
-            .body(Body::wrap_stream(out_rx.into_stream()))
-            .map_err(OpenBiError::HyperHttp);
-        let res = req.map(|req| {
-            (
-                self.inner.client.request(req),
-                out_tx,
-                self.inner.config.clone(),
-            )
-        });
-        OpenBiFuture::new(res)
-    }
-}
-
 impl<S: Service> ConnectionErrors for HyperConnection<S> {
     type SendError = self::SendError;
 
@@ -765,10 +581,23 @@ impl<S: Service> ConnectionCommon<S::Res, S::Req> for HyperConnection<S> {
 }
 
 impl<S: Service> Connection<S::Res, S::Req> for HyperConnection<S> {
-    type OpenBiFut = OpenBiFuture<S::Res, S::Req>;
+    async fn open_bi(&self) -> Result<(Self::SendSink, Self::RecvStream), Self::OpenError> {
+        let (out_tx, out_rx) = flume::bounded::<io::Result<Bytes>>(32);
+        let req: Request<Body> = Request::post(&self.inner.uri)
+            .body(Body::wrap_stream(out_rx.into_stream()))
+            .map_err(OpenBiError::HyperHttp)?;
+        let res = self
+            .inner
+            .client
+            .request(req)
+            .await
+            .map_err(OpenBiError::Hyper)?;
+        let (in_tx, in_rx) = flume::bounded::<result::Result<S::Res, RecvError>>(32);
+        spawn_recv_forwarder(res.into_body(), in_tx);
 
-    fn open_bi(&self) -> Self::OpenBiFut {
-        self.open_bi()
+        let out_tx = self::SendSink::new(out_tx, self.inner.config.clone());
+        let in_rx = self::RecvStream::new(in_rx);
+        Ok((out_tx, in_rx))
     }
 }
 
@@ -786,13 +615,19 @@ impl<S: Service> ConnectionCommon<S::Req, S::Res> for HyperServerEndpoint<S> {
 }
 
 impl<S: Service> ServerEndpoint<S::Req, S::Res> for HyperServerEndpoint<S> {
-    type AcceptBiFut = AcceptBiFuture<S::Req, S::Res>;
-
     fn local_addr(&self) -> &[LocalAddr] {
         &self.local_addr
     }
 
-    fn accept_bi(&self) -> Self::AcceptBiFut {
-        AcceptBiFuture::new(self.channel.clone().into_recv_async(), self.config.clone())
+    async fn accept_bi(&self) -> Result<(Self::SendSink, Self::RecvStream), AcceptBiError> {
+        let (recv, send) = self
+            .channel
+            .recv_async()
+            .await
+            .map_err(|_| AcceptBiError::RemoteDropped)?;
+        Ok((
+            SendSink::new(send, self.config.clone()),
+            RecvStream::new(recv),
+        ))
     }
 }
