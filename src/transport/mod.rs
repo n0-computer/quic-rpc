@@ -7,6 +7,8 @@ use std::{
     fmt::{self, Debug, Display},
     net::SocketAddr,
 };
+#[cfg(feature = "flume-transport")]
+pub mod boxed;
 #[cfg(feature = "combined-transport")]
 pub mod combined;
 #[cfg(feature = "flume-transport")]

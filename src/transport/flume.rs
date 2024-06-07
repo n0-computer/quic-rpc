@@ -26,7 +26,7 @@ impl fmt::Display for RecvError {
 }
 
 /// Sink for memory channels
-pub struct SendSink<T: RpcMessage>(flume::r#async::SendSink<'static, T>);
+pub struct SendSink<T: RpcMessage>(pub(crate) flume::r#async::SendSink<'static, T>);
 
 impl<T: RpcMessage> fmt::Debug for SendSink<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -72,7 +72,7 @@ impl<T: RpcMessage> Sink<T> for SendSink<T> {
 }
 
 /// Stream for memory channels
-pub struct RecvStream<T: RpcMessage>(flume::r#async::RecvStream<'static, T>);
+pub struct RecvStream<T: RpcMessage>(pub(crate) flume::r#async::RecvStream<'static, T>);
 
 impl<T: RpcMessage> fmt::Debug for RecvStream<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
