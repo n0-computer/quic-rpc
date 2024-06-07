@@ -185,7 +185,7 @@ impl<S: Service> Clone for QuinnServerEndpoint<S> {
 }
 
 impl<S: Service> ConnectionErrors for QuinnServerEndpoint<S> {
-    type SendError = io::Error;
+    type SendError = super::SendError;
 
     type RecvError = io::Error;
 
@@ -193,8 +193,8 @@ impl<S: Service> ConnectionErrors for QuinnServerEndpoint<S> {
 }
 
 impl<S: Service> ConnectionCommon<S::Req, S::Res> for QuinnServerEndpoint<S> {
-    type SendSink = self::SendSink<S::Res>;
-    type RecvStream = self::RecvStream<S::Req>;
+    type SendSink = super::SendSink<S::Res>;
+    type RecvStream = super::RecvStream<S::Req>;
 }
 
 impl<S: Service> ServerEndpoint<S::Req, S::Res> for QuinnServerEndpoint<S> {
@@ -205,7 +205,12 @@ impl<S: Service> ServerEndpoint<S::Req, S::Res> for QuinnServerEndpoint<S> {
             .recv_async()
             .await
             .map_err(|_| quinn::ConnectionError::LocallyClosed)?;
-        Ok((SendSink::new(send), RecvStream::new(recv)))
+        let send = SendSink::new(send);
+        let recv = RecvStream::new(recv);
+        Ok((
+            super::SendSink::boxed(Box::pin(send)),
+            super::RecvStream::boxed(Box::pin(recv)),
+        ))
     }
 
     fn local_addr(&self) -> &[LocalAddr] {
