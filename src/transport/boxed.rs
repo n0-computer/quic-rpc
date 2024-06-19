@@ -128,7 +128,7 @@ impl<T: RpcMessage> Stream for RecvStream<T> {
 
 enum OpenFutureInner<'a, In: RpcMessage, Out: RpcMessage> {
     /// A direct future (todo)
-    // Direct(...),
+    Direct(super::flume::OpenBiFuture<In, Out>),
     /// A boxed future
     Boxed(BoxFuture<'a, anyhow::Result<(SendSink<Out>, RecvStream<In>)>>),
 }
@@ -138,6 +138,10 @@ enum OpenFutureInner<'a, In: RpcMessage, Out: RpcMessage> {
 pub struct OpenFuture<'a, In: RpcMessage, Out: RpcMessage>(OpenFutureInner<'a, In, Out>);
 
 impl<'a, In: RpcMessage, Out: RpcMessage> OpenFuture<'a, In, Out> {
+    fn direct(f: super::flume::OpenBiFuture<In, Out>) -> Self {
+        Self(OpenFutureInner::Direct(f))
+    }
+
     fn boxed(
         f: impl Future<Output = anyhow::Result<(SendSink<Out>, RecvStream<In>)>> + Send + Sync + 'a,
     ) -> Self {
@@ -150,14 +154,18 @@ impl<'a, In: RpcMessage, Out: RpcMessage> Future for OpenFuture<'a, In, Out> {
 
     fn poll(self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
         match self.project().0 {
+            OpenFutureInner::Direct(f) => f
+                .poll(cx)
+                .map_ok(|(send, recv)| (SendSink::direct(send.0), RecvStream::direct(recv.0)))
+                .map_err(|e| e.into()),
             OpenFutureInner::Boxed(f) => f.poll(cx),
         }
     }
 }
 
 enum AcceptFutureInner<'a, In: RpcMessage, Out: RpcMessage> {
-    /// A direct future (todo)
-    // Direct(...),
+    /// A direct future
+    Direct(super::flume::AcceptBiFuture<In, Out>),
     /// A boxed future
     Boxed(BoxedFuture<'a, anyhow::Result<(SendSink<Out>, RecvStream<In>)>>),
 }
@@ -167,6 +175,10 @@ enum AcceptFutureInner<'a, In: RpcMessage, Out: RpcMessage> {
 pub struct AcceptFuture<'a, In: RpcMessage, Out: RpcMessage>(AcceptFutureInner<'a, In, Out>);
 
 impl<'a, In: RpcMessage, Out: RpcMessage> AcceptFuture<'a, In, Out> {
+    fn direct(f: super::flume::AcceptBiFuture<In, Out>) -> Self {
+        Self(AcceptFutureInner::Direct(f))
+    }
+
     fn boxed(
         f: impl Future<Output = anyhow::Result<(SendSink<Out>, RecvStream<In>)>> + Send + Sync + 'a,
     ) -> Self {
@@ -179,6 +191,10 @@ impl<'a, In: RpcMessage, Out: RpcMessage> Future for AcceptFuture<'a, In, Out> {
 
     fn poll(self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
         match self.project().0 {
+            AcceptFutureInner::Direct(f) => f
+                .poll(cx)
+                .map_ok(|(send, recv)| (SendSink::direct(send.0), RecvStream::direct(recv.0)))
+                .map_err(|e| e.into()),
             AcceptFutureInner::Boxed(f) => f.poll(cx),
         }
     }
@@ -197,33 +213,33 @@ pub trait BoxableConnection<In: RpcMessage, Out: RpcMessage>:
 
 /// A boxed connection
 #[derive(Debug)]
-pub struct Connection<In: RpcMessage, Out: RpcMessage>(Box<dyn BoxableConnection<In, Out>>);
+pub struct Connection<S: Service>(Box<dyn BoxableConnection<S::Res, S::Req>>);
 
-impl<In: RpcMessage, Out: RpcMessage> Connection<In, Out> {
+impl<S: Service> Connection<S> {
     /// Wrap a boxable server endpoint into a box, transforming all the types to concrete types
-    pub fn new(x: impl BoxableConnection<In, Out>) -> Self {
+    pub fn new(x: impl BoxableConnection<S::Res, S::Req>) -> Self {
         Self(Box::new(x))
     }
 }
 
-impl<In: RpcMessage, Out: RpcMessage> Clone for Connection<In, Out> {
+impl<S: Service> Clone for Connection<S> {
     fn clone(&self) -> Self {
         Self(self.0.clone_box())
     }
 }
 
-impl<In: RpcMessage, Out: RpcMessage> ConnectionCommon<In, Out> for Connection<In, Out> {
-    type RecvStream = RecvStream<In>;
-    type SendSink = SendSink<Out>;
+impl<S: Service> ConnectionCommon<S::Res, S::Req> for Connection<S> {
+    type RecvStream = RecvStream<S::Res>;
+    type SendSink = SendSink<S::Req>;
 }
 
-impl<In: RpcMessage, Out: RpcMessage> ConnectionErrors for Connection<In, Out> {
+impl<S: Service> ConnectionErrors for Connection<S> {
     type OpenError = anyhow::Error;
     type SendError = anyhow::Error;
     type RecvError = anyhow::Error;
 }
 
-impl<In: RpcMessage, Out: RpcMessage> super::Connection<In, Out> for Connection<In, Out> {
+impl<S: Service> super::Connection<S::Res, S::Req> for Connection<S> {
     async fn open_bi(&self) -> Result<(Self::SendSink, Self::RecvStream), Self::OpenError> {
         self.0.open_bi_boxed().await
     }
@@ -331,12 +347,7 @@ impl<S: Service> BoxableConnection<S::Res, S::Req> for super::flume::FlumeConnec
     }
 
     fn open_bi_boxed(&self) -> OpenFuture<S::Res, S::Req> {
-        let f = Box::pin(async move {
-            let (send, recv) = super::Connection::open_bi(self).await?;
-            // return the boxed streams
-            anyhow::Ok((SendSink::direct(send.0), RecvStream::direct(recv.0)))
-        });
-        OpenFuture::boxed(f)
+        OpenFuture::direct(super::Connection::open_bi(self))
     }
 }
 
@@ -347,13 +358,7 @@ impl<S: Service> BoxableServerEndpoint<S::Req, S::Res> for super::flume::FlumeSe
     }
 
     fn accept_bi_boxed(&self) -> AcceptFuture<S::Req, S::Res> {
-        let f = Box::pin(async move {
-            let (send, recv) = super::ServerEndpoint::accept_bi(self)
-                .await
-                .map_err(anyhow::Error::from)?;
-            Ok((SendSink::direct(send.0), RecvStream::direct(recv.0)))
-        });
-        AcceptFuture::boxed(f)
+        AcceptFuture::direct(super::ServerEndpoint::accept_bi(self))
     }
 
     fn local_addr(&self) -> &[super::LocalAddr] {
@@ -383,7 +388,7 @@ mod tests {
 
         let (server, client) = crate::transport::flume::connection::<FooService>(1);
         let server = super::ServerEndpoint::new(server);
-        let client = super::Connection::new(client);
+        let client = super::Connection::<FooService>::new(client);
         // spawn echo server
         tokio::spawn(async move {
             while let Ok((mut send, mut recv)) = server.accept_bi().await {
