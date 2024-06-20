@@ -5,7 +5,10 @@ use std::{
 };
 
 use quic_rpc::{transport, RpcClient, RpcServer};
-use quinn::{ClientConfig, Endpoint, ServerConfig};
+use quinn::{
+    crypto::rustls::{QuicClientConfig, QuicServerConfig},
+    ClientConfig, Endpoint, ServerConfig,
+};
 use tokio::task::JoinHandle;
 
 mod math;
@@ -54,13 +57,16 @@ fn configure_client(server_certs: &[&[u8]]) -> anyhow::Result<ClientConfig> {
         certs.add(cert)?;
     }
 
-    // let builder = rustls::ClientConfig::builder_with_provider(Arc::new(
-    //     rustls::crypto::ring::default_provider(),
-    // ))
-    // .with_root_certificates(certs);
+    let crypto_client_config = rustls::ClientConfig::builder_with_provider(Arc::new(
+        rustls::crypto::ring::default_provider(),
+    ))
+    .with_protocol_versions(&[&rustls::version::TLS13])
+    .expect("valid versions")
+    .with_root_certificates(certs)
+    .with_no_client_auth();
+    let quic_client_config = QuicClientConfig::try_from(crypto_client_config)?;
 
-    let cfg = ClientConfig::with_root_certificates(Arc::new(certs))?;
-    Ok(cfg)
+    Ok(ClientConfig::new(Arc::new(quic_client_config)))
 }
 
 /// Returns default server configuration along with its certificate.
@@ -72,7 +78,16 @@ fn configure_server() -> anyhow::Result<(ServerConfig, Vec<u8>)> {
     let priv_key = rustls::pki_types::PrivatePkcs8KeyDer::from(priv_key);
     let cert_chain = vec![rustls::pki_types::CertificateDer::from(cert_der.clone())];
 
-    let mut server_config = ServerConfig::with_single_cert(cert_chain, priv_key.into())?;
+    let crypto_server_config = rustls::ServerConfig::builder_with_provider(Arc::new(
+        rustls::crypto::ring::default_provider(),
+    ))
+    .with_protocol_versions(&[&rustls::version::TLS13])
+    .expect("valid versions")
+    .with_no_client_auth()
+    .with_single_cert(cert_chain, priv_key.into())?;
+    let quic_server_config = QuicServerConfig::try_from(crypto_server_config)?;
+    let mut server_config = ServerConfig::with_crypto(Arc::new(quic_server_config));
+
     Arc::get_mut(&mut server_config.transport)
         .unwrap()
         .max_concurrent_uni_streams(0_u8.into());
