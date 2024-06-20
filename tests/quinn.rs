@@ -50,9 +50,17 @@ pub fn make_server_endpoint(bind_addr: SocketAddr) -> anyhow::Result<(Endpoint, 
 fn configure_client(server_certs: &[&[u8]]) -> anyhow::Result<ClientConfig> {
     let mut certs = rustls::RootCertStore::empty();
     for cert in server_certs {
-        certs.add(&rustls::Certificate(cert.to_vec()))?;
+        let cert = rustls::pki_types::CertificateDer::from(cert.to_vec());
+        certs.add(cert)?;
     }
-    Ok(ClientConfig::with_root_certificates(certs))
+
+    // let builder = rustls::ClientConfig::builder_with_provider(Arc::new(
+    //     rustls::crypto::ring::default_provider(),
+    // ))
+    // .with_root_certificates(certs);
+
+    let cfg = ClientConfig::with_root_certificates(Arc::new(certs))?;
+    Ok(cfg)
 }
 
 /// Returns default server configuration along with its certificate.
@@ -61,10 +69,10 @@ fn configure_server() -> anyhow::Result<(ServerConfig, Vec<u8>)> {
     let cert = rcgen::generate_simple_self_signed(vec!["localhost".into()])?;
     let cert_der = cert.serialize_der()?;
     let priv_key = cert.serialize_private_key_der();
-    let priv_key = rustls::PrivateKey(priv_key);
-    let cert_chain = vec![rustls::Certificate(cert_der.clone())];
+    let priv_key = rustls::pki_types::PrivatePkcs8KeyDer::from(priv_key);
+    let cert_chain = vec![rustls::pki_types::CertificateDer::from(cert_der.clone())];
 
-    let mut server_config = ServerConfig::with_single_cert(cert_chain, priv_key)?;
+    let mut server_config = ServerConfig::with_single_cert(cert_chain, priv_key.into())?;
     Arc::get_mut(&mut server_config.transport)
         .unwrap()
         .max_concurrent_uni_streams(0_u8.into());
