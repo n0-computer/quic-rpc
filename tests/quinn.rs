@@ -5,7 +5,10 @@ use std::{
 };
 
 use quic_rpc::{transport, RpcClient, RpcServer};
-use quinn::{ClientConfig, Endpoint, ServerConfig};
+use quinn::{
+    crypto::rustls::{QuicClientConfig, QuicServerConfig},
+    ClientConfig, Endpoint, ServerConfig,
+};
 use tokio::task::JoinHandle;
 
 mod math;
@@ -50,9 +53,20 @@ pub fn make_server_endpoint(bind_addr: SocketAddr) -> anyhow::Result<(Endpoint, 
 fn configure_client(server_certs: &[&[u8]]) -> anyhow::Result<ClientConfig> {
     let mut certs = rustls::RootCertStore::empty();
     for cert in server_certs {
-        certs.add(&rustls::Certificate(cert.to_vec()))?;
+        let cert = rustls::pki_types::CertificateDer::from(cert.to_vec());
+        certs.add(cert)?;
     }
-    Ok(ClientConfig::with_root_certificates(certs))
+
+    let crypto_client_config = rustls::ClientConfig::builder_with_provider(Arc::new(
+        rustls::crypto::ring::default_provider(),
+    ))
+    .with_protocol_versions(&[&rustls::version::TLS13])
+    .expect("valid versions")
+    .with_root_certificates(certs)
+    .with_no_client_auth();
+    let quic_client_config = QuicClientConfig::try_from(crypto_client_config)?;
+
+    Ok(ClientConfig::new(Arc::new(quic_client_config)))
 }
 
 /// Returns default server configuration along with its certificate.
@@ -61,10 +75,19 @@ fn configure_server() -> anyhow::Result<(ServerConfig, Vec<u8>)> {
     let cert = rcgen::generate_simple_self_signed(vec!["localhost".into()])?;
     let cert_der = cert.serialize_der()?;
     let priv_key = cert.serialize_private_key_der();
-    let priv_key = rustls::PrivateKey(priv_key);
-    let cert_chain = vec![rustls::Certificate(cert_der.clone())];
+    let priv_key = rustls::pki_types::PrivatePkcs8KeyDer::from(priv_key);
+    let cert_chain = vec![rustls::pki_types::CertificateDer::from(cert_der.clone())];
 
-    let mut server_config = ServerConfig::with_single_cert(cert_chain, priv_key)?;
+    let crypto_server_config = rustls::ServerConfig::builder_with_provider(Arc::new(
+        rustls::crypto::ring::default_provider(),
+    ))
+    .with_protocol_versions(&[&rustls::version::TLS13])
+    .expect("valid versions")
+    .with_no_client_auth()
+    .with_single_cert(cert_chain, priv_key.into())?;
+    let quic_server_config = QuicServerConfig::try_from(crypto_server_config)?;
+    let mut server_config = ServerConfig::with_crypto(Arc::new(quic_server_config));
+
     Arc::get_mut(&mut server_config.transport)
         .unwrap()
         .max_concurrent_uni_streams(0_u8.into());
