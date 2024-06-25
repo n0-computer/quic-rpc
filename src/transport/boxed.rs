@@ -366,6 +366,20 @@ impl<S: Service> BoxableServerEndpoint<S::Req, S::Res> for super::flume::FlumeSe
     }
 }
 
+impl<S: Service> BoxableServerEndpoint<S::Req, S::Res> for super::misc::DummyServerEndpoint<S> {
+    fn clone_box(&self) -> Box<dyn BoxableServerEndpoint<S::Req, S::Res>> {
+        Box::new(self.clone())
+    }
+
+    fn accept_bi_boxed(&self) -> AcceptFuture<S::Req, S::Res> {
+        AcceptFuture::boxed(futures_lite::future::pending())
+    }
+
+    fn local_addr(&self) -> &[super::LocalAddr] {
+        super::ServerEndpoint::local_addr(self)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::Service;

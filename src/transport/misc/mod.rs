@@ -5,9 +5,9 @@ use futures_sink::Sink;
 
 use crate::{
     transport::{ConnectionErrors, ServerEndpoint},
-    RpcMessage,
+    Service,
 };
-use std::convert::Infallible;
+use std::{convert::Infallible, marker::PhantomData};
 
 use super::ConnectionCommon;
 
@@ -15,21 +15,21 @@ use super::ConnectionCommon;
 ///
 /// This can be useful as a default if you want to configure
 /// an optional server endpoint.
-#[derive(Debug, Clone, Default)]
-pub struct DummyServerEndpoint;
+#[derive(Default, Debug, Clone)]
+pub struct DummyServerEndpoint<S>(PhantomData<S>);
 
-impl ConnectionErrors for DummyServerEndpoint {
+impl<S: Service> ConnectionErrors for DummyServerEndpoint<S> {
     type OpenError = Infallible;
     type RecvError = Infallible;
     type SendError = Infallible;
 }
 
-impl<In: RpcMessage, Out: RpcMessage> ConnectionCommon<In, Out> for DummyServerEndpoint {
-    type RecvStream = stream::Pending<Result<In, Self::RecvError>>;
-    type SendSink = Box<dyn Sink<Out, Error = Self::SendError> + Unpin + Send + Sync>;
+impl<S: Service> ConnectionCommon<S::Req, S::Res> for DummyServerEndpoint<S> {
+    type RecvStream = stream::Pending<Result<S::Req, Self::RecvError>>;
+    type SendSink = Box<dyn Sink<S::Res, Error = Self::SendError> + Unpin + Send + Sync>;
 }
 
-impl<In: RpcMessage, Out: RpcMessage> ServerEndpoint<In, Out> for DummyServerEndpoint {
+impl<S: Service> ServerEndpoint<S::Req, S::Res> for DummyServerEndpoint<S> {
     async fn accept_bi(&self) -> Result<(Self::SendSink, Self::RecvStream), Self::OpenError> {
         futures_lite::future::pending().await
     }
