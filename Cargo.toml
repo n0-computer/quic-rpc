@@ -60,12 +60,12 @@ futures-buffered = "0.2.4"
 hyper-transport = ["dep:flume", "dep:hyper", "dep:bincode", "dep:bytes", "dep:tokio-serde", "dep:tokio-util"]
 quinn-transport = ["dep:flume", "dep:quinn", "dep:bincode", "dep:tokio-serde", "dep:tokio-util"]
 flume-transport = ["dep:flume"]
-async-channel-transport = ["dep:tokio-util", "dep:tokio-stream"]
+tokio-mpsc-transport = ["dep:tokio-util", "dep:tokio-stream"]
 interprocess-transport = ["quinn-transport", "quinn-flume-socket", "dep:quinn-udp", "dep:interprocess", "dep:bytes", "dep:tokio-util", "dep:futures"]
 combined-transport = []
 quinn-flume-socket = ["dep:flume", "dep:quinn", "dep:quinn-udp", "dep:bytes", "dep:tokio-util"]
 macros = []
-default = ["flume-transport", "async-channel-transport"]
+default = ["flume-transport", "tokio-mpsc-transport"]
 
 [package.metadata.docs.rs]
 all-features = true

@@ -4,7 +4,7 @@ use futures_lite::Stream;
 use futures_sink::Sink;
 
 use crate::{
-    transport::{Connection, ConnectionErrors, LocalAddr, ServerEndpoint},
+    transport::{self, ConnectionErrors, LocalAddr},
     RpcMessage, Service,
 };
 use core::fmt;
@@ -100,12 +100,12 @@ impl error::Error for RecvError {}
 /// A `tokio::sync::mpsc` based server endpoint.
 ///
 /// Created using [connection].
-pub struct MpscServerEndpoint<S: Service> {
+pub struct ServerEndpoint<S: Service> {
     #[allow(clippy::type_complexity)]
     stream: Arc<Mutex<mpsc::Receiver<(SendSink<S::Res>, RecvStream<S::Req>)>>>,
 }
 
-impl<S: Service> Clone for MpscServerEndpoint<S> {
+impl<S: Service> Clone for ServerEndpoint<S> {
     fn clone(&self) -> Self {
         Self {
             stream: self.stream.clone(),
@@ -113,15 +113,15 @@ impl<S: Service> Clone for MpscServerEndpoint<S> {
     }
 }
 
-impl<S: Service> fmt::Debug for MpscServerEndpoint<S> {
+impl<S: Service> fmt::Debug for ServerEndpoint<S> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("MpscServerEndpoint")
+        f.debug_struct("ServerEndpoint")
             .field("stream", &self.stream)
             .finish()
     }
 }
 
-impl<S: Service> ConnectionErrors for MpscServerEndpoint<S> {
+impl<S: Service> ConnectionErrors for ServerEndpoint<S> {
     type SendError = self::SendError;
 
     type RecvError = self::RecvError;
@@ -131,12 +131,12 @@ impl<S: Service> ConnectionErrors for MpscServerEndpoint<S> {
 
 type Socket<In, Out> = (self::SendSink<Out>, self::RecvStream<In>);
 
-impl<S: Service> ConnectionCommon<S::Req, S::Res> for MpscServerEndpoint<S> {
+impl<S: Service> ConnectionCommon<S::Req, S::Res> for ServerEndpoint<S> {
     type SendSink = SendSink<S::Res>;
     type RecvStream = RecvStream<S::Req>;
 }
 
-impl<S: Service> ServerEndpoint<S::Req, S::Res> for MpscServerEndpoint<S> {
+impl<S: Service> transport::ServerEndpoint<S::Req, S::Res> for ServerEndpoint<S> {
     async fn accept_bi(&self) -> Result<(Self::SendSink, Self::RecvStream), AcceptBiError> {
         let (send, recv) = self
             .stream
@@ -153,7 +153,7 @@ impl<S: Service> ServerEndpoint<S::Req, S::Res> for MpscServerEndpoint<S> {
     }
 }
 
-impl<S: Service> ConnectionErrors for MpscConnection<S> {
+impl<S: Service> ConnectionErrors for Connection<S> {
     type SendError = self::SendError;
 
     type RecvError = self::RecvError;
@@ -161,12 +161,12 @@ impl<S: Service> ConnectionErrors for MpscConnection<S> {
     type OpenError = self::OpenBiError;
 }
 
-impl<S: Service> ConnectionCommon<S::Res, S::Req> for MpscConnection<S> {
+impl<S: Service> ConnectionCommon<S::Res, S::Req> for Connection<S> {
     type SendSink = SendSink<S::Req>;
     type RecvStream = RecvStream<S::Res>;
 }
 
-impl<S: Service> Connection<S::Res, S::Req> for MpscConnection<S> {
+impl<S: Service> transport::Connection<S::Res, S::Req> for Connection<S> {
     async fn open_bi(&self) -> result::Result<Socket<S::Res, S::Req>, self::OpenBiError> {
         let (local_send, remote_recv) = mpsc::channel::<S::Req>(128);
         let (remote_send, local_recv) = mpsc::channel::<S::Res>(128);
@@ -186,15 +186,15 @@ impl<S: Service> Connection<S::Res, S::Req> for MpscConnection<S> {
     }
 }
 
-/// A mpsc based connection to a server endpoint.
+/// A tokio::sync::mpsc based connection to a server endpoint.
 ///
 /// Created using [connection].
-pub struct MpscConnection<S: Service> {
+pub struct Connection<S: Service> {
     #[allow(clippy::type_complexity)]
     sink: mpsc::Sender<(SendSink<S::Res>, RecvStream<S::Req>)>,
 }
 
-impl<S: Service> Clone for MpscConnection<S> {
+impl<S: Service> Clone for Connection<S> {
     fn clone(&self) -> Self {
         Self {
             sink: self.sink.clone(),
@@ -202,9 +202,9 @@ impl<S: Service> Clone for MpscConnection<S> {
     }
 }
 
-impl<S: Service> fmt::Debug for MpscConnection<S> {
+impl<S: Service> fmt::Debug for Connection<S> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("MpscClientChannel")
+        f.debug_struct("ClientChannel")
             .field("sink", &self.sink)
             .finish()
     }
@@ -277,12 +277,12 @@ impl std::error::Error for CreateChannelError {}
 /// Create a mpsc server endpoint and a connected mpsc client channel.
 ///
 /// `buffer` the size of the buffer for each channel. Keep this at a low value to get backpressure
-pub fn connection<S: Service>(buffer: usize) -> (MpscServerEndpoint<S>, MpscConnection<S>) {
+pub fn connection<S: Service>(buffer: usize) -> (ServerEndpoint<S>, Connection<S>) {
     let (sink, stream) = mpsc::channel(buffer);
     (
-        MpscServerEndpoint {
+        ServerEndpoint {
             stream: Arc::new(Mutex::new(stream)),
         },
-        MpscConnection { sink },
+        Connection { sink },
     )
 }

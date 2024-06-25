@@ -7,8 +7,6 @@ use std::{
     fmt::{self, Debug, Display},
     net::SocketAddr,
 };
-#[cfg(feature = "async-channel-transport")]
-pub mod async_channel;
 #[cfg(feature = "flume-transport")]
 pub mod boxed;
 #[cfg(feature = "combined-transport")]
@@ -23,6 +21,8 @@ pub mod interprocess;
 pub mod quinn;
 #[cfg(feature = "quinn-flume-socket")]
 pub mod quinn_flume_socket;
+#[cfg(feature = "tokio-mpsc-transport")]
+pub mod tokio_mpsc;
 
 pub mod misc;
 
