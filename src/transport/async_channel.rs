@@ -212,15 +212,15 @@ impl<S: Service> ConnectionCommon<S::Req, S::Res> for MpscServerEndpoint<S> {
 }
 
 impl<S: Service> ServerEndpoint<S::Req, S::Res> for MpscServerEndpoint<S> {
-    #[allow(refining_impl_trait)]
-    fn accept_bi(&self) -> AcceptBiFuture<S::Req, S::Res> {
-        let stream = self.stream.clone();
-        let wrapped = Box::pin(async move { stream.lock().await.recv().await });
-
-        AcceptBiFuture {
-            wrapped,
-            _p: PhantomData,
-        }
+    async fn accept_bi(&self) -> Result<(Self::SendSink, Self::RecvStream), AcceptBiError> {
+        let (send, recv) = self
+            .stream
+            .lock()
+            .await
+            .recv()
+            .await
+            .ok_or_else(|| AcceptBiError::RemoteDropped)?;
+        Ok((send, recv))
     }
 
     fn local_addr(&self) -> &[LocalAddr] {
