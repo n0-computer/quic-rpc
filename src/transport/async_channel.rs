@@ -179,10 +179,12 @@ impl<In: RpcMessage, Out: RpcMessage> Future for OpenBiFuture<In, Out> {
     }
 }
 
+type AcceptBiFutureBox<In, Out> =
+    Pin<Box<dyn Future<Output = Option<(SendSink<In>, RecvStream<Out>)>> + Send + 'static>>;
+
 /// Future returned by [MpscServerEndpoint::accept_bi]
 pub struct AcceptBiFuture<In: RpcMessage, Out: RpcMessage> {
-    wrapped:
-        Pin<Box<dyn Future<Output = Option<(SendSink<Out>, RecvStream<In>)>> + Send + 'static>>,
+    wrapped: AcceptBiFutureBox<Out, In>,
     _p: PhantomData<(In, Out)>,
 }
 
