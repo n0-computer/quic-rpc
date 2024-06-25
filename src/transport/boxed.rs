@@ -142,7 +142,8 @@ impl<'a, In: RpcMessage, Out: RpcMessage> OpenFuture<'a, In, Out> {
         Self(OpenFutureInner::Direct(f))
     }
 
-    fn boxed(
+    /// Create a new boxed future
+    pub fn boxed(
         f: impl Future<Output = anyhow::Result<(SendSink<Out>, RecvStream<In>)>> + Send + Sync + 'a,
     ) -> Self {
         Self(OpenFutureInner::Boxed(Box::pin(f)))
@@ -179,7 +180,8 @@ impl<'a, In: RpcMessage, Out: RpcMessage> AcceptFuture<'a, In, Out> {
         Self(AcceptFutureInner::Direct(f))
     }
 
-    fn boxed(
+    /// Create a new boxed future
+    pub fn boxed(
         f: impl Future<Output = anyhow::Result<(SendSink<Out>, RecvStream<In>)>> + Send + Sync + 'a,
     ) -> Self {
         Self(AcceptFutureInner::Boxed(Box::pin(f)))
