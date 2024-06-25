@@ -159,16 +159,16 @@ impl<In: RpcMessage, Out: RpcMessage> Future for OpenBiFuture<In, Out> {
         mut self: Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Self::Output> {
-        tracing::trace!("polling OpenBiFuture");
+        tracing::debug!("polling OpenBiFuture");
         match Pin::new(&mut self.inner).poll(cx) {
             Poll::Ready(Ok(())) => {
-                tracing::trace!("got ready");
+                tracing::debug!("got ready");
                 let res = self
                     .res
                     .take()
                     .map(|x| Poll::Ready(Ok(x)))
                     .unwrap_or(Poll::Pending);
-                tracing::trace!("res.is_ready()={}", res.is_ready());
+                tracing::debug!("res.is_ready()={}", res.is_ready());
                 res
             }
             Poll::Ready(Err(_)) => Poll::Ready(Err(self::OpenBiError::RemoteDropped)),
@@ -193,11 +193,11 @@ impl<In: RpcMessage, Out: RpcMessage> Future for AcceptBiFuture<In, Out> {
     type Output = result::Result<(SendSink<Out>, RecvStream<In>), AcceptBiError>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
-        tracing::trace!("polling AcceptBiFuture");
+        tracing::debug!("polling AcceptBiFuture");
         match Pin::new(&mut self.wrapped).poll(cx) {
             Poll::Ready(Ok((send, recv))) => {
                 let res = Poll::Ready(Ok((send, recv)));
-                tracing::trace!("accept_bi got stream pair");
+                tracing::debug!("accept_bi got stream pair");
                 res
             }
             Poll::Ready(Err(_)) => Poll::Ready(Err(AcceptBiError::RemoteDropped)),
