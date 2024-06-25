@@ -7,6 +7,8 @@ use std::{
     fmt::{self, Debug, Display},
     net::SocketAddr,
 };
+#[cfg(feature = "async-channel-transport")]
+pub mod async_channel;
 #[cfg(feature = "flume-transport")]
 pub mod boxed;
 #[cfg(feature = "combined-transport")]
