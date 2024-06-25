@@ -82,8 +82,11 @@ where
         M: ServerStreamingMsg<SInner>,
     {
         let msg = self.map.req_into_outer(msg.into());
+        tracing::debug!("opening connection");
         let (mut send, recv) = self.source.open_bi().await.map_err(Error::Open)?;
+        tracing::debug!("sending message");
         send.send(msg).map_err(Error::<C>::Send).await?;
+        tracing::debug!("send successful. returning lazy response stream");
         let map = Arc::clone(&self.map);
         let recv = recv.map(move |x| match x {
             Ok(x) => {
@@ -121,6 +124,7 @@ where
         Str: Stream<Item = M::Response> + Send + 'static,
         T: Send + 'static,
     {
+        tracing::debug!("got a server streaming request");
         let Self {
             mut send, mut recv, ..
         } = self;
@@ -134,6 +138,7 @@ where
             let responses = f(target, req);
             tokio::pin!(responses);
             while let Some(response) = responses.next().await {
+                tracing::debug!("sending a response");
                 // turn into a S::Res so we can send it
                 let response = self.map.res_into_outer(response.into());
                 // send it and return the error if any
