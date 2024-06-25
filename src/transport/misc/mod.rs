@@ -15,8 +15,14 @@ use super::ConnectionCommon;
 ///
 /// This can be useful as a default if you want to configure
 /// an optional server endpoint.
-#[derive(Default, Debug, Clone)]
+#[derive(Debug, Clone)]
 pub struct DummyServerEndpoint<S>(PhantomData<S>);
+
+impl Default for DummyServerEndpoint<()> {
+    fn default() -> Self {
+        Self(PhantomData)
+    }
+}
 
 impl<S: Service> ConnectionErrors for DummyServerEndpoint<S> {
     type OpenError = Infallible;
