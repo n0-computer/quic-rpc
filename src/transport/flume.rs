@@ -102,7 +102,7 @@ impl error::Error for RecvError {}
 /// Created using [connection].
 pub struct FlumeServerEndpoint<S: Service> {
     #[allow(clippy::type_complexity)]
-    stream: flume::Receiver<(SendSink<S::Res>, RecvStream<S::Req>)>,
+    stream: flume::Receiver<Socket<S::Res, S::Req>>,
 }
 
 impl<S: Service> Clone for FlumeServerEndpoint<S> {
@@ -129,12 +129,32 @@ impl<S: Service> ConnectionErrors for FlumeServerEndpoint<S> {
     type OpenError = self::AcceptBiError;
 }
 
-type Socket<In, Out> = (self::SendSink<Out>, self::RecvStream<In>);
+struct Socket<Out: RpcMessage, In: RpcMessage>(Option<(self::SendSink<Out>, self::RecvStream<In>)>);
+
+impl<Out: RpcMessage, In: RpcMessage> Socket<Out, In> {
+
+    pub fn new(send: self::SendSink<Out>, recv: self::RecvStream<In>) -> Self {
+        Self(Some((send, recv)))
+    }
+
+    pub fn into_parts(mut self) -> (SendSink<Out>, RecvStream<In>) {
+        let t = self.0.take().unwrap();
+        (t.0, t.1)
+    }
+}
+
+impl<Out: RpcMessage, In: RpcMessage> Drop for Socket<Out, In> {
+    fn drop(&mut self) {
+        if self.0.is_some() {
+            panic!("Socket dropped without being consumed");
+        }
+    }
+}
 
 /// Future returned by [FlumeConnection::open_bi]
 pub struct OpenBiFuture<In: RpcMessage, Out: RpcMessage> {
-    inner: flume::r#async::SendFut<'static, Socket<Out, In>>,
-    res: Option<Socket<In, Out>>,
+    inner: flume::r#async::SendFut<'static, Socket<In, Out>>,
+    res: Option<Socket<Out, In>>,
 }
 
 impl<In: RpcMessage, Out: RpcMessage> fmt::Debug for OpenBiFuture<In, Out> {
@@ -144,7 +164,7 @@ impl<In: RpcMessage, Out: RpcMessage> fmt::Debug for OpenBiFuture<In, Out> {
 }
 
 impl<In: RpcMessage, Out: RpcMessage> OpenBiFuture<In, Out> {
-    fn new(inner: flume::r#async::SendFut<'static, Socket<Out, In>>, res: Socket<In, Out>) -> Self {
+    fn new(inner: flume::r#async::SendFut<'static, Socket<In, Out>>, res: Socket<Out, In>) -> Self {
         Self {
             inner,
             res: Some(res),
@@ -153,7 +173,7 @@ impl<In: RpcMessage, Out: RpcMessage> OpenBiFuture<In, Out> {
 }
 
 impl<In: RpcMessage, Out: RpcMessage> Future for OpenBiFuture<In, Out> {
-    type Output = result::Result<Socket<In, Out>, self::OpenBiError>;
+    type Output = result::Result<(self::SendSink<Out>, self::RecvStream<In>), self::OpenBiError>;
 
     fn poll(
         mut self: Pin<&mut Self>,
@@ -163,7 +183,7 @@ impl<In: RpcMessage, Out: RpcMessage> Future for OpenBiFuture<In, Out> {
             Poll::Ready(Ok(())) => self
                 .res
                 .take()
-                .map(|x| Poll::Ready(Ok(x)))
+                .map(|x| Poll::Ready(Ok(x.into_parts())))
                 .unwrap_or(Poll::Pending),
             Poll::Ready(Err(_)) => Poll::Ready(Err(self::OpenBiError::RemoteDropped)),
             Poll::Pending => Poll::Pending,
@@ -173,7 +193,7 @@ impl<In: RpcMessage, Out: RpcMessage> Future for OpenBiFuture<In, Out> {
 
 /// Future returned by [FlumeServerEndpoint::accept_bi]
 pub struct AcceptBiFuture<In: RpcMessage, Out: RpcMessage> {
-    wrapped: flume::r#async::RecvFut<'static, (SendSink<Out>, RecvStream<In>)>,
+    wrapped: flume::r#async::RecvFut<'static, Socket<Out, In>>,
     _p: PhantomData<(In, Out)>,
 }
 
@@ -188,7 +208,10 @@ impl<In: RpcMessage, Out: RpcMessage> Future for AcceptBiFuture<In, Out> {
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
         match Pin::new(&mut self.wrapped).poll(cx) {
-            Poll::Ready(Ok((send, recv))) => Poll::Ready(Ok((send, recv))),
+            Poll::Ready(Ok(s)) => {
+                let (send, recv) = s.into_parts();
+                Poll::Ready(Ok((send, recv)))
+            }
             Poll::Ready(Err(_)) => Poll::Ready(Err(AcceptBiError::RemoteDropped)),
             Poll::Pending => Poll::Pending,
         }
@@ -232,11 +255,11 @@ impl<S: Service> Connection<S::Res, S::Req> for FlumeConnection<S> {
     fn open_bi(&self) -> OpenBiFuture<S::Res, S::Req> {
         let (local_send, remote_recv) = flume::bounded::<S::Req>(128);
         let (remote_send, local_recv) = flume::bounded::<S::Res>(128);
-        let remote_chan = (
+        let remote_chan = Socket::new(
             SendSink(remote_send.into_sink()),
             RecvStream(remote_recv.into_stream()),
         );
-        let local_chan = (
+        let local_chan = Socket::new(
             SendSink(local_send.into_sink()),
             RecvStream(local_recv.into_stream()),
         );
@@ -249,7 +272,7 @@ impl<S: Service> Connection<S::Res, S::Req> for FlumeConnection<S> {
 /// Created using [connection].
 pub struct FlumeConnection<S: Service> {
     #[allow(clippy::type_complexity)]
-    sink: flume::Sender<(SendSink<S::Res>, RecvStream<S::Req>)>,
+    sink: flume::Sender<Socket<S::Res, S::Req>>,
 }
 
 impl<S: Service> Clone for FlumeConnection<S> {
