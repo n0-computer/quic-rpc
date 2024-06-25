@@ -1,6 +1,6 @@
 //! Memory transport implementation using [tokio::sync::mpsc]
 
-use futures_lite::{Future, Stream};
+use futures_lite::Stream;
 use futures_sink::Sink;
 
 use crate::{
@@ -8,7 +8,7 @@ use crate::{
     RpcMessage, Service,
 };
 use core::fmt;
-use std::{error, fmt::Display, marker::PhantomData, pin::Pin, result, sync::Arc, task::Poll};
+use std::{error, fmt::Display, pin::Pin, result, sync::Arc, task::Poll};
 use tokio::sync::{mpsc, Mutex};
 
 use super::ConnectionCommon;
@@ -131,81 +131,6 @@ impl<S: Service> ConnectionErrors for MpscServerEndpoint<S> {
 
 type Socket<In, Out> = (self::SendSink<Out>, self::RecvStream<In>);
 
-/// Future returned by [MpscConnection::open_bi]
-pub struct OpenBiFuture<In: RpcMessage, Out: RpcMessage> {
-    inner: OpenBiFutureBox<In, Out>,
-    res: Option<Socket<In, Out>>,
-}
-
-impl<In: RpcMessage, Out: RpcMessage> fmt::Debug for OpenBiFuture<In, Out> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("OpenBiFuture").finish()
-    }
-}
-
-type OpenBiFutureBox<In, Out> = Pin<
-    Box<
-        dyn Future<Output = Result<(), mpsc::error::SendError<(SendSink<In>, RecvStream<Out>)>>>
-            + Send
-            + 'static,
-    >,
->;
-
-impl<In: RpcMessage, Out: RpcMessage> OpenBiFuture<In, Out> {
-    fn new(inner: OpenBiFutureBox<In, Out>, res: Socket<In, Out>) -> Self {
-        Self {
-            inner,
-            res: Some(res),
-        }
-    }
-}
-
-impl<In: RpcMessage, Out: RpcMessage> Future for OpenBiFuture<In, Out> {
-    type Output = result::Result<Socket<In, Out>, self::OpenBiError>;
-
-    fn poll(
-        mut self: Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Self::Output> {
-        match Pin::new(&mut self.inner).poll(cx) {
-            Poll::Ready(Ok(())) => self
-                .res
-                .take()
-                .map(|x| Poll::Ready(Ok(x)))
-                .unwrap_or(Poll::Pending),
-            Poll::Ready(Err(_)) => Poll::Ready(Err(self::OpenBiError::RemoteDropped)),
-            Poll::Pending => Poll::Pending,
-        }
-    }
-}
-
-type AcceptBiFutureBox<In, Out> =
-    Pin<Box<dyn Future<Output = Option<(SendSink<In>, RecvStream<Out>)>> + Send + 'static>>;
-
-/// Future returned by [MpscServerEndpoint::accept_bi]
-pub struct AcceptBiFuture<In: RpcMessage, Out: RpcMessage> {
-    wrapped: AcceptBiFutureBox<Out, In>,
-    _p: PhantomData<(In, Out)>,
-}
-
-impl<In: RpcMessage, Out: RpcMessage> fmt::Debug for AcceptBiFuture<In, Out> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("AcceptBiFuture").finish()
-    }
-}
-
-impl<In: RpcMessage, Out: RpcMessage> Future for AcceptBiFuture<In, Out> {
-    type Output = result::Result<(SendSink<Out>, RecvStream<In>), AcceptBiError>;
-
-    fn poll(mut self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
-        match Pin::new(&mut self.wrapped).poll(cx) {
-            Poll::Ready(Some((send, recv))) => Poll::Ready(Ok((send, recv))),
-            Poll::Ready(None) => Poll::Ready(Err(AcceptBiError::RemoteDropped)),
-            Poll::Pending => Poll::Pending,
-        }
-    }
-}
-
 impl<S: Service> ConnectionCommon<S::Req, S::Res> for MpscServerEndpoint<S> {
     type SendSink = SendSink<S::Res>;
     type RecvStream = RecvStream<S::Req>;
@@ -242,8 +167,7 @@ impl<S: Service> ConnectionCommon<S::Res, S::Req> for MpscConnection<S> {
 }
 
 impl<S: Service> Connection<S::Res, S::Req> for MpscConnection<S> {
-    #[allow(refining_impl_trait)]
-    fn open_bi(&self) -> OpenBiFuture<S::Res, S::Req> {
+    async fn open_bi(&self) -> result::Result<Socket<S::Res, S::Req>, self::OpenBiError> {
         let (local_send, remote_recv) = mpsc::channel::<S::Req>(128);
         let (remote_send, local_recv) = mpsc::channel::<S::Res>(128);
         let remote_chan = (
@@ -254,11 +178,11 @@ impl<S: Service> Connection<S::Res, S::Req> for MpscConnection<S> {
             SendSink(tokio_util::sync::PollSender::new(local_send)),
             RecvStream(tokio_stream::wrappers::ReceiverStream::new(local_recv)),
         );
-        let sink = self.sink.clone();
-        OpenBiFuture::new(
-            Box::pin(async move { sink.send(remote_chan).await }),
-            local_chan,
-        )
+        self.sink
+            .send(remote_chan)
+            .await
+            .map_err(|_| self::OpenBiError::RemoteDropped)?;
+        Ok(local_chan)
     }
 }
 
