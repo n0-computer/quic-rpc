@@ -144,7 +144,7 @@ impl<S: Service> transport::ServerEndpoint<S::Req, S::Res> for ServerEndpoint<S>
             .await
             .recv()
             .await
-            .ok_or_else(|| AcceptBiError::RemoteDropped)?;
+            .ok_or(AcceptBiError::RemoteDropped)?;
         Ok((send, recv))
     }
 
