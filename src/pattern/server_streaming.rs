@@ -137,8 +137,14 @@ where
             // get the response
             let responses = f(target, req);
             tokio::pin!(responses);
+            let mut n = 0;
             while let Some(response) = responses.next().await {
-                tracing::debug!("sending a response");
+                if n == 0 {
+                    tracing::trace!("sending response 0");
+                } else {
+                    tracing::trace!("sending response {}", n);
+                }
+                n += 1;
                 // turn into a S::Res so we can send it
                 let response = self.map.res_into_outer(response.into());
                 // send it and return the error if any
