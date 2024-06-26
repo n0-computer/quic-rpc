@@ -829,6 +829,7 @@ dependencies = [
  "iroh-quinn-udp",
  "pin-project",
  "proc-macro2",
+ "rand",
  "rcgen",
  "rustls",
  "serde",

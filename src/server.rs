@@ -128,14 +128,15 @@ impl<S: Service, C: ServiceEndpoint<S>> RpcServer<S, C> {
     /// Often sink and stream will wrap an an underlying byte stream. In this case you can
     /// call into_inner() on them to get it back to perform byte level reads and writes.
     pub async fn accept(&self) -> result::Result<(S::Req, RpcChannel<S, C>), RpcServerError<C>> {
-        tracing::debug!("accepting new channel");
+        let id: u64 = rand::random();
+        tracing::debug!("{} accepting new channel", id);
         let (send, mut recv) = self
             .source
             .accept_bi()
             .await
             .map_err(RpcServerError::Accept)?;
 
-        tracing::debug!("accepted new channel - awaiting first message");
+        tracing::debug!("{} accepted new channel - awaiting first message", id);
         // get the first message from the client. This will tell us what it wants to do.
         let request: S::Req = recv
             .next()
@@ -144,6 +145,7 @@ impl<S: Service, C: ServiceEndpoint<S>> RpcServer<S, C> {
             .ok_or(RpcServerError::EarlyClose)?
             // recv error
             .map_err(RpcServerError::RecvError)?;
+        tracing::debug!("{} received first message", id);
         Ok((request, RpcChannel::new(send, recv)))
     }
 
