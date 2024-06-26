@@ -210,7 +210,7 @@ pub trait BoxableConnection<In: RpcMessage, Out: RpcMessage>:
     fn clone_box(&self) -> Box<dyn BoxableConnection<In, Out>>;
 
     /// Open a channel to the remote che
-    fn open_bi_boxed(&self) -> OpenFuture<In, Out>;
+    fn open_boxed(&self) -> OpenFuture<In, Out>;
 }
 
 /// A boxed connection
@@ -242,8 +242,8 @@ impl<S: Service> ConnectionErrors for Connection<S> {
 }
 
 impl<S: Service> super::Connection<S::Res, S::Req> for Connection<S> {
-    async fn open_bi(&self) -> Result<(Self::SendSink, Self::RecvStream), Self::OpenError> {
-        self.0.open_bi_boxed().await
+    async fn open(&self) -> Result<(Self::SendSink, Self::RecvStream), Self::OpenError> {
+        self.0.open_boxed().await
     }
 }
 
@@ -290,7 +290,7 @@ impl<In: RpcMessage, Out: RpcMessage> ConnectionErrors for ServerEndpoint<In, Ou
 }
 
 impl<In: RpcMessage, Out: RpcMessage> super::ServerEndpoint<In, Out> for ServerEndpoint<In, Out> {
-    fn accept_bi(
+    fn accept(
         &self,
     ) -> impl Future<Output = Result<(Self::SendSink, Self::RecvStream), Self::OpenError>> + Send
     {
@@ -308,9 +308,9 @@ impl<S: Service> BoxableConnection<S::Res, S::Req> for super::quinn::QuinnConnec
         Box::new(self.clone())
     }
 
-    fn open_bi_boxed(&self) -> OpenFuture<S::Res, S::Req> {
+    fn open_boxed(&self) -> OpenFuture<S::Res, S::Req> {
         let f = Box::pin(async move {
-            let (send, recv) = super::Connection::open_bi(self).await?;
+            let (send, recv) = super::Connection::open(self).await?;
             // map the error types to anyhow
             let send = send.sink_map_err(anyhow::Error::from);
             let recv = recv.map_err(anyhow::Error::from);
@@ -329,7 +329,7 @@ impl<S: Service> BoxableServerEndpoint<S::Req, S::Res> for super::quinn::QuinnSe
 
     fn accept_bi_boxed(&self) -> AcceptFuture<S::Req, S::Res> {
         let f = async move {
-            let (send, recv) = super::ServerEndpoint::accept_bi(self).await?;
+            let (send, recv) = super::ServerEndpoint::accept(self).await?;
             let send = send.sink_map_err(anyhow::Error::from);
             let recv = recv.map_err(anyhow::Error::from);
             anyhow::Ok((SendSink::boxed(send), RecvStream::boxed(recv)))
@@ -348,8 +348,8 @@ impl<S: Service> BoxableConnection<S::Res, S::Req> for super::flume::FlumeConnec
         Box::new(self.clone())
     }
 
-    fn open_bi_boxed(&self) -> OpenFuture<S::Res, S::Req> {
-        OpenFuture::direct(super::Connection::open_bi(self))
+    fn open_boxed(&self) -> OpenFuture<S::Res, S::Req> {
+        OpenFuture::direct(super::Connection::open(self))
     }
 }
 
@@ -360,7 +360,7 @@ impl<S: Service> BoxableServerEndpoint<S::Req, S::Res> for super::flume::FlumeSe
     }
 
     fn accept_bi_boxed(&self) -> AcceptFuture<S::Req, S::Res> {
-        AcceptFuture::direct(super::ServerEndpoint::accept_bi(self))
+        AcceptFuture::direct(super::ServerEndpoint::accept(self))
     }
 
     fn local_addr(&self) -> &[super::LocalAddr] {
@@ -393,14 +393,14 @@ mod tests {
         let client = super::Connection::<FooService>::new(client);
         // spawn echo server
         tokio::spawn(async move {
-            while let Ok((mut send, mut recv)) = server.accept_bi().await {
+            while let Ok((mut send, mut recv)) = server.accept().await {
                 if let Some(Ok(msg)) = recv.next().await {
                     send.send(msg).await.ok();
                 }
             }
             anyhow::Ok(())
         });
-        if let Ok((mut send, mut recv)) = client.open_bi().await {
+        if let Ok((mut send, mut recv)) = client.open().await {
             send.send(1).await.ok();
             let res = recv.next().await;
             println!("{:?}", res);

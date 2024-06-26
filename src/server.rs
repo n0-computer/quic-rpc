@@ -151,11 +151,7 @@ impl<S: Service, C: ServiceEndpoint<S>> RpcServer<S, C> {
     /// Accepts a new channel from a client. The result is an [Accepting] object that
     /// can be used to read the first request.
     pub async fn accept(&self) -> result::Result<Accepting<S, C>, RpcServerError<C>> {
-        let (send, recv) = self
-            .source
-            .accept_bi()
-            .await
-            .map_err(RpcServerError::Accept)?;
+        let (send, recv) = self.source.accept().await.map_err(RpcServerError::Accept)?;
         Ok(Accepting { send, recv })
     }
 

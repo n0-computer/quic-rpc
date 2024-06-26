@@ -96,7 +96,7 @@ where
         M: BidiStreamingMsg<SInner>,
     {
         let msg = self.map.req_into_outer(msg.into());
-        let (mut send, recv) = self.source.open_bi().await.map_err(Error::Open)?;
+        let (mut send, recv) = self.source.open().await.map_err(Error::Open)?;
         send.send(msg).await.map_err(Error::<C>::Send)?;
         let send = UpdateSink(send, PhantomData, Arc::clone(&self.map));
         let map = Arc::clone(&self.map);
