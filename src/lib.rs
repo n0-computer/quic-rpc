@@ -65,7 +65,7 @@
 //! let handler = Handler;
 //! loop {
 //!   // accept connections
-//!   let (msg, chan) = server.accept().await?;
+//!   let (msg, chan) = server.accept_and_read_first().await?;
 //!   // dispatch the message to the appropriate handler
 //!   match msg {
 //!     PingRequest::Ping(ping) => chan.rpc(ping, handler, Handler::ping).await?,

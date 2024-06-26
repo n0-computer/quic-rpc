@@ -34,7 +34,7 @@ async fn main() -> Result<()> {
 async fn run_server<C: ServiceEndpoint<AppService>>(server_conn: C, handler: app::Handler) {
     let server = RpcServer::new(server_conn);
     loop {
-        match server.accept().await {
+        match server.accept_and_read_first().await {
             Err(err) => warn!(?err, "server accept failed"),
             Ok((req, chan)) => {
                 let handler = handler.clone();

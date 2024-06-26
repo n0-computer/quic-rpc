@@ -113,7 +113,7 @@ impl ComputeService {
         let s = server;
         let service = ComputeService;
         loop {
-            let (req, chan) = s.accept().await?;
+            let (req, chan) = s.accept_and_read_first().await?;
             use ComputeRequest::*;
             let service = service.clone();
             #[rustfmt::skip]

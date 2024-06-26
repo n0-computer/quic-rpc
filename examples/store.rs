@@ -168,7 +168,7 @@ async fn main() -> anyhow::Result<()> {
         let s = server;
         let store = Store;
         loop {
-            let (req, chan) = s.accept().await?;
+            let (req, chan) = s.accept_and_read_first().await?;
             use StoreRequest::*;
             let store = store.clone();
             #[rustfmt::skip]

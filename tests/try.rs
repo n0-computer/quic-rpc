@@ -77,7 +77,7 @@ async fn try_server_streaming() -> anyhow::Result<()> {
     let server = RpcServer::<TryService, _>::new(server);
     let server_handle = tokio::task::spawn(async move {
         loop {
-            let (req, chan) = server.accept().await?;
+            let (req, chan) = server.accept_and_read_first().await?;
             let handler = Handler;
             match req {
                 TryRequest::StreamN(req) => {
