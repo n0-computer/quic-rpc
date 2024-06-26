@@ -159,24 +159,6 @@ impl<S: Service, C: ServiceEndpoint<S>> RpcServer<S, C> {
         Ok(Accepting { send, recv })
     }
 
-    /// Accepts a new channel from a client, and reads the first request.
-    ///
-    /// The return value is a tuple of `(request, channel)`.  Here `request` is the
-    /// first request which is already read from the stream.  The `channel` is a
-    /// [RpcChannel] that has `sink` and `stream` fields that can be used to send more
-    /// requests and/or receive more responses.
-    ///
-    /// Often sink and stream will wrap an an underlying byte stream. In this case you can
-    /// call into_inner() on them to get it back to perform byte level reads and writes.
-    ///
-    /// Note that this method is not cancellation safe. If the future is dropped, a request
-    /// might be lost. So do not use this inside a select! block.
-    pub async fn accept_and_read_first(
-        &self,
-    ) -> result::Result<(S::Req, RpcChannel<S, C>), RpcServerError<C>> {
-        self.accept().await?.read_first().await
-    }
-
     /// Get the underlying service endpoint
     pub fn into_inner(self) -> C {
         self.source
@@ -341,7 +323,7 @@ where
 {
     let server = RpcServer::<S, C>::new(conn);
     loop {
-        let (req, chan) = server.accept_and_read_first().await?;
+        let (req, chan) = server.accept().await?.read_first().await?;
         let target = target.clone();
         handler(chan, req, target).await?;
     }

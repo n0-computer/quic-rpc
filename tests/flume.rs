@@ -67,7 +67,7 @@ async fn flume_channel_mapped_bench() -> anyhow::Result<()> {
         tokio::task::spawn(async move {
             let service = ComputeService;
             loop {
-                let (req, chan) = server.accept_and_read_first().await?;
+                let (req, chan) = server.accept().await?.read_first().await?;
                 let service = service.clone();
                 tokio::spawn(async move {
                     let req: OuterRequest = req;

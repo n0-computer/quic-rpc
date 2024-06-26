@@ -176,8 +176,10 @@ async fn hyper_channel_errors() -> anyhow::Result<()> {
         let (res_tx, res_rx) = flume::unbounded();
         let handle = tokio::spawn(async move {
             loop {
-                let x = server.accept_and_read_first().await;
-                let res = match x {
+                let Ok(x) = server.accept().await else {
+                    continue;
+                };
+                let res = match x.read_first().await {
                     Ok((req, chan)) => match req {
                         TestRequest::BigRequest(req) => {
                             chan.rpc(req, TestService, TestService::big).await
