@@ -132,7 +132,6 @@ impl<S: Service> ConnectionErrors for FlumeServerEndpoint<S> {
 struct Socket<Out: RpcMessage, In: RpcMessage>(Option<(self::SendSink<Out>, self::RecvStream<In>)>);
 
 impl<Out: RpcMessage, In: RpcMessage> Socket<Out, In> {
-
     pub fn new(send: self::SendSink<Out>, recv: self::RecvStream<In>) -> Self {
         Self(Some((send, recv)))
     }
@@ -146,7 +145,7 @@ impl<Out: RpcMessage, In: RpcMessage> Socket<Out, In> {
 impl<Out: RpcMessage, In: RpcMessage> Drop for Socket<Out, In> {
     fn drop(&mut self) {
         if self.0.is_some() {
-            panic!("Socket dropped without being consumed");
+            tracing::error!("dropping a socket without calling into_parts");
         }
     }
 }
