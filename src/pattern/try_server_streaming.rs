@@ -191,7 +191,7 @@ where
         Result<StreamCreated, M::CreateError>: Into<SInner::Res> + TryFrom<SInner::Res>,
     {
         let msg = self.map.req_into_outer(msg.into());
-        let (mut send, mut recv) = self.source.open_bi().await.map_err(Error::Open)?;
+        let (mut send, mut recv) = self.source.open().await.map_err(Error::Open)?;
         send.send(msg).map_err(Error::Send).await?;
         let map = Arc::clone(&self.map);
         let Some(initial) = recv.next().await else {

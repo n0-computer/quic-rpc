@@ -98,7 +98,7 @@ where
         M: ClientStreamingMsg<SInner>,
     {
         let msg = self.map.req_into_outer(msg.into());
-        let (mut send, mut recv) = self.source.open_bi().await.map_err(Error::Open)?;
+        let (mut send, mut recv) = self.source.open().await.map_err(Error::Open)?;
         send.send(msg).map_err(Error::Send).await?;
         let send = UpdateSink::<S, C, M::Update, SInner>(send, PhantomData, Arc::clone(&self.map));
         let map = Arc::clone(&self.map);
