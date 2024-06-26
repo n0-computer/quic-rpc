@@ -117,8 +117,14 @@ where
     }
 }
 
-impl<S: Service, C: ServiceEndpoint<S>> RpcServer<S, C> {
-    /// Accepts a new channel from a client, and reads the first request.
+/// The result of accepting a new connection.
+pub struct Accepting<S: Service, C: ServiceEndpoint<S>> {
+    send: C::SendSink,
+    recv: C::RecvStream,
+}
+
+impl<S: Service, C: ServiceEndpoint<S>> Accepting<S, C> {
+    /// Read the first message from the client.
     ///
     /// The return value is a tuple of `(request, channel)`.  Here `request` is the
     /// first request which is already read from the stream.  The `channel` is a
@@ -127,13 +133,8 @@ impl<S: Service, C: ServiceEndpoint<S>> RpcServer<S, C> {
     ///
     /// Often sink and stream will wrap an an underlying byte stream. In this case you can
     /// call into_inner() on them to get it back to perform byte level reads and writes.
-    pub async fn accept(&self) -> result::Result<(S::Req, RpcChannel<S, C>), RpcServerError<C>> {
-        let (send, mut recv) = self
-            .source
-            .accept_bi()
-            .await
-            .map_err(RpcServerError::Accept)?;
-
+    pub async fn read_first(self) -> result::Result<(S::Req, RpcChannel<S, C>), RpcServerError<C>> {
+        let Accepting { send, mut recv } = self;
         // get the first message from the client. This will tell us what it wants to do.
         let request: S::Req = recv
             .next()
@@ -143,6 +144,19 @@ impl<S: Service, C: ServiceEndpoint<S>> RpcServer<S, C> {
             // recv error
             .map_err(RpcServerError::RecvError)?;
         Ok((request, RpcChannel::new(send, recv)))
+    }
+}
+
+impl<S: Service, C: ServiceEndpoint<S>> RpcServer<S, C> {
+    /// Accepts a new channel from a client. The result is an [Accepting] object that
+    /// can be used to read the first request.
+    pub async fn accept(&self) -> result::Result<Accepting<S, C>, RpcServerError<C>> {
+        let (send, recv) = self
+            .source
+            .accept_bi()
+            .await
+            .map_err(RpcServerError::Accept)?;
+        Ok(Accepting { send, recv })
     }
 
     /// Get the underlying service endpoint
@@ -309,7 +323,7 @@ where
 {
     let server = RpcServer::<S, C>::new(conn);
     loop {
-        let (req, chan) = server.accept().await?;
+        let (req, chan) = server.accept().await?.read_first().await?;
         let target = target.clone();
         handler(chan, req, target).await?;
     }
