@@ -22,13 +22,12 @@ futures-sink = "0.3.30"
 futures-util = { version = "0.3.30", features = ["sink"] }
 hyper = { version = "0.14.16", features = ["full"], optional = true }
 pin-project = "1"
-quinn = { package = "quinn", version = "0.11", optional = true }
+quinn = { package = "iroh-quinn", version = "0.11", optional = true }
 serde = { version = "1.0.183", features = ["derive"] }
 tokio = { version = "1", default-features = false, features = ["macros", "sync"] }
 tokio-serde = { version = "0.8", features = ["bincode"], optional = true }
 tokio-util = { version = "0.7", features = ["codec"], optional = true }
 tracing = "0.1"
-quinn-udp = { package = "quinn-udp", version = "0.5.2", optional = true }
 interprocess = { version = "2.1", features = ["tokio"], optional = true }
 hex = "0.4.3"
 futures = { version = "0.3.30", optional = true }
@@ -46,7 +45,7 @@ async-stream = "0.3.3"
 
 serde = { version = "1", features = ["derive"] }
 tokio = { version = "1", features = ["full"] }
-quinn = { package = "quinn", version = "0.11" }
+quinn = { package = "iroh-quinn", version = "0.11", features = ["ring"] }
 rcgen = "0.12"
 rustls = { version = "0.23", default-features = false, features = ["ring"] }
 thousands = "0.2.0"
@@ -84,3 +83,6 @@ required-features = ["flume-transport"]
 
 [workspace]
 members = ["examples/split/types", "examples/split/server", "examples/split/client"]
+
+[patch.crates-io]
+iroh-quinn = { git = "https://github.com/n0-computer/quinn", branch = "iroh-0.11.x" }
