@@ -15,3 +15,4 @@ quic-rpc = { path = ".." }
 [dev-dependencies]
 derive_more = "0.99.18"
 serde = { version = "1.0.203", features = ["serde_derive"] }
+trybuild = "1.0.96"
