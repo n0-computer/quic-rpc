@@ -1,0 +1,17 @@
+[package]
+name = "quic-rpc-derive"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+syn = { version = "1.0", features = ["full"] }
+quote = "1.0"
+proc-macro2 = "1.0"
+quic-rpc = { path = ".." }
+
+[dev-dependencies]
+derive_more = "0.99.18"
+serde = { version = "1.0.203", features = ["serde_derive"] }
