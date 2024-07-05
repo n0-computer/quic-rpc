@@ -143,7 +143,7 @@ pub fn rpc_requests(attr: TokenStream, item: TokenStream) -> TokenStream {
                     return false;
                 }
             }
-            return true;
+            true
         });
 
         // Fail if there are multiple RPC patterns

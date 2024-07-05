@@ -13,6 +13,6 @@ proc-macro2 = "1.0"
 quic-rpc = { path = ".." }
 
 [dev-dependencies]
-derive_more = "0.99.18"
+derive_more = "1.0.0-beta.6"
 serde = { version = "1.0.203", features = ["serde_derive"] }
 trybuild = "1.0.96"
