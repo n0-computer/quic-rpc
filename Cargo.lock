@@ -849,7 +849,7 @@ dependencies = [
 
 [[package]]
 name = "quic-rpc-derive"
-version = "0.1.0"
+version = "0.11.0"
 dependencies = [
  "derive_more",
  "proc-macro2",
