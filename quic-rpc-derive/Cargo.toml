@@ -2,6 +2,12 @@
 name = "quic-rpc-derive"
 version = "0.11.0"
 edition = "2021"
+authors = ["Rüdiger Klaehn <rklaehn@protonmail.com>"]
+keywords = ["api", "protocol", "network", "rpc", "macro"]
+categories = ["network-programming"]
+license = "Apache-2.0/MIT"
+repository = "https://github.com/n0-computer/quic-rpc"
+description = "Macros for quic-rpc"
 
 [lib]
 proc-macro = true
