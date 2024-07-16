@@ -102,6 +102,7 @@ pub fn rpc_requests(attr: TokenStream, item: TokenStream) -> TokenStream {
     let mut input = parse_macro_input!(item as DeriveInput);
     let service_name = parse_macro_input!(attr as Ident);
 
+    let input_span = input.span();
     let data_enum = match &mut input.data {
         Data::Enum(data_enum) => data_enum,
         _ => {
@@ -129,7 +130,7 @@ pub fn rpc_requests(attr: TokenStream, item: TokenStream) -> TokenStream {
         };
 
         if !types.insert(request_type.to_token_stream().to_string()) {
-            return syn::Error::new(input.span(), "Each variant must have a unique request type")
+            return syn::Error::new(input_span, "Each variant must have a unique request type")
                 .to_compile_error()
                 .into();
         }
