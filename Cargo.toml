@@ -85,4 +85,4 @@ name = "modularize"
 required-features = ["flume-transport"]
 
 [workspace]
-members = ["examples/split/types", "examples/split/server", "examples/split/client"]
+members = ["examples/split/types", "examples/split/server", "examples/split/client", "quic-rpc-derive"]
