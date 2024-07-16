@@ -134,7 +134,7 @@ pub fn rpc_requests(attr: TokenStream, item: TokenStream) -> TokenStream {
                 .into();
         }
 
-        //
+        // Extract and remove RPC attributes
         let mut rpc_attr = Vec::new();
         variant.attrs.retain(|attr| {
             for ident in IDENTS {

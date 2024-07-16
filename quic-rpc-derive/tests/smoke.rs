@@ -15,25 +15,45 @@ fn simple() {
     #[derive(Debug, Serialize, Deserialize)]
     struct BidiStreamingRequest;
 
+    #[derive(Debug, Serialize, Deserialize)]
+    struct Update1;
+
+    #[derive(Debug, Serialize, Deserialize)]
+    struct Update2;
+
+    #[derive(Debug, Serialize, Deserialize)]
+    struct Response1;
+
+    #[derive(Debug, Serialize, Deserialize)]
+    struct Response2;
+
+    #[derive(Debug, Serialize, Deserialize)]
+    struct Response3;
+
+    #[derive(Debug, Serialize, Deserialize)]
+    struct Response4;
+
     #[rpc_requests(Service)]
     #[derive(Debug, Serialize, Deserialize, derive_more::From, derive_more::TryInto)]
     enum Request {
-        #[rpc(response=u32)]
+        #[rpc(response=Response1)]
         Rpc(RpcRequest),
-        #[server_streaming(response=())]
+        #[server_streaming(response=Response2)]
         ServerStreaming(ServerStreamingRequest),
-        #[bidi_streaming(update=(), response = ())]
+        #[bidi_streaming(update= Update1, response = Response3)]
         BidiStreaming(BidiStreamingRequest),
-        #[client_streaming(update = (), response = ())]
+        #[client_streaming(update = Update2, response = Response4)]
         ClientStreaming(ClientStreamingRequest),
-        // an update, you will never get this as the first message
-        GenericUpdate(()),
+        Update1(Update1),
+        Update2(Update2),
     }
 
     #[derive(Debug, Serialize, Deserialize, derive_more::From, derive_more::TryInto)]
     enum Response {
-        Void(()),
-        Rpc(u32),
+        Response1(Response1),
+        Response2(Response2),
+        Response3(Response3),
+        Response4(Response4),
     }
 
     #[derive(Debug, Clone)]
