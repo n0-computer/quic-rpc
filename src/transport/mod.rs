@@ -51,10 +51,10 @@ pub trait ConnectionCommon<In, Out>: ConnectionErrors {
 
 /// A connection to a specific remote machine
 ///
-/// A connection can be used to open bidirectional typed channels using [`Connection::open_bi`].
+/// A connection can be used to open bidirectional typed channels using [`Connection::open`].
 pub trait Connection<In, Out>: ConnectionCommon<In, Out> {
     /// Open a channel to the remote che
-    fn open_bi(
+    fn open(
         &self,
     ) -> impl Future<Output = Result<(Self::SendSink, Self::RecvStream), Self::OpenError>> + Send;
 }
@@ -66,7 +66,7 @@ pub trait Connection<In, Out>: ConnectionCommon<In, Out> {
 pub trait ServerEndpoint<In, Out>: ConnectionCommon<In, Out> {
     /// Accept a new typed bidirectional channel on any of the connections we
     /// have currently opened.
-    fn accept_bi(
+    fn accept(
         &self,
     ) -> impl Future<Output = Result<(Self::SendSink, Self::RecvStream), Self::OpenError>> + Send;
 

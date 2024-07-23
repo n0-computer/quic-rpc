@@ -82,7 +82,7 @@ where
         M: ServerStreamingMsg<SInner>,
     {
         let msg = self.map.req_into_outer(msg.into());
-        let (mut send, recv) = self.source.open_bi().await.map_err(Error::Open)?;
+        let (mut send, recv) = self.source.open().await.map_err(Error::Open)?;
         send.send(msg).map_err(Error::<C>::Send).await?;
         let map = Arc::clone(&self.map);
         let recv = recv.map(move |x| match x {

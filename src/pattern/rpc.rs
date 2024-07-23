@@ -74,7 +74,7 @@ where
         M: RpcMsg<SInner>,
     {
         let msg = self.map.req_into_outer(msg.into());
-        let (mut send, mut recv) = self.source.open_bi().await.map_err(Error::Open)?;
+        let (mut send, mut recv) = self.source.open().await.map_err(Error::Open)?;
         send.send(msg).await.map_err(Error::<C>::Send)?;
         let res = recv
             .next()
