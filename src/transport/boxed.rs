@@ -21,6 +21,7 @@ type BoxedFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + Sync + 'a>>;
 
 enum SendSinkInner<T: RpcMessage> {
     Direct(::flume::r#async::SendSink<'static, T>),
+    #[cfg(feature = "tokio-mpsc-transport")]
     DirectTokio(tokio_util::sync::PollSender<T>),
     Boxed(Pin<Box<dyn Sink<T, Error = anyhow::Error> + Send + Sync + 'static>>),
 }
@@ -44,6 +45,7 @@ impl<T: RpcMessage> SendSink<T> {
         Self(SendSinkInner::Direct(sink))
     }
 
+    #[cfg(feature = "tokio-mpsc-transport")]
     pub(crate) fn direct_tokio(sink: tokio_util::sync::PollSender<T>) -> Self {
         Self(SendSinkInner::DirectTokio(sink))
     }
@@ -58,6 +60,7 @@ impl<T: RpcMessage> Sink<T> for SendSink<T> {
     ) -> Poll<Result<(), Self::Error>> {
         match self.project().0 {
             SendSinkInner::Direct(sink) => sink.poll_ready_unpin(cx).map_err(anyhow::Error::from),
+            #[cfg(feature = "tokio-mpsc-transport")]
             SendSinkInner::DirectTokio(sink) => {
                 sink.poll_ready_unpin(cx).map_err(anyhow::Error::from)
             }
@@ -68,6 +71,7 @@ impl<T: RpcMessage> Sink<T> for SendSink<T> {
     fn start_send(self: std::pin::Pin<&mut Self>, item: T) -> Result<(), Self::Error> {
         match self.project().0 {
             SendSinkInner::Direct(sink) => sink.start_send_unpin(item).map_err(anyhow::Error::from),
+            #[cfg(feature = "tokio-mpsc-transport")]
             SendSinkInner::DirectTokio(sink) => {
                 sink.start_send_unpin(item).map_err(anyhow::Error::from)
             }
@@ -81,6 +85,7 @@ impl<T: RpcMessage> Sink<T> for SendSink<T> {
     ) -> Poll<Result<(), Self::Error>> {
         match self.project().0 {
             SendSinkInner::Direct(sink) => sink.poll_flush_unpin(cx).map_err(anyhow::Error::from),
+            #[cfg(feature = "tokio-mpsc-transport")]
             SendSinkInner::DirectTokio(sink) => {
                 sink.poll_flush_unpin(cx).map_err(anyhow::Error::from)
             }
@@ -94,6 +99,7 @@ impl<T: RpcMessage> Sink<T> for SendSink<T> {
     ) -> Poll<Result<(), Self::Error>> {
         match self.project().0 {
             SendSinkInner::Direct(sink) => sink.poll_close_unpin(cx).map_err(anyhow::Error::from),
+            #[cfg(feature = "tokio-mpsc-transport")]
             SendSinkInner::DirectTokio(sink) => {
                 sink.poll_close_unpin(cx).map_err(anyhow::Error::from)
             }
