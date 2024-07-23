@@ -7,7 +7,7 @@ use std::{
     fmt::{self, Debug, Display},
     net::SocketAddr,
 };
-#[cfg(feature = "flume-transport")]
+#[cfg(all(feature = "flume-transport", feature = "tokio-mpsc-transport"))]
 pub mod boxed;
 #[cfg(feature = "combined-transport")]
 pub mod combined;
@@ -21,6 +21,8 @@ pub mod interprocess;
 pub mod quinn;
 #[cfg(feature = "quinn-flume-socket")]
 pub mod quinn_flume_socket;
+#[cfg(feature = "tokio-mpsc-transport")]
+pub mod tokio_mpsc;
 
 pub mod misc;
 
