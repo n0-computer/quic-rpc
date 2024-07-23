@@ -104,6 +104,7 @@ impl<T: RpcMessage> Sink<T> for SendSink<T> {
 
 enum RecvStreamInner<T: RpcMessage> {
     Direct(::flume::r#async::RecvStream<'static, T>),
+    #[cfg(feature = "tokio-mpsc-transport")]
     DirectTokio(tokio_stream::wrappers::ReceiverStream<T>),
     Boxed(Pin<Box<dyn Stream<Item = Result<T, anyhow::Error>> + Send + Sync + 'static>>),
 }
@@ -129,6 +130,7 @@ impl<T: RpcMessage> RecvStream<T> {
     }
 
     /// Create a new receive stream from a direct flume receive stream
+    #[cfg(feature = "tokio-mpsc-transport")]
     pub(crate) fn direct_tokio(stream: tokio_stream::wrappers::ReceiverStream<T>) -> Self {
         Self(RecvStreamInner::DirectTokio(stream))
     }
@@ -144,6 +146,7 @@ impl<T: RpcMessage> Stream for RecvStream<T> {
                 Poll::Ready(None) => Poll::Ready(None),
                 Poll::Pending => Poll::Pending,
             },
+            #[cfg(feature = "tokio-mpsc-transport")]
             RecvStreamInner::DirectTokio(stream) => match stream.poll_next_unpin(cx) {
                 Poll::Ready(Some(item)) => Poll::Ready(Some(Ok(item))),
                 Poll::Ready(None) => Poll::Ready(None),
@@ -158,6 +161,7 @@ enum OpenFutureInner<'a, In: RpcMessage, Out: RpcMessage> {
     /// A direct future (todo)
     Direct(super::flume::OpenBiFuture<In, Out>),
     /// A direct future (todo)
+    #[cfg(feature = "tokio-mpsc-transport")]
     DirectTokio(BoxFuture<'a, anyhow::Result<(SendSink<Out>, RecvStream<In>)>>),
     /// A boxed future
     Boxed(BoxFuture<'a, anyhow::Result<(SendSink<Out>, RecvStream<In>)>>),
@@ -172,6 +176,7 @@ impl<'a, In: RpcMessage, Out: RpcMessage> OpenFuture<'a, In, Out> {
         Self(OpenFutureInner::Direct(f))
     }
     /// Create a new boxed future
+    #[cfg(feature = "tokio-mpsc-transport")]
     pub fn direct_tokio(
         f: impl Future<Output = anyhow::Result<(SendSink<Out>, RecvStream<In>)>> + Send + Sync + 'a,
     ) -> Self {
@@ -195,6 +200,7 @@ impl<'a, In: RpcMessage, Out: RpcMessage> Future for OpenFuture<'a, In, Out> {
                 .poll(cx)
                 .map_ok(|(send, recv)| (SendSink::direct(send.0), RecvStream::direct(recv.0)))
                 .map_err(|e| e.into()),
+            #[cfg(feature = "tokio-mpsc-transport")]
             OpenFutureInner::DirectTokio(f) => f.poll(cx),
             OpenFutureInner::Boxed(f) => f.poll(cx),
         }
@@ -205,6 +211,7 @@ enum AcceptFutureInner<'a, In: RpcMessage, Out: RpcMessage> {
     /// A direct future
     Direct(super::flume::AcceptBiFuture<In, Out>),
     /// A direct future
+    #[cfg(feature = "tokio-mpsc-transport")]
     DirectTokio(BoxedFuture<'a, anyhow::Result<(SendSink<Out>, RecvStream<In>)>>),
     /// A boxed future
     Boxed(BoxedFuture<'a, anyhow::Result<(SendSink<Out>, RecvStream<In>)>>),
@@ -220,6 +227,7 @@ impl<'a, In: RpcMessage, Out: RpcMessage> AcceptFuture<'a, In, Out> {
     }
 
     /// bla
+    #[cfg(feature = "tokio-mpsc-transport")]
     pub fn direct_tokio(
         f: impl Future<Output = anyhow::Result<(SendSink<Out>, RecvStream<In>)>> + Send + Sync + 'a,
     ) -> Self {
@@ -243,6 +251,7 @@ impl<'a, In: RpcMessage, Out: RpcMessage> Future for AcceptFuture<'a, In, Out> {
                 .poll(cx)
                 .map_ok(|(send, recv)| (SendSink::direct(send.0), RecvStream::direct(recv.0)))
                 .map_err(|e| e.into()),
+            #[cfg(feature = "tokio-mpsc-transport")]
             AcceptFutureInner::DirectTokio(f) => f.poll(cx),
             AcceptFutureInner::Boxed(f) => f.poll(cx),
         }
