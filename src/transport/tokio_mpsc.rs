@@ -137,7 +137,7 @@ impl<S: Service> ConnectionCommon<S::Req, S::Res> for ServerEndpoint<S> {
 }
 
 impl<S: Service> transport::ServerEndpoint<S::Req, S::Res> for ServerEndpoint<S> {
-    async fn accept_bi(&self) -> Result<(Self::SendSink, Self::RecvStream), AcceptBiError> {
+    async fn accept(&self) -> Result<(Self::SendSink, Self::RecvStream), AcceptBiError> {
         let (send, recv) = self
             .stream
             .lock()
@@ -167,7 +167,7 @@ impl<S: Service> ConnectionCommon<S::Res, S::Req> for Connection<S> {
 }
 
 impl<S: Service> transport::Connection<S::Res, S::Req> for Connection<S> {
-    async fn open_bi(&self) -> result::Result<Socket<S::Res, S::Req>, self::OpenBiError> {
+    async fn open(&self) -> result::Result<Socket<S::Res, S::Req>, self::OpenBiError> {
         let (local_send, remote_recv) = mpsc::channel::<S::Req>(128);
         let (remote_send, local_recv) = mpsc::channel::<S::Res>(128);
         let remote_chan = (

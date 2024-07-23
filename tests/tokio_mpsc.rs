@@ -9,7 +9,7 @@ use quic_rpc::{
 };
 
 #[tokio::test]
-async fn async_channel_channel_bench() -> anyhow::Result<()> {
+async fn tokio_mpsc_channel_bench() -> anyhow::Result<()> {
     tracing_subscriber::fmt::try_init().ok();
     let (server, client) = tokio_mpsc::connection::<ComputeService>(1);
 
@@ -26,7 +26,7 @@ async fn async_channel_channel_bench() -> anyhow::Result<()> {
 }
 
 #[tokio::test]
-async fn async_channel_channel_mapped_bench() -> anyhow::Result<()> {
+async fn tokio_mpsc_channel_mapped_bench() -> anyhow::Result<()> {
     use derive_more::{From, TryInto};
     use serde::{Deserialize, Serialize};
 
@@ -67,7 +67,7 @@ async fn async_channel_channel_mapped_bench() -> anyhow::Result<()> {
         tokio::task::spawn(async move {
             let service = ComputeService;
             loop {
-                let (req, chan) = server.accept().await?;
+                let (req, chan) = server.accept().await?.read_first().await?;
                 let service = service.clone();
                 tokio::spawn(async move {
                     let req: OuterRequest = req;

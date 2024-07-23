@@ -421,9 +421,9 @@ impl<S: Service> BoxableConnection<S::Res, S::Req> for super::tokio_mpsc::Connec
         Box::new(self.clone())
     }
 
-    fn open_bi_boxed(&self) -> OpenFuture<S::Res, S::Req> {
+    fn open_boxed(&self) -> OpenFuture<S::Res, S::Req> {
         let f = Box::pin(async move {
-            let (send, recv) = super::Connection::open_bi(self).await?;
+            let (send, recv) = super::Connection::open(self).await?;
             // return the boxed streams
             anyhow::Ok((
                 SendSink::direct_tokio(send.0),
@@ -442,7 +442,7 @@ impl<S: Service> BoxableServerEndpoint<S::Req, S::Res> for super::tokio_mpsc::Se
 
     fn accept_bi_boxed(&self) -> AcceptFuture<S::Req, S::Res> {
         let f = async move {
-            let (send, recv) = super::ServerEndpoint::accept_bi(self).await?;
+            let (send, recv) = super::ServerEndpoint::accept(self).await?;
             let send = send.sink_map_err(anyhow::Error::from);
             let recv = recv.map_err(anyhow::Error::from);
             anyhow::Ok((SendSink::boxed(send), RecvStream::boxed(recv)))
