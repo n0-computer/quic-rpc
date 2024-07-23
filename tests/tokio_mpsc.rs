@@ -1,17 +1,17 @@
-#![cfg(feature = "async-channel-transport")]
+#![cfg(feature = "tokio-mpsc-transport")]
 #![allow(non_local_definitions)]
 mod math;
 use math::*;
 use quic_rpc::{
     server::{RpcChannel, RpcServerError},
-    transport::async_channel,
+    transport::tokio_mpsc,
     RpcClient, RpcServer, Service,
 };
 
 #[tokio::test]
 async fn async_channel_channel_bench() -> anyhow::Result<()> {
     tracing_subscriber::fmt::try_init().ok();
-    let (server, client) = async_channel::connection::<ComputeService>(1);
+    let (server, client) = tokio_mpsc::connection::<ComputeService>(1);
 
     let server = RpcServer::<ComputeService, _>::new(server);
     let server_handle = tokio::task::spawn(ComputeService::server(server));
@@ -60,7 +60,7 @@ async fn async_channel_channel_mapped_bench() -> anyhow::Result<()> {
         type Req = InnerRequest;
         type Res = InnerResponse;
     }
-    let (server, client) = async_channel::connection::<OuterService>(1);
+    let (server, client) = tokio_mpsc::connection::<OuterService>(1);
 
     let server = RpcServer::new(server);
     let server_handle: tokio::task::JoinHandle<Result<(), RpcServerError<_>>> =
@@ -96,9 +96,9 @@ async fn async_channel_channel_mapped_bench() -> anyhow::Result<()> {
 
 /// simple happy path test for all 4 patterns
 #[tokio::test]
-async fn async_channel_channel_smoke() -> anyhow::Result<()> {
+async fn tokio_mpsc_channel_smoke() -> anyhow::Result<()> {
     tracing_subscriber::fmt::try_init().ok();
-    let (server, client) = async_channel::connection::<ComputeService>(1);
+    let (server, client) = tokio_mpsc::connection::<ComputeService>(1);
 
     let server = RpcServer::<ComputeService, _>::new(server);
     let server_handle = tokio::task::spawn(ComputeService::server(server));
