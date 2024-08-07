@@ -519,8 +519,8 @@ dependencies = [
 
 [[package]]
 name = "iroh-quinn"
-version = "0.11.1"
-source = "git+https://github.com/n0-computer/quinn?branch=iroh-0.11.x#89f0588ccff30ff5c544e385d94aab8fa73bd399"
+version = "0.11.3"
+source = "git+https://github.com/n0-computer/quinn?branch=iroh-0.11.x#a32092de403b798a911d27da5f00df6d21731aed"
 dependencies = [
  "bytes",
  "iroh-quinn-proto",
@@ -528,6 +528,7 @@ dependencies = [
  "pin-project-lite",
  "rustc-hash",
  "rustls",
+ "socket2",
  "thiserror",
  "tokio",
  "tracing",
@@ -535,8 +536,8 @@ dependencies = [
 
 [[package]]
 name = "iroh-quinn-proto"
-version = "0.11.2"
-source = "git+https://github.com/n0-computer/quinn?branch=iroh-0.11.x#89f0588ccff30ff5c544e385d94aab8fa73bd399"
+version = "0.11.6"
+source = "git+https://github.com/n0-computer/quinn?branch=iroh-0.11.x#a32092de403b798a911d27da5f00df6d21731aed"
 dependencies = [
  "bytes",
  "rand",
@@ -552,8 +553,8 @@ dependencies = [
 
 [[package]]
 name = "iroh-quinn-udp"
-version = "0.5.1"
-source = "git+https://github.com/n0-computer/quinn?branch=iroh-0.11.x#89f0588ccff30ff5c544e385d94aab8fa73bd399"
+version = "0.5.4"
+source = "git+https://github.com/n0-computer/quinn?branch=iroh-0.11.x#a32092de403b798a911d27da5f00df6d21731aed"
 dependencies = [
  "libc",
  "once_cell",
@@ -975,9 +976,9 @@ checksum = "719b953e2095829ee67db738b3bfa9fa368c94900df327b3f07fe6e794d2fe1f"
 
 [[package]]
 name = "rustc-hash"
-version = "1.1.0"
+version = "2.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "08d43f7aa6b08d49f382cde6a7982047c3426db949b1424bc4b7ec9ae12c6ce2"
+checksum = "583034fd73374156e66797ed8e5b0d5690409c9226b22d87cb7f19821c05d152"
 
 [[package]]
 name = "rustix"
