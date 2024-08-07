@@ -60,7 +60,7 @@ async fn main() -> anyhow::Result<()> {
     let server = RpcServer::new(server);
     let handle = tokio::task::spawn(async move {
         for _ in 0..1 {
-            let (req, chan) = server.accept().await?;
+            let (req, chan) = server.accept().await?.read_first().await?;
             match req {
                 IoRequest::Write(req) => chan.rpc_map_err(req, fs, Fs::write).await,
             }?

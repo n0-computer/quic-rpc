@@ -289,14 +289,14 @@ impl<A: Connection<S::Res, S::Req>, B: Connection<S::Res, S::Req>, S: Service>
 impl<A: Connection<S::Res, S::Req>, B: Connection<S::Res, S::Req>, S: Service>
     Connection<S::Res, S::Req> for CombinedConnection<A, B, S>
 {
-    async fn open_bi(&self) -> Result<(Self::SendSink, Self::RecvStream), Self::OpenError> {
+    async fn open(&self) -> Result<(Self::SendSink, Self::RecvStream), Self::OpenError> {
         let this = self.clone();
         // try a first, then b
         if let Some(a) = this.a {
-            let (send, recv) = a.open_bi().await.map_err(OpenBiError::A)?;
+            let (send, recv) = a.open().await.map_err(OpenBiError::A)?;
             Ok((SendSink::A(send), RecvStream::A(recv)))
         } else if let Some(b) = this.b {
-            let (send, recv) = b.open_bi().await.map_err(OpenBiError::B)?;
+            let (send, recv) = b.open().await.map_err(OpenBiError::B)?;
             Ok((SendSink::B(send), RecvStream::B(recv)))
         } else {
             Err(OpenBiError::NoChannel)
@@ -322,10 +322,10 @@ impl<A: ServerEndpoint<S::Req, S::Res>, B: ServerEndpoint<S::Req, S::Res>, S: Se
 impl<A: ServerEndpoint<S::Req, S::Res>, B: ServerEndpoint<S::Req, S::Res>, S: Service>
     ServerEndpoint<S::Req, S::Res> for CombinedServerEndpoint<A, B, S>
 {
-    async fn accept_bi(&self) -> Result<(Self::SendSink, Self::RecvStream), Self::OpenError> {
+    async fn accept(&self) -> Result<(Self::SendSink, Self::RecvStream), Self::OpenError> {
         let a_fut = async {
             if let Some(a) = &self.a {
-                let (send, recv) = a.accept_bi().await.map_err(AcceptBiError::A)?;
+                let (send, recv) = a.accept().await.map_err(AcceptBiError::A)?;
                 Ok((SendSink::A(send), RecvStream::A(recv)))
             } else {
                 std::future::pending().await
@@ -333,7 +333,7 @@ impl<A: ServerEndpoint<S::Req, S::Res>, B: ServerEndpoint<S::Req, S::Res>, S: Se
         };
         let b_fut = async {
             if let Some(b) = &self.b {
-                let (send, recv) = b.accept_bi().await.map_err(AcceptBiError::B)?;
+                let (send, recv) = b.accept().await.map_err(AcceptBiError::B)?;
                 Ok((SendSink::B(send), RecvStream::B(recv)))
             } else {
                 std::future::pending().await
@@ -377,7 +377,7 @@ mod tests {
             flume::FlumeConnection<Service>,
             Service,
         >::new(None, None);
-        let res = channel.open_bi().await;
+        let res = channel.open().await;
         assert!(matches!(res, Err(OpenBiError::NoChannel)));
     }
 }

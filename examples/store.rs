@@ -168,7 +168,7 @@ async fn main() -> anyhow::Result<()> {
         let s = server;
         let store = Store;
         loop {
-            let (req, chan) = s.accept().await?;
+            let (req, chan) = s.accept().await?.read_first().await?;
             use StoreRequest::*;
             let store = store.clone();
             #[rustfmt::skip]
@@ -239,7 +239,7 @@ async fn _main_unsugared() -> anyhow::Result<()> {
     }
     let (server, client) = flume::connection::<Service>(1);
     let to_string_service = tokio::spawn(async move {
-        let (mut send, mut recv) = server.accept_bi().await?;
+        let (mut send, mut recv) = server.accept().await?;
         while let Some(item) = recv.next().await {
             let item = item?;
             println!("server got: {item:?}");
@@ -247,7 +247,7 @@ async fn _main_unsugared() -> anyhow::Result<()> {
         }
         anyhow::Ok(())
     });
-    let (mut send, mut recv) = client.open_bi().await?;
+    let (mut send, mut recv) = client.open().await?;
     let print_result_service = tokio::spawn(async move {
         while let Some(item) = recv.next().await {
             let item = item?;

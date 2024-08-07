@@ -581,7 +581,7 @@ impl<S: Service> ConnectionCommon<S::Res, S::Req> for HyperConnection<S> {
 }
 
 impl<S: Service> Connection<S::Res, S::Req> for HyperConnection<S> {
-    async fn open_bi(&self) -> Result<(Self::SendSink, Self::RecvStream), Self::OpenError> {
+    async fn open(&self) -> Result<(Self::SendSink, Self::RecvStream), Self::OpenError> {
         let (out_tx, out_rx) = flume::bounded::<io::Result<Bytes>>(32);
         let req: Request<Body> = Request::post(&self.inner.uri)
             .body(Body::wrap_stream(out_rx.into_stream()))
@@ -619,7 +619,7 @@ impl<S: Service> ServerEndpoint<S::Req, S::Res> for HyperServerEndpoint<S> {
         &self.local_addr
     }
 
-    async fn accept_bi(&self) -> Result<(Self::SendSink, Self::RecvStream), AcceptBiError> {
+    async fn accept(&self) -> Result<(Self::SendSink, Self::RecvStream), AcceptBiError> {
         let (recv, send) = self
             .channel
             .recv_async()

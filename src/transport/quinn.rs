@@ -198,7 +198,7 @@ impl<S: Service> ConnectionCommon<S::Req, S::Res> for QuinnServerEndpoint<S> {
 }
 
 impl<S: Service> ServerEndpoint<S::Req, S::Res> for QuinnServerEndpoint<S> {
-    async fn accept_bi(&self) -> Result<(Self::SendSink, Self::RecvStream), AcceptBiError> {
+    async fn accept(&self) -> Result<(Self::SendSink, Self::RecvStream), AcceptBiError> {
         let (send, recv) = self
             .inner
             .receiver
@@ -627,7 +627,7 @@ impl<S: Service> ConnectionCommon<S::Res, S::Req> for QuinnConnection<S> {
 }
 
 impl<S: Service> Connection<S::Res, S::Req> for QuinnConnection<S> {
-    async fn open_bi(&self) -> Result<(Self::SendSink, Self::RecvStream), Self::OpenError> {
+    async fn open(&self) -> Result<(Self::SendSink, Self::RecvStream), Self::OpenError> {
         let (sender, receiver) = oneshot::channel();
         self.inner
             .sender
@@ -737,10 +737,10 @@ impl<In: DeserializeOwned> Stream for RecvStream<In> {
     }
 }
 
-/// Error for open_bi. Currently just a quinn::ConnectionError
+/// Error for open. Currently just a quinn::ConnectionError
 pub type OpenBiError = quinn::ConnectionError;
 
-/// Error for accept_bi. Currently just a quinn::ConnectionError
+/// Error for accept. Currently just a quinn::ConnectionError
 pub type AcceptBiError = quinn::ConnectionError;
 
 /// CreateChannelError for quinn channels.

@@ -167,7 +167,7 @@ impl ComputeService {
         let s = server;
         let service = ComputeService;
         loop {
-            let (req, chan) = s.accept().await?;
+            let (req, chan) = s.accept().await?.read_first().await?;
             let service = service.clone();
             tokio::spawn(async move { Self::handle_rpc_request(service, req, chan).await });
         }
@@ -206,7 +206,7 @@ impl ComputeService {
         let service = ComputeService;
         while received < count {
             received += 1;
-            let (req, chan) = s.accept().await?;
+            let (req, chan) = s.accept().await?.read_first().await?;
             let service = service.clone();
             tokio::spawn(async move {
                 use ComputeRequest::*;
@@ -236,7 +236,7 @@ impl ComputeService {
         let service = ComputeService;
         let request_stream = stream! {
             loop {
-                yield s2.accept().await;
+                yield s2.accept().await?.read_first().await;
             }
         };
         let process_stream = request_stream.map(move |r| {

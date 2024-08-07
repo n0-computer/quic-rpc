@@ -30,7 +30,7 @@ impl<In: RpcMessage, Out: RpcMessage> ConnectionCommon<In, Out> for DummyServerE
 }
 
 impl<In: RpcMessage, Out: RpcMessage> ServerEndpoint<In, Out> for DummyServerEndpoint {
-    async fn accept_bi(&self) -> Result<(Self::SendSink, Self::RecvStream), Self::OpenError> {
+    async fn accept(&self) -> Result<(Self::SendSink, Self::RecvStream), Self::OpenError> {
         futures_lite::future::pending().await
     }
 

@@ -131,7 +131,7 @@ impl<S: Service> ConnectionErrors for FlumeServerEndpoint<S> {
 
 type Socket<In, Out> = (self::SendSink<Out>, self::RecvStream<In>);
 
-/// Future returned by [FlumeConnection::open_bi]
+/// Future returned by [FlumeConnection::open]
 pub struct OpenBiFuture<In: RpcMessage, Out: RpcMessage> {
     inner: flume::r#async::SendFut<'static, Socket<Out, In>>,
     res: Option<Socket<In, Out>>,
@@ -202,7 +202,7 @@ impl<S: Service> ConnectionCommon<S::Req, S::Res> for FlumeServerEndpoint<S> {
 
 impl<S: Service> ServerEndpoint<S::Req, S::Res> for FlumeServerEndpoint<S> {
     #[allow(refining_impl_trait)]
-    fn accept_bi(&self) -> AcceptBiFuture<S::Req, S::Res> {
+    fn accept(&self) -> AcceptBiFuture<S::Req, S::Res> {
         AcceptBiFuture {
             wrapped: self.stream.clone().into_recv_async(),
             _p: PhantomData,
@@ -229,7 +229,7 @@ impl<S: Service> ConnectionCommon<S::Res, S::Req> for FlumeConnection<S> {
 
 impl<S: Service> Connection<S::Res, S::Req> for FlumeConnection<S> {
     #[allow(refining_impl_trait)]
-    fn open_bi(&self) -> OpenBiFuture<S::Res, S::Req> {
+    fn open(&self) -> OpenBiFuture<S::Res, S::Req> {
         let (local_send, remote_recv) = flume::bounded::<S::Req>(128);
         let (remote_send, local_recv) = flume::bounded::<S::Res>(128);
         let remote_chan = (
