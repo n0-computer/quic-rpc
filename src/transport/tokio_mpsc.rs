@@ -2,13 +2,14 @@
 
 use futures_lite::Stream;
 use futures_sink::Sink;
+use tokio_util::sync::PollSender;
 
 use crate::{
     transport::{self, ConnectionErrors, LocalAddr},
     RpcMessage, Service,
 };
 use core::fmt;
-use std::{error, fmt::Display, pin::Pin, result, sync::Arc, task::Poll};
+use std::{error, fmt::Display, future::Future, pin::Pin, result, sync::Arc, task::Poll};
 use tokio::sync::{mpsc, Mutex};
 
 use super::ConnectionCommon;
@@ -167,7 +168,8 @@ impl<S: Service> ConnectionCommon<S::Res, S::Req> for Connection<S> {
 }
 
 impl<S: Service> transport::Connection<S::Res, S::Req> for Connection<S> {
-    async fn open(&self) -> result::Result<Socket<S::Res, S::Req>, self::OpenBiError> {
+    #[allow(refining_impl_trait)]
+    fn open(&self) -> OpenBiFuture<S::Res, S::Req> {
         let (local_send, remote_recv) = mpsc::channel::<S::Req>(128);
         let (remote_send, local_recv) = mpsc::channel::<S::Res>(128);
         let remote_chan = (
@@ -178,11 +180,61 @@ impl<S: Service> transport::Connection<S::Res, S::Req> for Connection<S> {
             SendSink(tokio_util::sync::PollSender::new(local_send)),
             RecvStream(tokio_stream::wrappers::ReceiverStream::new(local_recv)),
         );
-        self.sink
-            .send(remote_chan)
-            .await
-            .map_err(|_| self::OpenBiError::RemoteDropped)?;
-        Ok(local_chan)
+        let sender = PollSender::new(self.sink.clone());
+        OpenBiFuture::new(sender, remote_chan, local_chan)
+    }
+}
+
+/// Future returned by [FlumeConnection::open]
+pub struct OpenBiFuture<In: RpcMessage, Out: RpcMessage> {
+    inner: PollSender<Socket<Out, In>>,
+    send: Option<Socket<Out, In>>,
+    res: Option<Socket<In, Out>>,
+}
+
+impl<In: RpcMessage, Out: RpcMessage> fmt::Debug for OpenBiFuture<In, Out> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("OpenBiFuture").finish()
+    }
+}
+
+impl<In: RpcMessage, Out: RpcMessage> OpenBiFuture<In, Out> {
+    fn new(
+        inner: PollSender<Socket<Out, In>>,
+        send: Socket<Out, In>,
+        res: Socket<In, Out>,
+    ) -> Self {
+        Self {
+            inner,
+            send: Some(send),
+            res: Some(res),
+        }
+    }
+}
+
+impl<In: RpcMessage, Out: RpcMessage> Future for OpenBiFuture<In, Out> {
+    type Output = result::Result<Socket<In, Out>, self::OpenBiError>;
+
+    fn poll(
+        mut self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Self::Output> {
+        match Pin::new(&mut self.inner).poll_reserve(cx) {
+            Poll::Ready(Ok(())) => {
+                let Some(item) = self.send.take() else {
+                    return Poll::Pending;
+                };
+                let Ok(_) = self.inner.send_item(item) else {
+                    return Poll::Ready(Err(self::OpenBiError::RemoteDropped));
+                };
+                self.res
+                    .take()
+                    .map(|x| Poll::Ready(Ok(x)))
+                    .unwrap_or(Poll::Pending)
+            }
+            Poll::Ready(Err(_)) => Poll::Ready(Err(self::OpenBiError::RemoteDropped)),
+            Poll::Pending => Poll::Pending,
+        }
     }
 }
 
