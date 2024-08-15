@@ -2,7 +2,6 @@
     feature = "flume-transport",
     feature = "hyper-transport",
     feature = "quinn-transport",
-    feature = "interprocess-transport",
 ))]
 #![allow(dead_code)]
 use async_stream::stream;
