@@ -32,11 +32,9 @@ hex = "0.4.3"
 futures = { version = "0.3.30", optional = true }
 anyhow = "1.0.73"
 
-[dependencies.educe]
-# This is an unused dependency, it is needed to make the minimal
-# crates versions work since tokio-serde depends on this.  See
-# https://github.com/carllerche/tokio-serde/pull/29
-version = "0.4.20"
+# Indirect dependencies, is needed to make the minimal crates versions work
+educe = "0.4.20" # tokio-serde
+slab = "0.4.9" # iroh-quinn
 
 [dev-dependencies]
 anyhow = "1.0.73"
