@@ -1,8 +1,8 @@
 [package]
 name = "quic-rpc"
-version = "0.11.0"
+version = "0.12.0"
 edition = "2021"
-authors = ["Rüdiger Klaehn <rklaehn@protonmail.com>"]
+authors = ["Rüdiger Klaehn <rklaehn@protonmail.com>", "n0 team"]
 keywords = ["api", "protocol", "network", "rpc"]
 categories = ["network-programming"]
 license = "Apache-2.0/MIT"
