@@ -82,6 +82,3 @@ required-features = ["flume-transport"]
 
 [workspace]
 members = ["examples/split/types", "examples/split/server", "examples/split/client", "quic-rpc-derive"]
-
-[patch.crates-io]
-iroh-quinn = { git = "https://github.com/n0-computer/quinn", branch = "iroh-0.11.x" }
