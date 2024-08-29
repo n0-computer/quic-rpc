@@ -901,7 +901,6 @@ dependencies = [
  "pin-project",
  "proc-macro2",
  "rcgen",
- "rustls",
  "serde",
  "slab",
  "tempfile",
