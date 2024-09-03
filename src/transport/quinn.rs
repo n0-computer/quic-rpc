@@ -35,11 +35,11 @@ impl Drop for ServerEndpointInner {
     fn drop(&mut self) {
         tracing::debug!("Dropping server endpoint");
         if let Some(endpoint) = self.endpoint.take() {
-            let span = debug_span!("closing server endpoint");
             endpoint.close(0u32.into(), b"server endpoint dropped");
 
             if let Ok(handle) = tokio::runtime::Handle::try_current() {
                 // spawn a task to wait for the endpoint to notify peers that it is closing
+                let span = debug_span!("closing server endpoint");
                 handle.spawn(
                     async move {
                         endpoint.wait_idle().await;
