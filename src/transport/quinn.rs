@@ -35,15 +35,18 @@ impl Drop for ServerEndpointInner {
     fn drop(&mut self) {
         tracing::debug!("Dropping server endpoint");
         if let Some(endpoint) = self.endpoint.take() {
-            let span = debug_span!("closing server endpoint");
             endpoint.close(0u32.into(), b"server endpoint dropped");
-            // spawn a task to wait for the endpoint to notify peers that it is closing
-            tokio::spawn(
-                async move {
-                    endpoint.wait_idle().await;
-                }
-                .instrument(span),
-            );
+
+            if let Ok(handle) = tokio::runtime::Handle::try_current() {
+                // spawn a task to wait for the endpoint to notify peers that it is closing
+                let span = debug_span!("closing server endpoint");
+                handle.spawn(
+                    async move {
+                        endpoint.wait_idle().await;
+                    }
+                    .instrument(span),
+                );
+            }
         }
         if let Some(task) = self.task.take() {
             task.abort()
@@ -230,14 +233,16 @@ impl Drop for ClientConnectionInner {
         tracing::debug!("Dropping client connection");
         if let Some(endpoint) = self.endpoint.take() {
             endpoint.close(0u32.into(), b"client connection dropped");
-            // spawn a task to wait for the endpoint to notify peers that it is closing
-            let span = debug_span!("closing client endpoint");
-            tokio::spawn(
-                async move {
-                    endpoint.wait_idle().await;
-                }
-                .instrument(span),
-            );
+            if let Ok(handle) = tokio::runtime::Handle::try_current() {
+                // spawn a task to wait for the endpoint to notify peers that it is closing
+                let span = debug_span!("closing client endpoint");
+                handle.spawn(
+                    async move {
+                        endpoint.wait_idle().await;
+                    }
+                    .instrument(span),
+                );
+            }
         }
         // this should not be necessary, since the task would terminate when the receiver is dropped.
         // but just to be on the safe side.
