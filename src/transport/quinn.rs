@@ -44,7 +44,7 @@ impl Drop for ServerEndpointInner {
                     async move {
                         endpoint.wait_idle().await;
                     }
-                        .instrument(span),
+                    .instrument(span),
                 );
             }
         }
@@ -240,7 +240,7 @@ impl Drop for ClientConnectionInner {
                     async move {
                         endpoint.wait_idle().await;
                     }
-                        .instrument(span),
+                    .instrument(span),
                 );
             }
         }
