@@ -171,7 +171,7 @@ impl<In: RpcMessage, Out: RpcMessage> Future for OpenBiFuture<In, Out> {
     }
 }
 
-/// Future returned by [FlumeServerEndpoint::accept_bi]
+/// Future returned by [FlumeServerEndpoint::accept]
 pub struct AcceptBiFuture<In: RpcMessage, Out: RpcMessage> {
     wrapped: flume::r#async::RecvFut<'static, (SendSink<Out>, RecvStream<In>)>,
     _p: PhantomData<(In, Out)>,

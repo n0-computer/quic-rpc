@@ -73,7 +73,7 @@ impl<A: ServerEndpoint<S::Req, S::Res>, B: ServerEndpoint<S::Req, S::Res>, S: Se
     /// Create a combined server endpoint from two other server endpoints
     ///
     /// When listening for incoming connections with
-    /// [crate::ServerEndpoint::accept_bi], all configured channels will be listened on,
+    /// [crate::ServerEndpoint::accept], all configured channels will be listened on,
     /// and the first to receive a connection will be used. If no channels are configured,
     /// accept_bi will not throw an error but wait forever.
     pub fn new(a: Option<A>, b: Option<B>) -> Self {
