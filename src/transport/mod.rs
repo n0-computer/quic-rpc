@@ -56,7 +56,7 @@ pub trait Connection<In, Out>: ConnectionCommon<In, Out> {
 /// A server endpoint that listens for connections
 ///
 /// A server endpoint can be used to accept bidirectional typed channels from any of the
-/// currently opened connections to clients, using [`ServerEndpoint::accept_bi`].
+/// currently opened connections to clients, using [`ServerEndpoint::accept`].
 pub trait ServerEndpoint<In, Out>: ConnectionCommon<In, Out> {
     /// Accept a new typed bidirectional channel on any of the connections we
     /// have currently opened.
