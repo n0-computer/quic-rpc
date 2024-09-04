@@ -7,7 +7,7 @@ use std::{
 use quic_rpc::{transport, RpcClient, RpcServer};
 use quinn::{
     crypto::rustls::{QuicClientConfig, QuicServerConfig},
-    ClientConfig, Endpoint, ServerConfig,
+    rustls, ClientConfig, Endpoint, ServerConfig,
 };
 use tokio::task::JoinHandle;
 
