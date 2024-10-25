@@ -19,12 +19,15 @@ use std::{
 };
 use tokio::sync::oneshot;
 
+/// Type alias for a service endpoint
+pub type BoxedServiceEndpoint<S> = crate::transport::boxed::ServerEndpoint<<S as crate::Service>::Req, <S as crate::Service>::Res>;
+
 /// A server channel for a specific service.
 ///
 /// This is a wrapper around a [ServiceEndpoint] that serves as the entry point for the server DSL.
 /// `S` is the service type, `C` is the channel type.
 #[derive(Debug)]
-pub struct RpcServer<S, C> {
+pub struct RpcServer<S, C = BoxedServiceEndpoint<S>> {
     /// The channel on which new requests arrive.
     ///
     /// Each new request is a receiver and channel pair on which messages for this request
@@ -63,7 +66,7 @@ impl<S: Service, C: ServiceEndpoint<S>> RpcServer<S, C> {
 /// Sink and stream are independent, so you can take the channel apart and use
 /// them independently.
 #[derive(Debug)]
-pub struct RpcChannel<S: Service, C: ServiceEndpoint<S>, SInner: Service = S> {
+pub struct RpcChannel<S: Service, C: ServiceEndpoint<S> = BoxedServiceEndpoint<S>, SInner: Service = S> {
     /// Sink to send responses to the client.
     pub send: C::SendSink,
     /// Stream to receive requests from the client.

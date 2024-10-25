@@ -17,6 +17,9 @@ use std::{
     task::{Context, Poll},
 };
 
+/// Type alias for a boxed connection to a specific service
+pub type BoxedServiceConnection<S> = crate::transport::boxed::Connection<<S as crate::Service>::Res, <S as crate::Service>::Req>;
+
 /// Sync version of `future::stream::BoxStream`.
 pub type BoxStreamSync<'a, T> = Pin<Box<dyn Stream<Item = T> + Send + Sync + 'a>>;
 
@@ -25,7 +28,7 @@ pub type BoxStreamSync<'a, T> = Pin<Box<dyn Stream<Item = T> + Send + Sync + 'a>
 /// This is a wrapper around a [ServiceConnection] that serves as the entry point
 /// for the client DSL. `S` is the service type, `C` is the substream source.
 #[derive(Debug)]
-pub struct RpcClient<S, C, SInner = S> {
+pub struct RpcClient<S, C = BoxedServiceConnection<S>, SInner = S> {
     pub(crate) source: C,
     pub(crate) map: Arc<dyn MapService<S, SInner>>,
 }
