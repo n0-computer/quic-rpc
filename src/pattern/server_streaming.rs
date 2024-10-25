@@ -67,7 +67,7 @@ impl<S: ConnectionErrors> fmt::Display for ItemError<S> {
 
 impl<S: ConnectionErrors> error::Error for ItemError<S> {}
 
-impl<S, C, SInner> RpcClient<S, SInner, C>
+impl<SInner, S, C> RpcClient<SInner, S, C>
 where
     S: Service,
     C: ServiceConnection<S>,

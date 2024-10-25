@@ -396,7 +396,7 @@ mod tests {
 
         use crate::transport::{Connection, ServerEndpoint};
 
-        let (server, client) = crate::transport::flume::connection::<FooService>(1);
+        let (server, client) = crate::transport::flume::service_connection::<FooService>(1);
         let server = super::ServerEndpoint::new(server);
         let client = super::Connection::new(client);
         // spawn echo server

@@ -6,7 +6,7 @@ use futures_sink::Sink;
 
 use crate::{
     transport::{Connection, ConnectionErrors, LocalAddr, ServerEndpoint},
-    RpcMessage, Service,
+    RpcMessage,
 };
 use core::fmt;
 use std::{error, fmt::Display, marker::PhantomData, pin::Pin, result, task::Poll};
@@ -335,12 +335,22 @@ impl std::error::Error for CreateChannelError {}
 /// Create a flume server endpoint and a connected flume client channel.
 ///
 /// `buffer` the size of the buffer for each channel. Keep this at a low value to get backpressure
-pub fn connection<S: Service>(
+pub fn connection<Req: RpcMessage, Res: RpcMessage>(
+    buffer: usize,
+) -> (
+    FlumeServerEndpoint<Req, Res>,
+    FlumeConnection<Res, Req>,
+) {
+    let (sink, stream) = flume::bounded(buffer);
+    (FlumeServerEndpoint { stream }, FlumeConnection { sink })
+}
+
+/// Create a flume server endpoint and a connected flume client channel for a specific service.
+pub fn service_connection<S: crate::Service>(
     buffer: usize,
 ) -> (
     FlumeServerEndpoint<S::Req, S::Res>,
     FlumeConnection<S::Res, S::Req>,
 ) {
-    let (sink, stream) = flume::bounded(buffer);
-    (FlumeServerEndpoint { stream }, FlumeConnection { sink })
+    connection(buffer)
 }

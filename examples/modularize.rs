@@ -19,7 +19,7 @@ use app::AppService;
 async fn main() -> Result<()> {
     // Spawn an inmemory connection.
     // Could use quic equally (all code in this example is generic over the transport)
-    let (server_conn, client_conn) = flume::connection::<AppService>(1);
+    let (server_conn, client_conn) = flume::service_connection::<AppService>(1);
 
     // spawn the server
     let handler = app::Handler::default();
@@ -173,7 +173,7 @@ mod app {
     #[derive(Debug, Clone)]
     pub struct Client<S: Service, C: ServiceConnection<S>> {
         pub iroh: iroh::Client<S, C>,
-        client: RpcClient<S, AppService, C>,
+        client: RpcClient<AppService, S, C>,
     }
 
     impl<S, C> Client<S, C>
@@ -181,7 +181,7 @@ mod app {
         S: Service,
         C: ServiceConnection<S>,
     {
-        pub fn new(client: RpcClient<S, AppService, C>) -> Self {
+        pub fn new(client: RpcClient<AppService, S, C>) -> Self {
             Self {
                 iroh: iroh::Client::new(client.clone().map()),
                 client,
@@ -261,7 +261,7 @@ mod iroh {
         S: Service,
         C: ServiceConnection<S>,
     {
-        pub fn new(client: RpcClient<S, IrohService, C>) -> Self {
+        pub fn new(client: RpcClient<IrohService, S, C>) -> Self {
             Self {
                 calc: calc::Client::new(client.clone().map()),
                 clock: clock::Client::new(client.clone().map()),
@@ -374,7 +374,7 @@ mod calc {
 
     #[derive(Debug, Clone)]
     pub struct Client<S, C> {
-        client: RpcClient<S, CalcService, C>,
+        client: RpcClient<CalcService, S, C>,
     }
 
     impl<S, C> Client<S, C>
@@ -382,7 +382,7 @@ mod calc {
         C: ServiceConnection<S>,
         S: Service,
     {
-        pub fn new(client: RpcClient<S, CalcService, C>) -> Self {
+        pub fn new(client: RpcClient<CalcService, S, C>) -> Self {
             Self { client }
         }
         pub async fn add(&self, a: i64, b: i64) -> anyhow::Result<i64> {
@@ -518,7 +518,7 @@ mod clock {
 
     #[derive(Debug, Clone)]
     pub struct Client<S, C> {
-        client: RpcClient<S, ClockService, C>,
+        client: RpcClient<ClockService, S, C>,
     }
 
     impl<S, C> Client<S, C>
@@ -526,7 +526,7 @@ mod clock {
         C: ServiceConnection<S>,
         S: Service,
     {
-        pub fn new(client: RpcClient<S, ClockService, C>) -> Self {
+        pub fn new(client: RpcClient<ClockService, S, C>) -> Self {
             Self { client }
         }
         pub async fn tick(&self) -> Result<BoxStream<Result<usize>>> {
