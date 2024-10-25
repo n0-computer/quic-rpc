@@ -100,12 +100,12 @@ impl error::Error for RecvError {}
 /// A flume based server endpoint.
 ///
 /// Created using [connection].
-pub struct FlumeServerEndpoint<S: Service> {
+pub struct FlumeServerEndpoint<In: RpcMessage, Out: RpcMessage> {
     #[allow(clippy::type_complexity)]
-    stream: flume::Receiver<(SendSink<S::Res>, RecvStream<S::Req>)>,
+    stream: flume::Receiver<(SendSink<Out>, RecvStream<In>)>,
 }
 
-impl<S: Service> Clone for FlumeServerEndpoint<S> {
+impl<In: RpcMessage, Out: RpcMessage> Clone for FlumeServerEndpoint<In, Out> {
     fn clone(&self) -> Self {
         Self {
             stream: self.stream.clone(),
@@ -113,7 +113,7 @@ impl<S: Service> Clone for FlumeServerEndpoint<S> {
     }
 }
 
-impl<S: Service> fmt::Debug for FlumeServerEndpoint<S> {
+impl<In: RpcMessage, Out: RpcMessage> fmt::Debug for FlumeServerEndpoint<In, Out> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("FlumeServerEndpoint")
             .field("stream", &self.stream)
@@ -121,7 +121,7 @@ impl<S: Service> fmt::Debug for FlumeServerEndpoint<S> {
     }
 }
 
-impl<S: Service> ConnectionErrors for FlumeServerEndpoint<S> {
+impl<In: RpcMessage, Out: RpcMessage> ConnectionErrors for FlumeServerEndpoint<In, Out> {
     type SendError = self::SendError;
 
     type RecvError = self::RecvError;
@@ -195,14 +195,14 @@ impl<In: RpcMessage, Out: RpcMessage> Future for AcceptBiFuture<In, Out> {
     }
 }
 
-impl<S: Service> ConnectionCommon<S::Req, S::Res> for FlumeServerEndpoint<S> {
-    type SendSink = SendSink<S::Res>;
-    type RecvStream = RecvStream<S::Req>;
+impl<In: RpcMessage, Out: RpcMessage> ConnectionCommon<In, Out> for FlumeServerEndpoint<In, Out> {
+    type SendSink = SendSink<Out>;
+    type RecvStream = RecvStream<In>;
 }
 
-impl<S: Service> ServerEndpoint<S::Req, S::Res> for FlumeServerEndpoint<S> {
+impl<In: RpcMessage, Out: RpcMessage> ServerEndpoint<In, Out> for FlumeServerEndpoint<In, Out> {
     #[allow(refining_impl_trait)]
-    fn accept(&self) -> AcceptBiFuture<S::Req, S::Res> {
+    fn accept(&self) -> AcceptBiFuture<In, Out> {
         AcceptBiFuture {
             wrapped: self.stream.clone().into_recv_async(),
             _p: PhantomData,
@@ -214,7 +214,7 @@ impl<S: Service> ServerEndpoint<S::Req, S::Res> for FlumeServerEndpoint<S> {
     }
 }
 
-impl<S: Service> ConnectionErrors for FlumeConnection<S> {
+impl<In: RpcMessage, Out: RpcMessage> ConnectionErrors for FlumeConnection<In, Out> {
     type SendError = self::SendError;
 
     type RecvError = self::RecvError;
@@ -222,16 +222,16 @@ impl<S: Service> ConnectionErrors for FlumeConnection<S> {
     type OpenError = self::OpenBiError;
 }
 
-impl<S: Service> ConnectionCommon<S::Res, S::Req> for FlumeConnection<S> {
-    type SendSink = SendSink<S::Req>;
-    type RecvStream = RecvStream<S::Res>;
+impl<In: RpcMessage, Out: RpcMessage> ConnectionCommon<In, Out> for FlumeConnection<In, Out> {
+    type SendSink = SendSink<Out>;
+    type RecvStream = RecvStream<In>;
 }
 
-impl<S: Service> Connection<S::Res, S::Req> for FlumeConnection<S> {
+impl<In: RpcMessage, Out: RpcMessage> Connection<In, Out> for FlumeConnection<In, Out> {
     #[allow(refining_impl_trait)]
-    fn open(&self) -> OpenBiFuture<S::Res, S::Req> {
-        let (local_send, remote_recv) = flume::bounded::<S::Req>(128);
-        let (remote_send, local_recv) = flume::bounded::<S::Res>(128);
+    fn open(&self) -> OpenBiFuture<In, Out> {
+        let (local_send, remote_recv) = flume::bounded::<Out>(128);
+        let (remote_send, local_recv) = flume::bounded::<In>(128);
         let remote_chan = (
             SendSink(remote_send.into_sink()),
             RecvStream(remote_recv.into_stream()),
@@ -247,12 +247,12 @@ impl<S: Service> Connection<S::Res, S::Req> for FlumeConnection<S> {
 /// A flume based connection to a server endpoint.
 ///
 /// Created using [connection].
-pub struct FlumeConnection<S: Service> {
+pub struct FlumeConnection<In: RpcMessage, Out: RpcMessage> {
     #[allow(clippy::type_complexity)]
-    sink: flume::Sender<(SendSink<S::Res>, RecvStream<S::Req>)>,
+    sink: flume::Sender<(SendSink<In>, RecvStream<Out>)>,
 }
 
-impl<S: Service> Clone for FlumeConnection<S> {
+impl<In: RpcMessage, Out: RpcMessage> Clone for FlumeConnection<In, Out> {
     fn clone(&self) -> Self {
         Self {
             sink: self.sink.clone(),
@@ -260,7 +260,7 @@ impl<S: Service> Clone for FlumeConnection<S> {
     }
 }
 
-impl<S: Service> fmt::Debug for FlumeConnection<S> {
+impl<In: RpcMessage, Out: RpcMessage> fmt::Debug for FlumeConnection<In, Out> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("FlumeClientChannel")
             .field("sink", &self.sink)
@@ -335,7 +335,12 @@ impl std::error::Error for CreateChannelError {}
 /// Create a flume server endpoint and a connected flume client channel.
 ///
 /// `buffer` the size of the buffer for each channel. Keep this at a low value to get backpressure
-pub fn connection<S: Service>(buffer: usize) -> (FlumeServerEndpoint<S>, FlumeConnection<S>) {
+pub fn connection<S: Service>(
+    buffer: usize,
+) -> (
+    FlumeServerEndpoint<S::Req, S::Res>,
+    FlumeConnection<S::Res, S::Req>,
+) {
     let (sink, stream) = flume::bounded(buffer);
     (FlumeServerEndpoint { stream }, FlumeConnection { sink })
 }

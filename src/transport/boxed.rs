@@ -14,7 +14,7 @@ use futures_util::{future::BoxFuture, SinkExt, Stream, StreamExt};
 use pin_project::pin_project;
 use std::future::Future;
 
-use crate::{RpcMessage, Service};
+use crate::RpcMessage;
 
 use super::{ConnectionCommon, ConnectionErrors};
 type BoxedFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + Sync + 'a>>;
@@ -215,33 +215,33 @@ pub trait BoxableConnection<In: RpcMessage, Out: RpcMessage>:
 
 /// A boxed connection
 #[derive(Debug)]
-pub struct Connection<S: Service>(Box<dyn BoxableConnection<S::Res, S::Req>>);
+pub struct Connection<In, Out>(Box<dyn BoxableConnection<In, Out>>);
 
-impl<S: Service> Connection<S> {
+impl<In: RpcMessage, Out: RpcMessage> Connection<In, Out> {
     /// Wrap a boxable server endpoint into a box, transforming all the types to concrete types
-    pub fn new(x: impl BoxableConnection<S::Res, S::Req>) -> Self {
+    pub fn new(x: impl BoxableConnection<In, Out>) -> Self {
         Self(Box::new(x))
     }
 }
 
-impl<S: Service> Clone for Connection<S> {
+impl<In: RpcMessage, Out: RpcMessage> Clone for Connection<In, Out> {
     fn clone(&self) -> Self {
         Self(self.0.clone_box())
     }
 }
 
-impl<S: Service> ConnectionCommon<S::Res, S::Req> for Connection<S> {
-    type RecvStream = RecvStream<S::Res>;
-    type SendSink = SendSink<S::Req>;
+impl<In: RpcMessage, Out: RpcMessage> ConnectionCommon<In, Out> for Connection<In, Out> {
+    type RecvStream = RecvStream<In>;
+    type SendSink = SendSink<Out>;
 }
 
-impl<S: Service> ConnectionErrors for Connection<S> {
+impl<In: RpcMessage, Out: RpcMessage> ConnectionErrors for Connection<In, Out> {
     type OpenError = anyhow::Error;
     type SendError = anyhow::Error;
     type RecvError = anyhow::Error;
 }
 
-impl<S: Service> super::Connection<S::Res, S::Req> for Connection<S> {
+impl<In: RpcMessage, Out: RpcMessage> super::Connection<In, Out> for Connection<In, Out> {
     async fn open(&self) -> Result<(Self::SendSink, Self::RecvStream), Self::OpenError> {
         self.0.open_boxed().await
     }
@@ -303,12 +303,14 @@ impl<In: RpcMessage, Out: RpcMessage> super::ServerEndpoint<In, Out> for ServerE
 }
 
 #[cfg(feature = "quinn-transport")]
-impl<S: Service> BoxableConnection<S::Res, S::Req> for super::quinn::QuinnConnection<S> {
-    fn clone_box(&self) -> Box<dyn BoxableConnection<S::Res, S::Req>> {
+impl<In: RpcMessage, Out: RpcMessage> BoxableConnection<In, Out>
+    for super::quinn::QuinnConnection<In, Out>
+{
+    fn clone_box(&self) -> Box<dyn BoxableConnection<In, Out>> {
         Box::new(self.clone())
     }
 
-    fn open_boxed(&self) -> OpenFuture<S::Res, S::Req> {
+    fn open_boxed(&self) -> OpenFuture<In, Out> {
         let f = Box::pin(async move {
             let (send, recv) = super::Connection::open(self).await?;
             // map the error types to anyhow
@@ -322,12 +324,14 @@ impl<S: Service> BoxableConnection<S::Res, S::Req> for super::quinn::QuinnConnec
 }
 
 #[cfg(feature = "quinn-transport")]
-impl<S: Service> BoxableServerEndpoint<S::Req, S::Res> for super::quinn::QuinnServerEndpoint<S> {
-    fn clone_box(&self) -> Box<dyn BoxableServerEndpoint<S::Req, S::Res>> {
+impl<In: RpcMessage, Out: RpcMessage> BoxableServerEndpoint<In, Out>
+    for super::quinn::QuinnServerEndpoint<In, Out>
+{
+    fn clone_box(&self) -> Box<dyn BoxableServerEndpoint<In, Out>> {
         Box::new(self.clone())
     }
 
-    fn accept_bi_boxed(&self) -> AcceptFuture<S::Req, S::Res> {
+    fn accept_bi_boxed(&self) -> AcceptFuture<In, Out> {
         let f = async move {
             let (send, recv) = super::ServerEndpoint::accept(self).await?;
             let send = send.sink_map_err(anyhow::Error::from);
@@ -343,23 +347,27 @@ impl<S: Service> BoxableServerEndpoint<S::Req, S::Res> for super::quinn::QuinnSe
 }
 
 #[cfg(feature = "flume-transport")]
-impl<S: Service> BoxableConnection<S::Res, S::Req> for super::flume::FlumeConnection<S> {
-    fn clone_box(&self) -> Box<dyn BoxableConnection<S::Res, S::Req>> {
+impl<In: RpcMessage, Out: RpcMessage> BoxableConnection<In, Out>
+    for super::flume::FlumeConnection<In, Out>
+{
+    fn clone_box(&self) -> Box<dyn BoxableConnection<In, Out>> {
         Box::new(self.clone())
     }
 
-    fn open_boxed(&self) -> OpenFuture<S::Res, S::Req> {
+    fn open_boxed(&self) -> OpenFuture<In, Out> {
         OpenFuture::direct(super::Connection::open(self))
     }
 }
 
 #[cfg(feature = "flume-transport")]
-impl<S: Service> BoxableServerEndpoint<S::Req, S::Res> for super::flume::FlumeServerEndpoint<S> {
-    fn clone_box(&self) -> Box<dyn BoxableServerEndpoint<S::Req, S::Res>> {
+impl<In: RpcMessage, Out: RpcMessage> BoxableServerEndpoint<In, Out>
+    for super::flume::FlumeServerEndpoint<In, Out>
+{
+    fn clone_box(&self) -> Box<dyn BoxableServerEndpoint<In, Out>> {
         Box::new(self.clone())
     }
 
-    fn accept_bi_boxed(&self) -> AcceptFuture<S::Req, S::Res> {
+    fn accept_bi_boxed(&self) -> AcceptFuture<In, Out> {
         AcceptFuture::direct(super::ServerEndpoint::accept(self))
     }
 
@@ -390,7 +398,7 @@ mod tests {
 
         let (server, client) = crate::transport::flume::connection::<FooService>(1);
         let server = super::ServerEndpoint::new(server);
-        let client = super::Connection::<FooService>::new(client);
+        let client = super::Connection::new(client);
         // spawn echo server
         tokio::spawn(async move {
             while let Ok((mut send, mut recv)) = server.accept().await {
