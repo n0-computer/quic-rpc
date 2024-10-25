@@ -18,7 +18,8 @@ use std::{
 };
 
 /// Type alias for a boxed connection to a specific service
-pub type BoxedServiceConnection<S> = crate::transport::boxed::Connection<<S as crate::Service>::Res, <S as crate::Service>::Req>;
+pub type BoxedServiceConnection<S> =
+    crate::transport::boxed::Connection<<S as crate::Service>::Res, <S as crate::Service>::Req>;
 
 /// Sync version of `future::stream::BoxStream`.
 pub type BoxStreamSync<'a, T> = Pin<Box<dyn Stream<Item = T> + Send + Sync + 'a>>;
@@ -28,12 +29,12 @@ pub type BoxStreamSync<'a, T> = Pin<Box<dyn Stream<Item = T> + Send + Sync + 'a>
 /// This is a wrapper around a [ServiceConnection] that serves as the entry point
 /// for the client DSL. `S` is the service type, `C` is the substream source.
 #[derive(Debug)]
-pub struct RpcClient<S, C = BoxedServiceConnection<S>, SInner = S> {
+pub struct RpcClient<S, SInner = S, C = BoxedServiceConnection<S>> {
     pub(crate) source: C,
     pub(crate) map: Arc<dyn MapService<S, SInner>>,
 }
 
-impl<S, C: Clone, SInner> Clone for RpcClient<S, C, SInner> {
+impl<S, SInner, C: Clone> Clone for RpcClient<S, SInner, C> {
     fn clone(&self) -> Self {
         Self {
             source: self.source.clone(),
@@ -84,7 +85,7 @@ where
     }
 }
 
-impl<S, C> RpcClient<S, C, S>
+impl<S, C> RpcClient<S, S, C>
 where
     S: Service,
     C: ServiceConnection<S>,
@@ -101,7 +102,7 @@ where
     }
 }
 
-impl<S, C, SInner> RpcClient<S, C, SInner>
+impl<S, SInner, C> RpcClient<S, SInner, C>
 where
     S: Service,
     C: ServiceConnection<S>,
@@ -121,7 +122,7 @@ where
     /// Where SNext is the new service to map to and SInner is the current inner service.
     ///
     /// This method can be chained infintely.
-    pub fn map<SNext>(self) -> RpcClient<S, C, SNext>
+    pub fn map<SNext>(self) -> RpcClient<S, SNext, C>
     where
         SNext: Service,
         SNext::Req: Into<SInner::Req> + TryFrom<SInner::Req>,
@@ -135,7 +136,7 @@ where
     }
 }
 
-impl<S, C, SInner> AsRef<C> for RpcClient<S, C, SInner>
+impl<S, SInner, C> AsRef<C> for RpcClient<S, SInner, C>
 where
     S: Service,
     C: ServiceConnection<S>,

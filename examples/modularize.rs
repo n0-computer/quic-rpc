@@ -172,8 +172,8 @@ mod app {
 
     #[derive(Debug, Clone)]
     pub struct Client<S: Service, C: ServiceConnection<S>> {
-        pub iroh: iroh::Client<C, S>,
-        client: RpcClient<S, C, AppService>,
+        pub iroh: iroh::Client<S, C>,
+        client: RpcClient<S, AppService, C>,
     }
 
     impl<S, C> Client<S, C>
@@ -181,7 +181,7 @@ mod app {
         S: Service,
         C: ServiceConnection<S>,
     {
-        pub fn new(client: RpcClient<S, C, AppService>) -> Self {
+        pub fn new(client: RpcClient<S, AppService, C>) -> Self {
             Self {
                 iroh: iroh::Client::new(client.clone().map()),
                 client,
@@ -251,17 +251,17 @@ mod iroh {
     }
 
     #[derive(Debug, Clone)]
-    pub struct Client<C, S = IrohService> {
-        pub calc: calc::Client<C, S>,
-        pub clock: clock::Client<C, S>,
+    pub struct Client<S, C> {
+        pub calc: calc::Client<S, C>,
+        pub clock: clock::Client<S, C>,
     }
 
-    impl<C, S> Client<C, S>
+    impl<S, C> Client<S, C>
     where
-        C: ServiceConnection<S>,
         S: Service,
+        C: ServiceConnection<S>,
     {
-        pub fn new(client: RpcClient<S, C, IrohService>) -> Self {
+        pub fn new(client: RpcClient<S, IrohService, C>) -> Self {
             Self {
                 calc: calc::Client::new(client.clone().map()),
                 clock: clock::Client::new(client.clone().map()),
@@ -373,16 +373,16 @@ mod calc {
     }
 
     #[derive(Debug, Clone)]
-    pub struct Client<C, S = CalcService> {
-        client: RpcClient<S, C, CalcService>,
+    pub struct Client<S, C> {
+        client: RpcClient<S, CalcService, C>,
     }
 
-    impl<C, S> Client<C, S>
+    impl<S, C> Client<S, C>
     where
         C: ServiceConnection<S>,
         S: Service,
     {
-        pub fn new(client: RpcClient<S, C, CalcService>) -> Self {
+        pub fn new(client: RpcClient<S, CalcService, C>) -> Self {
             Self { client }
         }
         pub async fn add(&self, a: i64, b: i64) -> anyhow::Result<i64> {
@@ -517,16 +517,16 @@ mod clock {
     }
 
     #[derive(Debug, Clone)]
-    pub struct Client<C, S = ClockService> {
-        client: RpcClient<S, C, ClockService>,
+    pub struct Client<S, C> {
+        client: RpcClient<S, ClockService, C>,
     }
 
-    impl<C, S> Client<C, S>
+    impl<S, C> Client<S, C>
     where
         C: ServiceConnection<S>,
         S: Service,
     {
-        pub fn new(client: RpcClient<S, C, ClockService>) -> Self {
+        pub fn new(client: RpcClient<S, ClockService, C>) -> Self {
             Self { client }
         }
         pub async fn tick(&self) -> Result<BoxStream<Result<usize>>> {

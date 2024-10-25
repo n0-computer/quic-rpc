@@ -185,7 +185,7 @@ async fn main() -> anyhow::Result<()> {
     }
 
     let (server, client) = flume::connection::<StoreService>(1);
-    let client = RpcClient::<StoreService, _>::new(client);
+    let client = RpcClient::<StoreService, StoreService, _>::new(client);
     let server = RpcServer::<StoreService, _>::new(server);
     let server_handle = tokio::task::spawn(server_future(server));
 

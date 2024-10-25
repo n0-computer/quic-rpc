@@ -53,7 +53,7 @@
 //!
 //! // client side
 //! // create the rpc client given the channel and the service type
-//! let mut client = RpcClient::<PingService, _>::new(client);
+//! let mut client = RpcClient::<PingService,PingService, _>::new(client);
 //!
 //! // call the service
 //! let res = client.rpc(Ping).await?;
