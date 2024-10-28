@@ -98,7 +98,7 @@ impl<S: ConnectionErrors, E: Debug> fmt::Display for ItemError<S, E> {
 
 impl<S: ConnectionErrors, E: Debug> error::Error for ItemError<S, E> {}
 
-impl<S, C, SInner> RpcChannel<S, C, SInner>
+impl<S, C, SInner> RpcChannel<S, SInner, C>
 where
     S: Service,
     C: ServiceEndpoint<S>,

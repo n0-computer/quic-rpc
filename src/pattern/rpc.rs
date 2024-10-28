@@ -91,7 +91,7 @@ where
     }
 }
 
-impl<S, C, SInner> RpcChannel<S, C, SInner>
+impl<S, C, SInner> RpcChannel<S, SInner, C>
 where
     S: Service,
     C: ServiceEndpoint<S>,

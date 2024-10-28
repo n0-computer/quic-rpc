@@ -175,7 +175,7 @@ impl ComputeService {
     pub async fn handle_rpc_request<S, E>(
         service: ComputeService,
         req: ComputeRequest,
-        chan: RpcChannel<S, E, ComputeService>,
+        chan: RpcChannel<S, ComputeService, E>,
     ) -> Result<(), RpcServerError<E>>
     where
         S: Service,

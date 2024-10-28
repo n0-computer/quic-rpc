@@ -337,10 +337,7 @@ impl std::error::Error for CreateChannelError {}
 /// `buffer` the size of the buffer for each channel. Keep this at a low value to get backpressure
 pub fn connection<Req: RpcMessage, Res: RpcMessage>(
     buffer: usize,
-) -> (
-    FlumeServerEndpoint<Req, Res>,
-    FlumeConnection<Res, Req>,
-) {
+) -> (FlumeServerEndpoint<Req, Res>, FlumeConnection<Res, Req>) {
     let (sink, stream) = flume::bounded(buffer);
     (FlumeServerEndpoint { stream }, FlumeConnection { sink })
 }

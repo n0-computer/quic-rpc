@@ -69,8 +69,8 @@ impl<S: Service, C: ServiceEndpoint<S>> RpcServer<S, C> {
 #[derive(Debug)]
 pub struct RpcChannel<
     S: Service,
-    C: ServiceEndpoint<S> = BoxedServiceEndpoint<S>,
     SInner: Service = S,
+    C: ServiceEndpoint<S> = BoxedServiceEndpoint<S>,
 > {
     /// Sink to send responses to the client.
     pub send: C::SendSink,
@@ -80,7 +80,7 @@ pub struct RpcChannel<
     pub map: Arc<dyn MapService<S, SInner>>,
 }
 
-impl<S, C> RpcChannel<S, C, S>
+impl<S, C> RpcChannel<S, S, C>
 where
     S: Service,
     C: ServiceEndpoint<S>,
@@ -95,7 +95,7 @@ where
     }
 }
 
-impl<S, C, SInner> RpcChannel<S, C, SInner>
+impl<S, C, SInner> RpcChannel<S, SInner, C>
 where
     S: Service,
     C: ServiceEndpoint<S>,
@@ -110,7 +110,7 @@ where
     /// Where SNext is the new service to map to and SInner is the current inner service.
     ///
     /// This method can be chained infintely.
-    pub fn map<SNext>(self) -> RpcChannel<S, C, SNext>
+    pub fn map<SNext>(self) -> RpcChannel<S, SNext, C>
     where
         SNext: Service,
         SNext::Req: Into<SInner::Req> + TryFrom<SInner::Req>,
@@ -141,7 +141,9 @@ impl<S: Service, C: ServiceEndpoint<S>> Accepting<S, C> {
     ///
     /// Often sink and stream will wrap an an underlying byte stream. In this case you can
     /// call into_inner() on them to get it back to perform byte level reads and writes.
-    pub async fn read_first(self) -> result::Result<(S::Req, RpcChannel<S, C>), RpcServerError<C>> {
+    pub async fn read_first(
+        self,
+    ) -> result::Result<(S::Req, RpcChannel<S, S, C>), RpcServerError<C>> {
         let Accepting { send, mut recv } = self;
         // get the first message from the client. This will tell us what it wants to do.
         let request: S::Req = recv
@@ -322,10 +324,10 @@ where
     S: Service,
     C: ServiceEndpoint<S>,
     T: Clone + Send + 'static,
-    F: FnMut(RpcChannel<S, C>, S::Req, T) -> Fut + Send + 'static,
+    F: FnMut(RpcChannel<S, S, C>, S::Req, T) -> Fut + Send + 'static,
     Fut: Future<Output = Result<(), RpcServerError<C>>> + Send + 'static,
 {
-    let server = RpcServer::<S, C>::new(conn);
+    let server: RpcServer<S, C> = RpcServer::<S, C>::new(conn);
     loop {
         let (req, chan) = server.accept().await?.read_first().await?;
         let target = target.clone();

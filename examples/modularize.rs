@@ -32,7 +32,7 @@ async fn main() -> Result<()> {
 }
 
 async fn run_server<C: ServiceEndpoint<AppService>>(server_conn: C, handler: app::Handler) {
-    let server = RpcServer::new(server_conn);
+    let server = RpcServer::<AppService, _>::new(server_conn);
     loop {
         let Ok(accepting) = server.accept().await else {
             continue;
@@ -156,7 +156,7 @@ mod app {
         pub async fn handle_rpc_request<E: ServiceEndpoint<AppService>>(
             self,
             req: Request,
-            chan: RpcChannel<AppService, E>,
+            chan: RpcChannel<AppService, AppService, E>,
         ) -> Result<()> {
             match req {
                 Request::Iroh(req) => self.iroh.handle_rpc_request(req, chan.map()).await?,
@@ -236,7 +236,7 @@ mod iroh {
         pub async fn handle_rpc_request<S, E>(
             self,
             req: Request,
-            chan: RpcChannel<S, E, IrohService>,
+            chan: RpcChannel<S, IrohService, E>,
         ) -> Result<()>
         where
             S: Service,
@@ -340,7 +340,7 @@ mod calc {
         pub async fn handle_rpc_request<S, E>(
             self,
             req: Request,
-            chan: RpcChannel<S, E, CalcService>,
+            chan: RpcChannel<S, CalcService, E>,
         ) -> Result<()>
         where
             S: Service,
@@ -478,7 +478,7 @@ mod clock {
         pub async fn handle_rpc_request<S, E>(
             self,
             req: Request,
-            chan: RpcChannel<S, E, ClockService>,
+            chan: RpcChannel<S, ClockService, E>,
         ) -> Result<()>
         where
             S: Service,
