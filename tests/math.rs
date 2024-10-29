@@ -175,7 +175,7 @@ impl ComputeService {
     pub async fn handle_rpc_request<S, E>(
         service: ComputeService,
         req: ComputeRequest,
-        chan: RpcChannel<ComputeService, S, E>,
+        chan: RpcChannel<ComputeService, E, S>,
     ) -> Result<(), RpcServerError<E>>
     where
         S: Service,
@@ -268,7 +268,7 @@ impl ComputeService {
 }
 
 pub async fn smoke_test<C: ServiceConnection<ComputeService>>(client: C) -> anyhow::Result<()> {
-    let client = RpcClient::<ComputeService, ComputeService, C>::new(client);
+    let client = RpcClient::<ComputeService, C>::new(client);
     // a rpc call
     tracing::debug!("calling rpc S(1234)");
     let res = client.rpc(Sqr(1234)).await?;
@@ -316,7 +316,7 @@ fn clear_line() {
     print!("\r{}\r", " ".repeat(80));
 }
 
-pub async fn bench<S, C>(client: RpcClient<ComputeService, S, C>, n: u64) -> anyhow::Result<()>
+pub async fn bench<S, C>(client: RpcClient<ComputeService, C, S>, n: u64) -> anyhow::Result<()>
 where
     C::SendError: std::error::Error,
     S: Service,

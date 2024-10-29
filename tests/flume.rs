@@ -15,7 +15,7 @@ async fn flume_channel_bench() -> anyhow::Result<()> {
 
     let server = RpcServer::<ComputeService, _>::new(server);
     let server_handle = tokio::task::spawn(ComputeService::server(server));
-    let client = RpcClient::<ComputeService, ComputeService, _>::new(client);
+    let client = RpcClient::<ComputeService, _>::new(client);
     bench(client, 1000000).await?;
     // dropping the client will cause the server to terminate
     match server_handle.await? {
@@ -73,8 +73,8 @@ async fn flume_channel_mapped_bench() -> anyhow::Result<()> {
                     let req: OuterRequest = req;
                     match req {
                         OuterRequest::Inner(InnerRequest::Compute(req)) => {
-                            let chan: RpcChannel<InnerService, OuterService, _> = chan.map();
-                            let chan: RpcChannel<ComputeService, OuterService, _> = chan.map();
+                            let chan: RpcChannel<InnerService, _, OuterService> = chan.map();
+                            let chan: RpcChannel<ComputeService, _, OuterService> = chan.map();
                             ComputeService::handle_rpc_request(service, req, chan).await
                         }
                     }
@@ -82,9 +82,9 @@ async fn flume_channel_mapped_bench() -> anyhow::Result<()> {
             }
         });
 
-    let client = RpcClient::<OuterService, OuterService, _>::new(client);
-    let client: RpcClient<InnerService, OuterService, _> = client.map();
-    let client: RpcClient<ComputeService, OuterService, _> = client.map();
+    let client = RpcClient::<OuterService, _>::new(client);
+    let client: RpcClient<InnerService, _, OuterService> = client.map();
+    let client: RpcClient<ComputeService, _, OuterService> = client.map();
     bench(client, 1000000).await?;
     // dropping the client will cause the server to terminate
     match server_handle.await? {

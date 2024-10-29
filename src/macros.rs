@@ -199,7 +199,7 @@ macro_rules! __derive_create_dispatch {
         macro_rules! $create_dispatch {
             ($target:ident, $handler:ident) => {
                 pub async fn $handler<C: $crate::ServiceEndpoint<$service>>(
-                    mut chan: $crate::server::RpcChannel<$service, $service, C>,
+                    mut chan: $crate::server::RpcChannel<$service, C, $service>,
                     msg: <$service as $crate::Service>::Req,
                     target: $target,
                 ) -> Result<(), $crate::server::RpcServerError<C>> {

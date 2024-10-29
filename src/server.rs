@@ -77,11 +77,8 @@ impl<S: Service, C: ServiceEndpoint<S>> RpcServer<S, C> {
 /// `SC` is the service type that is compatible with the connection.
 /// `C` is the service endpoint from which the channel was created.
 #[derive(Debug)]
-pub struct RpcChannel<
-    S: Service,
-    SC: Service = S,
-    C: ServiceEndpoint<SC> = BoxedServiceEndpoint<SC>,
-> {
+pub struct RpcChannel<S: Service, C: ServiceEndpoint<SC> = BoxedServiceEndpoint<S>, SC: Service = S>
+{
     /// Sink to send responses to the client.
     pub send: C::SendSink,
     /// Stream to receive requests from the client.
@@ -90,7 +87,7 @@ pub struct RpcChannel<
     pub map: Arc<dyn MapService<SC, S>>,
 }
 
-impl<S, C> RpcChannel<S, S, C>
+impl<S, C> RpcChannel<S, C, S>
 where
     S: Service,
     C: ServiceEndpoint<S>,
@@ -105,7 +102,7 @@ where
     }
 }
 
-impl<SC, S, C> RpcChannel<S, SC, C>
+impl<SC, S, C> RpcChannel<S, C, SC>
 where
     S: Service,
     SC: Service,
@@ -120,7 +117,7 @@ where
     /// Where SNext is the new service to map to and S is the current inner service.
     ///
     /// This method can be chained infintely.
-    pub fn map<SNext>(self) -> RpcChannel<SNext, SC, C>
+    pub fn map<SNext>(self) -> RpcChannel<SNext, C, SC>
     where
         SNext: Service,
         SNext::Req: Into<S::Req> + TryFrom<S::Req>,
@@ -153,7 +150,7 @@ impl<S: Service, C: ServiceEndpoint<S>> Accepting<S, C> {
     /// call into_inner() on them to get it back to perform byte level reads and writes.
     pub async fn read_first(
         self,
-    ) -> result::Result<(S::Req, RpcChannel<S, S, C>), RpcServerError<C>> {
+    ) -> result::Result<(S::Req, RpcChannel<S, C, S>), RpcServerError<C>> {
         let Accepting { send, mut recv } = self;
         // get the first message from the client. This will tell us what it wants to do.
         let request: S::Req = recv
@@ -334,7 +331,7 @@ where
     S: Service,
     C: ServiceEndpoint<S>,
     T: Clone + Send + 'static,
-    F: FnMut(RpcChannel<S, S, C>, S::Req, T) -> Fut + Send + 'static,
+    F: FnMut(RpcChannel<S, C, S>, S::Req, T) -> Fut + Send + 'static,
     Fut: Future<Output = Result<(), RpcServerError<C>>> + Send + 'static,
 {
     let server: RpcServer<S, C> = RpcServer::<S, C>::new(conn);

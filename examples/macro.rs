@@ -110,7 +110,7 @@ async fn main() -> anyhow::Result<()> {
         let target = Store;
         run_server_loop(StoreService, server, target, dispatch_store_request).await
     });
-    let client = RpcClient::<StoreService, _, _>::new(client);
+    let client = RpcClient::<StoreService, _>::new(client);
 
     // a rpc call
     for i in 0..3 {

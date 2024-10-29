@@ -35,12 +35,12 @@ pub type BoxStreamSync<'a, T> = Pin<Box<dyn Stream<Item = T> + Send + Sync + 'a>
 /// `SC` is the service type that is compatible with the connection.
 /// `C` is the substream source.
 #[derive(Debug)]
-pub struct RpcClient<S, SC = S, C = BoxedServiceConnection<SC>> {
+pub struct RpcClient<S, C = BoxedServiceConnection<S>, SC = S> {
     pub(crate) source: C,
     pub(crate) map: Arc<dyn MapService<SC, S>>,
 }
 
-impl<SC, S, C: Clone> Clone for RpcClient<S, SC, C> {
+impl<SC, S, C: Clone> Clone for RpcClient<S, C, SC> {
     fn clone(&self) -> Self {
         Self {
             source: self.source.clone(),
@@ -91,7 +91,7 @@ where
     }
 }
 
-impl<S, C> RpcClient<S, S, C>
+impl<S, C> RpcClient<S, C, S>
 where
     S: Service,
     C: ServiceConnection<S>,
@@ -114,7 +114,7 @@ where
     }
 }
 
-impl<S, SC, C> RpcClient<S, SC, C>
+impl<S, C, SC> RpcClient<S, C, SC>
 where
     S: Service,
     SC: Service,
@@ -134,7 +134,7 @@ where
     /// Where SNext is the new service to map to and S is the current inner service.
     ///
     /// This method can be chained infintely.
-    pub fn map<SNext>(self) -> RpcClient<SNext, SC, C>
+    pub fn map<SNext>(self) -> RpcClient<SNext, C, SC>
     where
         SNext: Service,
         SNext::Req: Into<S::Req> + TryFrom<S::Req>,
@@ -148,7 +148,7 @@ where
     }
 }
 
-impl<S, SC, C> AsRef<C> for RpcClient<S, SC, C>
+impl<S, C, SC> AsRef<C> for RpcClient<S, C, SC>
 where
     S: Service,
     SC: Service,

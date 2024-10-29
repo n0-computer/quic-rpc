@@ -89,7 +89,7 @@ async fn try_server_streaming() -> anyhow::Result<()> {
         #[allow(unreachable_code)]
         Ok(())
     });
-    let client = RpcClient::<TryService, TryService, _>::new(client);
+    let client = RpcClient::<TryService, _>::new(client);
     let stream_n = client.try_server_streaming(StreamN { n: 10 }).await?;
     let items: Vec<_> = stream_n.collect().await;
     println!("{:?}", items);

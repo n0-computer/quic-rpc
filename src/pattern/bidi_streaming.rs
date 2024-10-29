@@ -75,7 +75,7 @@ impl<C: ConnectionErrors> fmt::Display for ItemError<C> {
 
 impl<C: ConnectionErrors> error::Error for ItemError<C> {}
 
-impl<S, SC, C> RpcClient<S, SC, C>
+impl<S, C, SC> RpcClient<S, C, SC>
 where
     SC: Service,
     C: ServiceConnection<SC>,
@@ -113,7 +113,7 @@ where
     }
 }
 
-impl<SC, C, S> RpcChannel<S, SC, C>
+impl<SC, C, S> RpcChannel<S, C, SC>
 where
     SC: Service,
     C: ServiceEndpoint<SC>,
