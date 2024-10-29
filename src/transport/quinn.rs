@@ -1,7 +1,7 @@
 //! QUIC transport implementation based on [quinn](https://crates.io/crates/quinn)
 use crate::{
     transport::{Connection, ConnectionErrors, LocalAddr, ServerEndpoint},
-    Service,
+    RpcMessage,
 };
 use futures_lite::{Future, Stream, StreamExt};
 use futures_sink::Sink;
@@ -56,12 +56,12 @@ impl Drop for ServerEndpointInner {
 
 /// A server endpoint using a quinn connection
 #[derive(Debug)]
-pub struct QuinnServerEndpoint<S: Service> {
+pub struct QuinnServerEndpoint<In: RpcMessage, Out: RpcMessage> {
     inner: Arc<ServerEndpointInner>,
-    _phantom: PhantomData<S>,
+    _phantom: PhantomData<(In, Out)>,
 }
 
-impl<S: Service> QuinnServerEndpoint<S> {
+impl<In: RpcMessage, Out: RpcMessage> QuinnServerEndpoint<In, Out> {
     /// handles RPC requests from a connection
     ///
     /// to cleanly shutdown the handler, drop the receiver side of the sender.
@@ -178,7 +178,7 @@ impl<S: Service> QuinnServerEndpoint<S> {
     }
 }
 
-impl<S: Service> Clone for QuinnServerEndpoint<S> {
+impl<In: RpcMessage, Out: RpcMessage> Clone for QuinnServerEndpoint<In, Out> {
     fn clone(&self) -> Self {
         Self {
             inner: self.inner.clone(),
@@ -187,7 +187,7 @@ impl<S: Service> Clone for QuinnServerEndpoint<S> {
     }
 }
 
-impl<S: Service> ConnectionErrors for QuinnServerEndpoint<S> {
+impl<In: RpcMessage, Out: RpcMessage> ConnectionErrors for QuinnServerEndpoint<In, Out> {
     type SendError = io::Error;
 
     type RecvError = io::Error;
@@ -195,12 +195,12 @@ impl<S: Service> ConnectionErrors for QuinnServerEndpoint<S> {
     type OpenError = quinn::ConnectionError;
 }
 
-impl<S: Service> ConnectionCommon<S::Req, S::Res> for QuinnServerEndpoint<S> {
-    type SendSink = self::SendSink<S::Res>;
-    type RecvStream = self::RecvStream<S::Req>;
+impl<In: RpcMessage, Out: RpcMessage> ConnectionCommon<In, Out> for QuinnServerEndpoint<In, Out> {
+    type SendSink = self::SendSink<Out>;
+    type RecvStream = self::RecvStream<In>;
 }
 
-impl<S: Service> ServerEndpoint<S::Req, S::Res> for QuinnServerEndpoint<S> {
+impl<In: RpcMessage, Out: RpcMessage> ServerEndpoint<In, Out> for QuinnServerEndpoint<In, Out> {
     async fn accept(&self) -> Result<(Self::SendSink, Self::RecvStream), AcceptBiError> {
         let (send, recv) = self
             .inner
@@ -254,12 +254,12 @@ impl Drop for ClientConnectionInner {
 }
 
 /// A connection using a quinn connection
-pub struct QuinnConnection<S: Service> {
+pub struct QuinnConnection<In: RpcMessage, Out: RpcMessage> {
     inner: Arc<ClientConnectionInner>,
-    _phantom: PhantomData<S>,
+    _phantom: PhantomData<(In, Out)>,
 }
 
-impl<S: Service> QuinnConnection<S> {
+impl<In: RpcMessage, Out: RpcMessage> QuinnConnection<In, Out> {
     async fn single_connection_handler_inner(
         connection: quinn::Connection,
         requests: flume::Receiver<oneshot::Sender<Result<SocketInner, quinn::ConnectionError>>>,
@@ -601,7 +601,7 @@ impl<'a, T> Stream for Receiver<'a, T> {
     }
 }
 
-impl<S: Service> fmt::Debug for QuinnConnection<S> {
+impl<In: RpcMessage, Out: RpcMessage> fmt::Debug for QuinnConnection<In, Out> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ClientChannel")
             .field("inner", &self.inner)
@@ -609,7 +609,7 @@ impl<S: Service> fmt::Debug for QuinnConnection<S> {
     }
 }
 
-impl<S: Service> Clone for QuinnConnection<S> {
+impl<In: RpcMessage, Out: RpcMessage> Clone for QuinnConnection<In, Out> {
     fn clone(&self) -> Self {
         Self {
             inner: self.inner.clone(),
@@ -618,7 +618,7 @@ impl<S: Service> Clone for QuinnConnection<S> {
     }
 }
 
-impl<S: Service> ConnectionErrors for QuinnConnection<S> {
+impl<In: RpcMessage, Out: RpcMessage> ConnectionErrors for QuinnConnection<In, Out> {
     type SendError = io::Error;
 
     type RecvError = io::Error;
@@ -626,12 +626,12 @@ impl<S: Service> ConnectionErrors for QuinnConnection<S> {
     type OpenError = quinn::ConnectionError;
 }
 
-impl<S: Service> ConnectionCommon<S::Res, S::Req> for QuinnConnection<S> {
-    type SendSink = self::SendSink<S::Req>;
-    type RecvStream = self::RecvStream<S::Res>;
+impl<In: RpcMessage, Out: RpcMessage> ConnectionCommon<In, Out> for QuinnConnection<In, Out> {
+    type SendSink = self::SendSink<Out>;
+    type RecvStream = self::RecvStream<In>;
 }
 
-impl<S: Service> Connection<S::Res, S::Req> for QuinnConnection<S> {
+impl<In: RpcMessage, Out: RpcMessage> Connection<In, Out> for QuinnConnection<In, Out> {
     async fn open(&self) -> Result<(Self::SendSink, Self::RecvStream), Self::OpenError> {
         let (sender, receiver) = oneshot::channel();
         self.inner

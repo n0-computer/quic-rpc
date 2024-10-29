@@ -17,20 +17,30 @@ use std::{
     task::{Context, Poll},
 };
 
+/// Type alias for a boxed connection to a specific service
+pub type BoxedServiceConnection<S> =
+    crate::transport::boxed::Connection<<S as crate::Service>::Res, <S as crate::Service>::Req>;
+
 /// Sync version of `future::stream::BoxStream`.
 pub type BoxStreamSync<'a, T> = Pin<Box<dyn Stream<Item = T> + Send + Sync + 'a>>;
 
 /// A client for a specific service
 ///
 /// This is a wrapper around a [ServiceConnection] that serves as the entry point
-/// for the client DSL. `S` is the service type, `C` is the substream source.
+/// for the client DSL.
+///
+/// Type parameters:
+///
+/// `S` is the service type that determines what interactions this client supports.
+/// `SC` is the service type that is compatible with the connection.
+/// `C` is the substream source.
 #[derive(Debug)]
-pub struct RpcClient<S, C, SInner = S> {
+pub struct RpcClient<S, C = BoxedServiceConnection<S>, SC = S> {
     pub(crate) source: C,
-    pub(crate) map: Arc<dyn MapService<S, SInner>>,
+    pub(crate) map: Arc<dyn MapService<SC, S>>,
 }
 
-impl<S, C: Clone, SInner> Clone for RpcClient<S, C, SInner> {
+impl<SC, S, C: Clone> Clone for RpcClient<S, C, SC> {
     fn clone(&self) -> Self {
         Self {
             source: self.source.clone(),
@@ -43,23 +53,23 @@ impl<S, C: Clone, SInner> Clone for RpcClient<S, C, SInner> {
 /// that support it, [crate::message::ClientStreaming] and [crate::message::BidiStreaming].
 #[pin_project]
 #[derive(Debug)]
-pub struct UpdateSink<S, C, T, SInner = S>(
+pub struct UpdateSink<SC, C, T, S = SC>(
     #[pin] pub C::SendSink,
     pub PhantomData<T>,
-    pub Arc<dyn MapService<S, SInner>>,
+    pub Arc<dyn MapService<SC, S>>,
 )
 where
+    SC: Service,
     S: Service,
-    SInner: Service,
-    C: ServiceConnection<S>,
-    T: Into<SInner::Req>;
+    C: ServiceConnection<SC>,
+    T: Into<S::Req>;
 
-impl<S, C, T, SInner> Sink<T> for UpdateSink<S, C, T, SInner>
+impl<SC, C, T, S> Sink<T> for UpdateSink<SC, C, T, S>
 where
+    SC: Service,
     S: Service,
-    SInner: Service,
-    C: ServiceConnection<S>,
-    T: Into<SInner::Req>,
+    C: ServiceConnection<SC>,
+    T: Into<S::Req>,
 {
     type Error = C::SendError;
 
@@ -90,6 +100,12 @@ where
     /// [ServiceConnection].
     ///
     /// This is where a generic typed connection is converted into a client for a specific service.
+    ///
+    /// When creating a new client, the outer service type `S` and the inner
+    /// service type `SC` that is compatible with the underlying connection will
+    /// be identical.
+    ///
+    /// You can get a client for a nested service by calling [map](RpcClient::map).
     pub fn new(source: C) -> Self {
         Self {
             source,
@@ -98,11 +114,11 @@ where
     }
 }
 
-impl<S, C, SInner> RpcClient<S, C, SInner>
+impl<S, C, SC> RpcClient<S, C, SC>
 where
     S: Service,
-    C: ServiceConnection<S>,
-    SInner: Service,
+    SC: Service,
+    C: ServiceConnection<SC>,
 {
     /// Get the underlying connection
     pub fn into_inner(self) -> C {
@@ -112,17 +128,17 @@ where
     /// Map this channel's service into an inner service.
     ///
     /// This method is available if the required bounds are upheld:
-    /// SNext::Req: Into<SInner::Req> + TryFrom<SInner::Req>,
-    /// SNext::Res: Into<SInner::Res> + TryFrom<SInner::Res>,
+    /// SNext::Req: Into<S::Req> + TryFrom<S::Req>,
+    /// SNext::Res: Into<S::Res> + TryFrom<S::Res>,
     ///
-    /// Where SNext is the new service to map to and SInner is the current inner service.
+    /// Where SNext is the new service to map to and S is the current inner service.
     ///
     /// This method can be chained infintely.
-    pub fn map<SNext>(self) -> RpcClient<S, C, SNext>
+    pub fn map<SNext>(self) -> RpcClient<SNext, C, SC>
     where
         SNext: Service,
-        SNext::Req: Into<SInner::Req> + TryFrom<SInner::Req>,
-        SNext::Res: Into<SInner::Res> + TryFrom<SInner::Res>,
+        SNext::Req: Into<S::Req> + TryFrom<S::Req>,
+        SNext::Res: Into<S::Res> + TryFrom<S::Res>,
     {
         let map = ChainedMapper::new(self.map);
         RpcClient {
@@ -132,11 +148,11 @@ where
     }
 }
 
-impl<S, C, SInner> AsRef<C> for RpcClient<S, C, SInner>
+impl<S, C, SC> AsRef<C> for RpcClient<S, C, SC>
 where
     S: Service,
-    C: ServiceConnection<S>,
-    SInner: Service,
+    SC: Service,
+    C: ServiceConnection<SC>,
 {
     fn as_ref(&self) -> &C {
         &self.source

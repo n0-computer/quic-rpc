@@ -175,7 +175,7 @@ impl ComputeService {
     pub async fn handle_rpc_request<S, E>(
         service: ComputeService,
         req: ComputeRequest,
-        chan: RpcChannel<S, E, ComputeService>,
+        chan: RpcChannel<ComputeService, E, S>,
     ) -> Result<(), RpcServerError<E>>
     where
         S: Service,
@@ -316,7 +316,7 @@ fn clear_line() {
     print!("\r{}\r", " ".repeat(80));
 }
 
-pub async fn bench<S, C>(client: RpcClient<S, C, ComputeService>, n: u64) -> anyhow::Result<()>
+pub async fn bench<S, C>(client: RpcClient<ComputeService, C, S>, n: u64) -> anyhow::Result<()>
 where
     C::SendError: std::error::Error,
     S: Service,

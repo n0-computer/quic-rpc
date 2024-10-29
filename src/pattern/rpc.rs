@@ -62,16 +62,16 @@ impl<C: ConnectionErrors> fmt::Display for Error<C> {
 
 impl<C: ConnectionErrors> error::Error for Error<C> {}
 
-impl<S, C, SInner> RpcClient<S, C, SInner>
+impl<S, C, SC> RpcClient<S, C, SC>
 where
     S: Service,
-    C: ServiceConnection<S>,
-    SInner: Service,
+    SC: Service,
+    C: ServiceConnection<SC>,
 {
     /// RPC call to the server, single request, single response
     pub async fn rpc<M>(&self, msg: M) -> result::Result<M::Response, Error<C>>
     where
-        M: RpcMsg<SInner>,
+        M: RpcMsg<S>,
     {
         let msg = self.map.req_into_outer(msg.into());
         let (mut send, mut recv) = self.source.open().await.map_err(Error::Open)?;
@@ -91,11 +91,11 @@ where
     }
 }
 
-impl<S, C, SInner> RpcChannel<S, C, SInner>
+impl<S, C, SC> RpcChannel<S, C, SC>
 where
     S: Service,
-    C: ServiceEndpoint<S>,
-    SInner: Service,
+    SC: Service,
+    C: ServiceEndpoint<SC>,
 {
     /// handle the message of type `M` using the given function on the target object
     ///
@@ -107,7 +107,7 @@ where
         f: F,
     ) -> result::Result<(), RpcServerError<C>>
     where
-        M: RpcMsg<SInner>,
+        M: RpcMsg<S>,
         F: FnOnce(T, M) -> Fut,
         Fut: Future<Output = M::Response>,
         T: Send + 'static,
@@ -142,7 +142,7 @@ where
         f: F,
     ) -> result::Result<(), RpcServerError<C>>
     where
-        M: RpcMsg<SInner, Response = result::Result<R, E2>>,
+        M: RpcMsg<S, Response = result::Result<R, E2>>,
         F: FnOnce(T, M) -> Fut,
         Fut: Future<Output = result::Result<R, E1>>,
         E2: From<E1>,

@@ -49,11 +49,11 @@
 //! }
 //!
 //! // create a transport channel, here a memory channel for testing
-//! let (server, client) = quic_rpc::transport::flume::connection::<PingService>(1);
+//! let (server, client) = quic_rpc::transport::flume::service_connection::<PingService>(1);
 //!
 //! // client side
 //! // create the rpc client given the channel and the service type
-//! let mut client = RpcClient::<PingService, _>::new(client);
+//! let mut client = RpcClient::<PingService,_>::new(client);
 //!
 //! // call the service
 //! let res = client.rpc(Ping).await?;

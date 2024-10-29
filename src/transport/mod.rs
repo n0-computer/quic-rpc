@@ -1,4 +1,22 @@
 //! Transports for quic-rpc
+//!
+//! There are two sides to a transport, a server side where connections are
+//! accepted and a client side where connections are initiated.
+//!
+//! Connections are bidirectional typed channels, with a distinct type for
+//! the send and receive side. They are *unrelated* to services.
+//!
+//! In the transport module, the message types are referred to as `In` and `Out`.
+//!
+//! A [`Connection`] can be used to *open* bidirectional typed channels using
+//! [`Connection::open`]. A [`ServerEndpoint`] can be used to *accept* bidirectional
+//! typed channels from any of the currently opened connections to clients, using
+//! [`ServerEndpoint::accept`].
+//!
+//! In both cases, the result is a tuple of a send side and a receive side. These
+//! types are defined by implementing the [`ConnectionCommon`] trait.
+//!
+//! Errors for both sides are defined by implementing the [`ConnectionErrors`] trait.
 use futures_lite::{Future, Stream};
 use futures_sink::Sink;
 

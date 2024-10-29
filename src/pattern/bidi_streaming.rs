@@ -75,11 +75,11 @@ impl<C: ConnectionErrors> fmt::Display for ItemError<C> {
 
 impl<C: ConnectionErrors> error::Error for ItemError<C> {}
 
-impl<S, C, SInner> RpcClient<S, C, SInner>
+impl<S, C, SC> RpcClient<S, C, SC>
 where
+    SC: Service,
+    C: ServiceConnection<SC>,
     S: Service,
-    C: ServiceConnection<S>,
-    SInner: Service,
 {
     /// Bidi call to the server, request opens a stream, response is a stream
     pub async fn bidi<M>(
@@ -87,13 +87,13 @@ where
         msg: M,
     ) -> result::Result<
         (
-            UpdateSink<S, C, M::Update, SInner>,
+            UpdateSink<SC, C, M::Update, S>,
             BoxStreamSync<'static, result::Result<M::Response, ItemError<C>>>,
         ),
         Error<C>,
     >
     where
-        M: BidiStreamingMsg<SInner>,
+        M: BidiStreamingMsg<S>,
     {
         let msg = self.map.req_into_outer(msg.into());
         let (mut send, recv) = self.source.open().await.map_err(Error::Open)?;
@@ -113,11 +113,11 @@ where
     }
 }
 
-impl<S, C, SInner> RpcChannel<S, C, SInner>
+impl<SC, C, S> RpcChannel<S, C, SC>
 where
+    SC: Service,
+    C: ServiceEndpoint<SC>,
     S: Service,
-    C: ServiceEndpoint<S>,
-    SInner: Service,
 {
     /// handle the message M using the given function on the target object
     ///
@@ -129,8 +129,8 @@ where
         f: F,
     ) -> result::Result<(), RpcServerError<C>>
     where
-        M: BidiStreamingMsg<SInner>,
-        F: FnOnce(T, M, UpdateStream<S, C, M::Update, SInner>) -> Str + Send + 'static,
+        M: BidiStreamingMsg<S>,
+        F: FnOnce(T, M, UpdateStream<SC, C, M::Update, S>) -> Str + Send + 'static,
         Str: Stream<Item = M::Response> + Send + 'static,
         T: Send + 'static,
     {

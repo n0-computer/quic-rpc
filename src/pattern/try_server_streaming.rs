@@ -98,11 +98,11 @@ impl<S: ConnectionErrors, E: Debug> fmt::Display for ItemError<S, E> {
 
 impl<S: ConnectionErrors, E: Debug> error::Error for ItemError<S, E> {}
 
-impl<S, C, SInner> RpcChannel<S, C, SInner>
+impl<SC, C, S> RpcChannel<S, C, SC>
 where
+    SC: Service,
+    C: ServiceEndpoint<SC>,
     S: Service,
-    C: ServiceEndpoint<S>,
-    SInner: Service,
 {
     /// handle the message M using the given function on the target object
     ///
@@ -117,10 +117,9 @@ where
         f: F,
     ) -> result::Result<(), RpcServerError<C>>
     where
-        M: TryServerStreamingMsg<SInner>,
-        std::result::Result<M::Item, M::ItemError>: Into<SInner::Res> + TryFrom<SInner::Res>,
-        std::result::Result<StreamCreated, M::CreateError>:
-            Into<SInner::Res> + TryFrom<SInner::Res>,
+        M: TryServerStreamingMsg<S>,
+        std::result::Result<M::Item, M::ItemError>: Into<S::Res> + TryFrom<S::Res>,
+        std::result::Result<StreamCreated, M::CreateError>: Into<S::Res> + TryFrom<S::Res>,
         F: FnOnce(T, M) -> Fut + Send + 'static,
         Fut: Future<Output = std::result::Result<Str, M::CreateError>> + Send + 'static,
         Str: Stream<Item = std::result::Result<M::Item, M::ItemError>> + Send + 'static,
@@ -171,11 +170,11 @@ where
     }
 }
 
-impl<S, C, SInner> RpcClient<S, C, SInner>
+impl<S, C, SC> RpcClient<S, C, SC>
 where
+    SC: Service,
+    C: ServiceConnection<SC>,
     S: Service,
-    C: ServiceConnection<S>,
-    SInner: Service,
 {
     /// Bidi call to the server, request opens a stream, response is a stream
     pub async fn try_server_streaming<M>(
@@ -186,9 +185,9 @@ where
         Error<C, M::CreateError>,
     >
     where
-        M: TryServerStreamingMsg<SInner>,
-        Result<M::Item, M::ItemError>: Into<SInner::Res> + TryFrom<SInner::Res>,
-        Result<StreamCreated, M::CreateError>: Into<SInner::Res> + TryFrom<SInner::Res>,
+        M: TryServerStreamingMsg<S>,
+        Result<M::Item, M::ItemError>: Into<S::Res> + TryFrom<S::Res>,
+        Result<StreamCreated, M::CreateError>: Into<S::Res> + TryFrom<S::Res>,
     {
         let msg = self.map.req_into_outer(msg.into());
         let (mut send, mut recv) = self.source.open().await.map_err(Error::Open)?;

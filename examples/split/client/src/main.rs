@@ -19,8 +19,7 @@ async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt::init();
     let server_addr: SocketAddr = "127.0.0.1:12345".parse()?;
     let endpoint = make_insecure_client_endpoint("0.0.0.0:0".parse()?)?;
-    let client =
-        QuinnConnection::<ComputeService>::new(endpoint, server_addr, "localhost".to_string());
+    let client = QuinnConnection::new(endpoint, server_addr, "localhost".to_string());
     let client = RpcClient::new(client);
     // let mut client = ComputeClient(client);
 

@@ -62,7 +62,7 @@ async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt::init();
     let server_addr: SocketAddr = "127.0.0.1:12345".parse()?;
     let (server, _server_certs) = make_server_endpoint(server_addr)?;
-    let channel = QuinnServerEndpoint::<ComputeService>::new(server)?;
+    let channel = QuinnServerEndpoint::new(server)?;
     let target = Compute;
     run_server_loop(
         ComputeService,
