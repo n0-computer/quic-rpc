@@ -343,6 +343,7 @@ pub fn connection<Req: RpcMessage, Res: RpcMessage>(
 }
 
 /// Create a flume server endpoint and a connected flume client channel for a specific service.
+#[allow(clippy::type_complexity)]
 pub fn service_connection<S: crate::Service>(
     buffer: usize,
 ) -> (
