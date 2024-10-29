@@ -77,11 +77,11 @@ impl<C: ConnectionErrors> fmt::Display for ItemError<C> {
 
 impl<C: ConnectionErrors> error::Error for ItemError<C> {}
 
-impl<SInner, S, C> RpcClient<SInner, S, C>
+impl<S, SC, C> RpcClient<S, SC, C>
 where
     S: Service,
-    C: ServiceConnection<S>,
-    SInner: Service,
+    SC: Service,
+    C: ServiceConnection<SC>,
 {
     /// Call to the server that allows the client to stream, single response
     pub async fn client_streaming<M>(
@@ -89,18 +89,18 @@ where
         msg: M,
     ) -> result::Result<
         (
-            UpdateSink<S, C, M::Update, SInner>,
+            UpdateSink<SC, C, M::Update, S>,
             Boxed<result::Result<M::Response, ItemError<C>>>,
         ),
         Error<C>,
     >
     where
-        M: ClientStreamingMsg<SInner>,
+        M: ClientStreamingMsg<S>,
     {
         let msg = self.map.req_into_outer(msg.into());
         let (mut send, mut recv) = self.source.open().await.map_err(Error::Open)?;
         send.send(msg).map_err(Error::Send).await?;
-        let send = UpdateSink::<S, C, M::Update, SInner>(send, PhantomData, Arc::clone(&self.map));
+        let send = UpdateSink::<SC, C, M::Update, S>(send, PhantomData, Arc::clone(&self.map));
         let map = Arc::clone(&self.map);
         let recv = async move {
             let item = recv.next().await.ok_or(ItemError::EarlyClose)?;
@@ -120,11 +120,11 @@ where
     }
 }
 
-impl<S, C, SInner> RpcChannel<S, SInner, C>
+impl<S, SC, C> RpcChannel<S, SC, C>
 where
     S: Service,
-    C: ServiceEndpoint<S>,
-    SInner: Service,
+    SC: Service,
+    C: ServiceEndpoint<SC>,
 {
     /// handle the message M using the given function on the target object
     ///
@@ -136,8 +136,8 @@ where
         f: F,
     ) -> result::Result<(), RpcServerError<C>>
     where
-        M: ClientStreamingMsg<SInner>,
-        F: FnOnce(T, M, UpdateStream<S, C, M::Update, SInner>) -> Fut + Send + 'static,
+        M: ClientStreamingMsg<S>,
+        F: FnOnce(T, M, UpdateStream<SC, C, M::Update, S>) -> Fut + Send + 'static,
         Fut: Future<Output = M::Response> + Send + 'static,
         T: Send + 'static,
     {

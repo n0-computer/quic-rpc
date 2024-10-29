@@ -62,7 +62,7 @@ async fn flume_channel_mapped_bench() -> anyhow::Result<()> {
     }
     let (server, client) = flume::service_connection::<OuterService>(1);
 
-    let server = RpcServer::new(server);
+    let server = RpcServer::<OuterService, _>::new(server);
     let server_handle: tokio::task::JoinHandle<Result<(), RpcServerError<_>>> =
         tokio::task::spawn(async move {
             let service = ComputeService;
@@ -73,8 +73,8 @@ async fn flume_channel_mapped_bench() -> anyhow::Result<()> {
                     let req: OuterRequest = req;
                     match req {
                         OuterRequest::Inner(InnerRequest::Compute(req)) => {
-                            let chan: RpcChannel<OuterService, InnerService, _> = chan.map();
-                            let chan: RpcChannel<OuterService, ComputeService, _> = chan.map();
+                            let chan: RpcChannel<InnerService, OuterService, _> = chan.map();
+                            let chan: RpcChannel<ComputeService, OuterService, _> = chan.map();
                             ComputeService::handle_rpc_request(service, req, chan).await
                         }
                     }

@@ -23,10 +23,14 @@ use tokio::sync::oneshot;
 pub type BoxedServiceEndpoint<S> =
     crate::transport::boxed::ServerEndpoint<<S as crate::Service>::Req, <S as crate::Service>::Res>;
 
-/// A server channel for a specific service.
+/// A server for a specific service.
 ///
 /// This is a wrapper around a [ServiceEndpoint] that serves as the entry point for the server DSL.
-/// `S` is the service type, `C` is the channel type.
+///
+/// Type parameters:
+///
+/// `S` is the service type.
+/// `C` is the channel type.
 #[derive(Debug)]
 pub struct RpcServer<S, C = BoxedServiceEndpoint<S>> {
     /// The channel on which new requests arrive.
@@ -66,18 +70,24 @@ impl<S: Service, C: ServiceEndpoint<S>> RpcServer<S, C> {
 ///
 /// Sink and stream are independent, so you can take the channel apart and use
 /// them independently.
+///
+/// Type parameters:
+///
+/// `S` is the service type.
+/// `SC` is the service type that is compatible with the connection.
+/// `C` is the service endpoint from which the channel was created.
 #[derive(Debug)]
 pub struct RpcChannel<
     S: Service,
-    SInner: Service = S,
-    C: ServiceEndpoint<S> = BoxedServiceEndpoint<S>,
+    SC: Service = S,
+    C: ServiceEndpoint<SC> = BoxedServiceEndpoint<SC>,
 > {
     /// Sink to send responses to the client.
     pub send: C::SendSink,
     /// Stream to receive requests from the client.
     pub recv: C::RecvStream,
     /// Mapper to map between S and S2
-    pub map: Arc<dyn MapService<S, SInner>>,
+    pub map: Arc<dyn MapService<SC, S>>,
 }
 
 impl<S, C> RpcChannel<S, S, C>
@@ -95,26 +105,26 @@ where
     }
 }
 
-impl<S, C, SInner> RpcChannel<S, SInner, C>
+impl<SC, S, C> RpcChannel<S, SC, C>
 where
     S: Service,
-    C: ServiceEndpoint<S>,
-    SInner: Service,
+    SC: Service,
+    C: ServiceEndpoint<SC>,
 {
     /// Map this channel's service into an inner service.
     ///
     /// This method is available if the required bounds are upheld:
-    /// SNext::Req: Into<SInner::Req> + TryFrom<SInner::Req>,
-    /// SNext::Res: Into<SInner::Res> + TryFrom<SInner::Res>,
+    /// SNext::Req: Into<S::Req> + TryFrom<S::Req>,
+    /// SNext::Res: Into<S::Res> + TryFrom<S::Res>,
     ///
-    /// Where SNext is the new service to map to and SInner is the current inner service.
+    /// Where SNext is the new service to map to and S is the current inner service.
     ///
     /// This method can be chained infintely.
-    pub fn map<SNext>(self) -> RpcChannel<S, SNext, C>
+    pub fn map<SNext>(self) -> RpcChannel<SNext, SC, C>
     where
         SNext: Service,
-        SNext::Req: Into<SInner::Req> + TryFrom<SInner::Req>,
-        SNext::Res: Into<SInner::Res> + TryFrom<SInner::Res>,
+        SNext::Req: Into<S::Req> + TryFrom<S::Req>,
+        SNext::Res: Into<S::Res> + TryFrom<S::Res>,
     {
         let map = ChainedMapper::new(self.map);
         RpcChannel {
@@ -183,27 +193,27 @@ impl<S: Service, C: ServiceEndpoint<S>> AsRef<C> for RpcServer<S, C> {
 /// cause a termination of the RPC call.
 #[pin_project]
 #[derive(Debug)]
-pub struct UpdateStream<S, C, T, SInner = S>(
+pub struct UpdateStream<SC, C, T, S = SC>(
     #[pin] C::RecvStream,
     Option<oneshot::Sender<RpcServerError<C>>>,
     PhantomData<T>,
-    Arc<dyn MapService<S, SInner>>,
+    Arc<dyn MapService<SC, S>>,
 )
 where
+    SC: Service,
     S: Service,
-    SInner: Service,
-    C: ServiceEndpoint<S>;
+    C: ServiceEndpoint<SC>;
 
-impl<S, C, T, SInner> UpdateStream<S, C, T, SInner>
+impl<SC, C, T, S> UpdateStream<SC, C, T, S>
 where
+    SC: Service,
     S: Service,
-    SInner: Service,
-    C: ServiceEndpoint<S>,
-    T: TryFrom<SInner::Req>,
+    C: ServiceEndpoint<SC>,
+    T: TryFrom<S::Req>,
 {
     pub(crate) fn new(
         recv: C::RecvStream,
-        map: Arc<dyn MapService<S, SInner>>,
+        map: Arc<dyn MapService<SC, S>>,
     ) -> (Self, UnwrapToPending<RpcServerError<C>>) {
         let (error_send, error_recv) = oneshot::channel();
         let error_recv = UnwrapToPending(error_recv);
@@ -211,12 +221,12 @@ where
     }
 }
 
-impl<S, C, T, SInner> Stream for UpdateStream<S, C, T, SInner>
+impl<SC, C, T, S> Stream for UpdateStream<SC, C, T, S>
 where
+    SC: Service,
     S: Service,
-    SInner: Service,
-    C: ServiceEndpoint<S>,
-    T: TryFrom<SInner::Req>,
+    C: ServiceEndpoint<SC>,
+    T: TryFrom<S::Req>,
 {
     type Item = T;
 

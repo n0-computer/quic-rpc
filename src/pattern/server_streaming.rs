@@ -67,11 +67,11 @@ impl<S: ConnectionErrors> fmt::Display for ItemError<S> {
 
 impl<S: ConnectionErrors> error::Error for ItemError<S> {}
 
-impl<SInner, S, C> RpcClient<SInner, S, C>
+impl<S, SC, C> RpcClient<S, SC, C>
 where
+    SC: Service,
+    C: ServiceConnection<SC>,
     S: Service,
-    C: ServiceConnection<S>,
-    SInner: Service,
 {
     /// Bidi call to the server, request opens a stream, response is a stream
     pub async fn server_streaming<M>(
@@ -79,7 +79,7 @@ where
         msg: M,
     ) -> result::Result<BoxStreamSync<'static, result::Result<M::Response, ItemError<C>>>, Error<C>>
     where
-        M: ServerStreamingMsg<SInner>,
+        M: ServerStreamingMsg<S>,
     {
         let msg = self.map.req_into_outer(msg.into());
         let (mut send, recv) = self.source.open().await.map_err(Error::Open)?;
@@ -100,11 +100,11 @@ where
     }
 }
 
-impl<S, C, SInner> RpcChannel<S, SInner, C>
+impl<S, SC, C> RpcChannel<S, SC, C>
 where
     S: Service,
-    C: ServiceEndpoint<S>,
-    SInner: Service,
+    SC: Service,
+    C: ServiceEndpoint<SC>,
 {
     /// handle the message M using the given function on the target object
     ///
@@ -116,7 +116,7 @@ where
         f: F,
     ) -> result::Result<(), RpcServerError<C>>
     where
-        M: ServerStreamingMsg<SInner>,
+        M: ServerStreamingMsg<S>,
         F: FnOnce(T, M) -> Str + Send + 'static,
         Str: Stream<Item = M::Response> + Send + 'static,
         T: Send + 'static,

@@ -236,7 +236,7 @@ mod iroh {
         pub async fn handle_rpc_request<S, E>(
             self,
             req: Request,
-            chan: RpcChannel<S, IrohService, E>,
+            chan: RpcChannel<IrohService, S, E>,
         ) -> Result<()>
         where
             S: Service,
@@ -340,7 +340,7 @@ mod calc {
         pub async fn handle_rpc_request<S, E>(
             self,
             req: Request,
-            chan: RpcChannel<S, CalcService, E>,
+            chan: RpcChannel<CalcService, S, E>,
         ) -> Result<()>
         where
             S: Service,
@@ -478,7 +478,7 @@ mod clock {
         pub async fn handle_rpc_request<S, E>(
             self,
             req: Request,
-            chan: RpcChannel<S, ClockService, E>,
+            chan: RpcChannel<ClockService, S, E>,
         ) -> Result<()>
         where
             S: Service,
