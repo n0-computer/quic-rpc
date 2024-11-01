@@ -187,11 +187,10 @@ impl<In: RpcMessage, Out: RpcMessage> IrohNetServerEndpoint<In, Out> {
         let allowed_node_ids = match access_control {
             AccessControl::Unrestricted => BTreeSet::new(),
             AccessControl::Allowed(list) if list.is_empty() => {
-                tracing::warn!(
-                    "Allowed list of `NodeId`s is empty, iroh-net \
-                    quic-rpc endpoint will have unrestricted access!"
-                );
-                BTreeSet::new()
+                return Err(io::Error::other(
+                    "Empty list of allowed nodes, \
+                    endpoint would reject all connections",
+                ));
             }
             AccessControl::Allowed(list) => BTreeSet::from_iter(list),
         };
@@ -203,7 +202,7 @@ impl<In: RpcMessage, Out: RpcMessage> IrohNetServerEndpoint<In, Out> {
             sender,
             allowed_node_ids,
         ));
-        
+
         Ok(Self {
             inner: Arc::new(ServerEndpointInner {
                 endpoint: Some(endpoint),
