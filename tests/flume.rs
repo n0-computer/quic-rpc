@@ -73,8 +73,8 @@ async fn flume_channel_mapped_bench() -> anyhow::Result<()> {
                     let req: OuterRequest = req;
                     match req {
                         OuterRequest::Inner(InnerRequest::Compute(req)) => {
-                            let chan: RpcChannel<InnerService, _, OuterService> = chan.map();
-                            let chan: RpcChannel<ComputeService, _, OuterService> = chan.map();
+                            let chan: RpcChannel<InnerService, _> = chan.map();
+                            let chan: RpcChannel<ComputeService, _> = chan.map();
                             ComputeService::handle_rpc_request(service, req, chan).await
                         }
                     }

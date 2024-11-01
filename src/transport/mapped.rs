@@ -297,24 +297,26 @@ where
     }
 }
 
-impl<S, C, SC> RpcChannel<S, C, SC>
+impl<S, C> RpcChannel<S, C>
 where
     S: Service,
-    SC: Service,
-    C: ConnectionCommon<In = SC::Req, Out = SC::Res>,
+    C: ConnectionCommon<In = S::Req, Out = S::Res>,
 {
     /// Map the input and output types of this connection
-    pub fn map2<S1>(self) -> RpcChannel<S, MappedConnectionTypes<S1::Req, S1::Res, C>, S1>
+    pub fn map2<S1>(self) -> RpcChannel<S1, MappedConnectionTypes<S1::Req, S1::Res, C>>
     where
         S1: Service,
-        S1::Req: TryFrom<SC::Req>,
-        SC::Res: From<S1::Res>,
+        S1::Req: TryFrom<S::Req>,
+        S::Res: From<S1::Res>,
     {
-        RpcChannel {
-            send: MappedSendSink::new(self.send),
-            recv: MappedRecvStream::new(self.recv),
-            map: todo!(),
-        }
+        let send = MappedSendSink::<C::SendSink, S1::Res, S::Res>::new(self.send);
+        let recv = MappedRecvStream::<C::RecvStream, S1::Req>::new(self.recv);
+        let t: RpcChannel<S1, MappedConnectionTypes<S1::Req, S1::Res, C>> = RpcChannel {
+            send,
+            recv,
+            p: PhantomData,
+        };
+        t
     }
 }
 

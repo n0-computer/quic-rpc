@@ -100,11 +100,10 @@ where
     }
 }
 
-impl<S, C, SC> RpcChannel<S, C, SC>
+impl<S, C> RpcChannel<S, C>
 where
     S: Service,
-    C: ConnectionCommon<In = SC::Req, Out = SC::Res>,
-    SC: Service,
+    C: ConnectionCommon<In = S::Req, Out = S::Res>,
 {
     /// handle the message M using the given function on the target object
     ///
@@ -135,7 +134,7 @@ where
             tokio::pin!(responses);
             while let Some(response) = responses.next().await {
                 // turn into a S::Res so we can send it
-                let response = self.map.res_into_outer(response.into());
+                let response = response.into();
                 // send it and return the error if any
                 send.send(response)
                     .await

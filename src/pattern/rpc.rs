@@ -91,11 +91,10 @@ where
     }
 }
 
-impl<S, C, SC> RpcChannel<S, C, SC>
+impl<S, C> RpcChannel<S, C>
 where
     S: Service,
-    C: ConnectionCommon<In = SC::Req, Out = SC::Res>,
-    SC: Service,
+    C: ConnectionCommon<In = S::Req, Out = S::Res>,
 {
     /// handle the message of type `M` using the given function on the target object
     ///
@@ -124,7 +123,7 @@ where
             // get the response
             let res = f(target, req).await;
             // turn into a S::Res so we can send it
-            let res = self.map.res_into_outer(res.into());
+            let res = res.into();
             // send it and return the error if any
             send.send(res).await.map_err(RpcServerError::SendError)
         })

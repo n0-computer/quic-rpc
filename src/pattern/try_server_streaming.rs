@@ -98,10 +98,9 @@ impl<S: ConnectionErrors, E: Debug> fmt::Display for ItemError<S, E> {
 
 impl<S: ConnectionErrors, E: Debug> error::Error for ItemError<S, E> {}
 
-impl<SC, C, S> RpcChannel<S, C, SC>
+impl<S, C> RpcChannel<S, C>
 where
-    SC: Service,
-    C: ConnectionCommon<In = SC::Req, Out = SC::Res>,
+    C: ConnectionCommon<In = S::Req, Out = S::Res>,
     S: Service,
 {
     /// handle the message M using the given function on the target object
@@ -138,7 +137,7 @@ where
             let responses = match f(target, req).await {
                 Ok(responses) => {
                     // turn into a S::Res so we can send it
-                    let response = self.map.res_into_outer(Ok(StreamCreated).into());
+                    let response = Ok(StreamCreated).into();
                     // send it and return the error if any
                     send.send(response)
                         .await
@@ -147,7 +146,7 @@ where
                 }
                 Err(cause) => {
                     // turn into a S::Res so we can send it
-                    let response = self.map.res_into_outer(Err(cause).into());
+                    let response = Err(cause).into();
                     // send it and return the error if any
                     send.send(response)
                         .await
@@ -158,7 +157,7 @@ where
             tokio::pin!(responses);
             while let Some(response) = responses.next().await {
                 // turn into a S::Res so we can send it
-                let response = self.map.res_into_outer(response.into());
+                let response = response.into();
                 // send it and return the error if any
                 send.send(response)
                     .await

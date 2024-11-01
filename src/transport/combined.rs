@@ -1,13 +1,11 @@
 //! Transport that combines two other transports
 use super::{Connection, ConnectionCommon, ConnectionErrors, LocalAddr, ServerEndpoint};
-use crate::RpcMessage;
 use futures_lite::Stream;
 use futures_sink::Sink;
 use pin_project::pin_project;
 use std::{
     error, fmt,
     fmt::Debug,
-    marker::PhantomData,
     pin::Pin,
     task::{Context, Poll},
 };

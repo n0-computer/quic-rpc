@@ -2,8 +2,7 @@
 //!
 //! The main entry point is [RpcServer]
 use crate::{
-    map::{ChainedMapper, MapService, Mapper},
-    transport::{ConnectionCommon, ConnectionErrors},
+    transport::{mapped::{MappedConnectionTypes, MappedRecvStream, MappedSendSink}, ConnectionCommon, ConnectionErrors},
     Service, ServiceEndpoint,
 };
 use futures_lite::{Future, Stream, StreamExt};
@@ -14,7 +13,6 @@ use std::{
     marker::PhantomData,
     pin::Pin,
     result,
-    sync::Arc,
     task::{self, Poll},
 };
 use tokio::sync::oneshot;
@@ -79,18 +77,17 @@ impl<S: Service, C: ServiceEndpoint<S>> RpcServer<S, C> {
 #[derive(Debug)]
 pub struct RpcChannel<
     S: Service,
-    C: ConnectionCommon<In = SC::Req, Out = SC::Res> = BoxedServiceEndpoint<S>,
-    SC: Service = S,
+    C: ConnectionCommon<In = S::Req, Out = S::Res> = BoxedServiceEndpoint<S>,
 > {
     /// Sink to send responses to the client.
     pub send: C::SendSink,
     /// Stream to receive requests from the client.
     pub recv: C::RecvStream,
-    /// Mapper to map between S and S2
-    pub map: Arc<dyn MapService<SC, S>>,
+
+    pub(crate) p: PhantomData<S>,
 }
 
-impl<S, C> RpcChannel<S, C, S>
+impl<S, C> RpcChannel<S, C>
 where
     S: Service,
     C: ConnectionCommon<In = S::Req, Out = S::Res>,
@@ -100,16 +97,15 @@ where
         Self {
             send,
             recv,
-            map: Arc::new(Mapper::new()),
+            p: PhantomData,
         }
     }
 }
 
-impl<SC, S, C> RpcChannel<S, C, SC>
+impl<S, C> RpcChannel<S, C>
 where
     S: Service,
-    SC: Service,
-    C: ConnectionCommon<In = SC::Req, Out = SC::Res>,
+    C: ConnectionCommon<In = S::Req, Out = S::Res>,
 {
     /// Map this channel's service into an inner service.
     ///
@@ -120,17 +116,16 @@ where
     /// Where SNext is the new service to map to and S is the current inner service.
     ///
     /// This method can be chained infintely.
-    pub fn map<SNext>(self) -> RpcChannel<SNext, C, SC>
+    pub fn map<SNext>(self) -> RpcChannel<SNext, MappedConnectionTypes<SNext::Req, SNext::Res, C>>
     where
         SNext: Service,
-        SNext::Req: Into<S::Req> + TryFrom<S::Req>,
-        SNext::Res: Into<S::Res> + TryFrom<S::Res>,
+        SNext::Req: TryFrom<S::Req>,
+        S::Res: From<SNext::Res>,
     {
-        let map = ChainedMapper::new(self.map);
         RpcChannel {
-            send: self.send,
-            recv: self.recv,
-            map: Arc::new(map),
+            send: MappedSendSink::new(self.send),
+            recv: MappedRecvStream::new(self.recv),
+            p: PhantomData,
         }
     }
 }
@@ -152,9 +147,7 @@ impl<S: Service, C: ServiceEndpoint<S>> Accepting<S, C> {
     ///
     /// Often sink and stream will wrap an an underlying byte stream. In this case you can
     /// call into_inner() on them to get it back to perform byte level reads and writes.
-    pub async fn read_first(
-        self,
-    ) -> result::Result<(S::Req, RpcChannel<S, C, S>), RpcServerError<C>> {
+    pub async fn read_first(self) -> result::Result<(S::Req, RpcChannel<S, C>), RpcServerError<C>> {
         let Accepting { send, mut recv, .. } = self;
         // get the first message from the client. This will tell us what it wants to do.
         let request: S::Req = recv
@@ -164,7 +157,7 @@ impl<S: Service, C: ServiceEndpoint<S>> Accepting<S, C> {
             .ok_or(RpcServerError::EarlyClose)?
             // recv error
             .map_err(RpcServerError::RecvError)?;
-        Ok((request, RpcChannel::new(send, recv)))
+        Ok((request, RpcChannel::<S, C>::new(send, recv)))
     }
 }
 
@@ -198,40 +191,30 @@ impl<S: Service, C: ServiceEndpoint<S>> AsRef<C> for RpcServer<S, C> {
 /// cause a termination of the RPC call.
 #[pin_project]
 #[derive(Debug)]
-pub struct UpdateStream<SC, C, T, S = SC>(
+pub struct UpdateStream<C, T>(
     #[pin] C::RecvStream,
     Option<oneshot::Sender<RpcServerError<C>>>,
     PhantomData<T>,
-    Arc<dyn MapService<SC, S>>,
 )
 where
-    SC: Service,
-    S: Service,
-    C: ConnectionCommon<In = SC::Req, Out = SC::Res>;
+    C: ConnectionCommon;
 
-impl<SC, C, T, S> UpdateStream<SC, C, T, S>
+impl<C, T> UpdateStream<C, T>
 where
-    SC: Service,
-    S: Service,
-    C: ConnectionCommon<In = SC::Req, Out = SC::Res>,
-    T: TryFrom<S::Req>,
+    C: ConnectionCommon,
+    T: TryFrom<C::In>,
 {
-    pub(crate) fn new(
-        recv: C::RecvStream,
-        map: Arc<dyn MapService<SC, S>>,
-    ) -> (Self, UnwrapToPending<RpcServerError<C>>) {
+    pub(crate) fn new(recv: C::RecvStream) -> (Self, UnwrapToPending<RpcServerError<C>>) {
         let (error_send, error_recv) = oneshot::channel();
         let error_recv = UnwrapToPending(error_recv);
-        (Self(recv, Some(error_send), PhantomData, map), error_recv)
+        (Self(recv, Some(error_send), PhantomData), error_recv)
     }
 }
 
-impl<SC, C, T, S> Stream for UpdateStream<SC, C, T, S>
+impl<C, T> Stream for UpdateStream<C, T>
 where
-    SC: Service,
-    S: Service,
-    C: ConnectionCommon<In = SC::Req, Out = SC::Res>,
-    T: TryFrom<S::Req>,
+    C: ConnectionCommon,
+    T: TryFrom<C::In>,
 {
     type Item = T;
 
@@ -240,8 +223,7 @@ where
         match Pin::new(&mut this.0).poll_next(cx) {
             Poll::Ready(Some(msg)) => match msg {
                 Ok(msg) => {
-                    let msg = this.3.req_try_into_inner(msg);
-                    let msg = msg.and_then(|msg| T::try_from(msg).map_err(|_cause| ()));
+                    let msg = T::try_from(msg).map_err(|_cause| ());
                     match msg {
                         Ok(msg) => Poll::Ready(Some(msg)),
                         Err(_cause) => {
@@ -339,7 +321,7 @@ where
     S: Service,
     C: ServiceEndpoint<S>,
     T: Clone + Send + 'static,
-    F: FnMut(RpcChannel<S, C, S>, S::Req, T) -> Fut + Send + 'static,
+    F: FnMut(RpcChannel<S, C>, S::Req, T) -> Fut + Send + 'static,
     Fut: Future<Output = Result<(), RpcServerError<C>>> + Send + 'static,
 {
     let server: RpcServer<S, C> = RpcServer::<S, C>::new(conn);
