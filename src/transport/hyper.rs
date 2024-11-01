@@ -582,13 +582,14 @@ impl<In: RpcMessage, Out: RpcMessage> ConnectionErrors for HyperConnection<In, O
     type OpenError = OpenBiError;
 }
 
-impl<In: RpcMessage, Out: RpcMessage> ConnectionCommon<In, Out> for HyperConnection<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> ConnectionCommon for HyperConnection<In, Out> {
+    type In = In;
+    type Out = Out;
     type RecvStream = self::RecvStream<In>;
-
     type SendSink = self::SendSink<Out>;
 }
 
-impl<In: RpcMessage, Out: RpcMessage> Connection<In, Out> for HyperConnection<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> Connection for HyperConnection<In, Out> {
     async fn open(&self) -> Result<(Self::SendSink, Self::RecvStream), Self::OpenError> {
         let (out_tx, out_rx) = flume::bounded::<io::Result<Bytes>>(32);
         let req: Request<Body> = Request::post(&self.inner.uri)
@@ -617,12 +618,14 @@ impl<In: RpcMessage, Out: RpcMessage> ConnectionErrors for HyperServerEndpoint<I
     type OpenError = AcceptBiError;
 }
 
-impl<In: RpcMessage, Out: RpcMessage> ConnectionCommon<In, Out> for HyperServerEndpoint<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> ConnectionCommon for HyperServerEndpoint<In, Out> {
+    type In = In;
+    type Out = Out;
     type RecvStream = self::RecvStream<In>;
     type SendSink = self::SendSink<Out>;
 }
 
-impl<In: RpcMessage, Out: RpcMessage> ServerEndpoint<In, Out> for HyperServerEndpoint<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> ServerEndpoint for HyperServerEndpoint<In, Out> {
     fn local_addr(&self) -> &[LocalAddr] {
         &self.local_addr
     }

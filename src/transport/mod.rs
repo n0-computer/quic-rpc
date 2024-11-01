@@ -56,17 +56,25 @@ pub trait ConnectionErrors: Debug + Clone + Send + Sync + 'static {
 /// Types that are common to both [`Connection`] and [`ServerEndpoint`].
 ///
 /// Having this as a separate trait is useful when writing generic code that works with both.
-pub trait ConnectionCommon<In, Out>: ConnectionErrors {
+pub trait ConnectionCommon: ConnectionErrors {
+    /// The type of messages that can be received on the channel
+    type In: RpcMessage;
+    /// The type of messages that can be sent on the channel
+    type Out: RpcMessage;
     /// Receive side of a bidirectional typed channel
-    type RecvStream: Stream<Item = Result<In, Self::RecvError>> + Send + Sync + Unpin + 'static;
+    type RecvStream: Stream<Item = Result<Self::In, Self::RecvError>>
+        + Send
+        + Sync
+        + Unpin
+        + 'static;
     /// Send side of a bidirectional typed channel
-    type SendSink: Sink<Out, Error = Self::SendError> + Send + Sync + Unpin + 'static;
+    type SendSink: Sink<Self::Out, Error = Self::SendError> + Send + Sync + Unpin + 'static;
 }
 
 /// A connection to a specific remote machine
 ///
 /// A connection can be used to open bidirectional typed channels using [`Connection::open`].
-pub trait Connection<In, Out>: ConnectionCommon<In, Out> {
+pub trait Connection: ConnectionCommon {
     /// Open a channel to the remote che
     fn open(
         &self,
@@ -77,7 +85,7 @@ pub trait Connection<In, Out>: ConnectionCommon<In, Out> {
 ///
 /// A server endpoint can be used to accept bidirectional typed channels from any of the
 /// currently opened connections to clients, using [`ServerEndpoint::accept`].
-pub trait ServerEndpoint<In, Out>: ConnectionCommon<In, Out> {
+pub trait ServerEndpoint: ConnectionCommon {
     /// Accept a new typed bidirectional channel on any of the connections we
     /// have currently opened.
     fn accept(

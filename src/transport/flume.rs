@@ -195,12 +195,14 @@ impl<In: RpcMessage, Out: RpcMessage> Future for AcceptBiFuture<In, Out> {
     }
 }
 
-impl<In: RpcMessage, Out: RpcMessage> ConnectionCommon<In, Out> for FlumeServerEndpoint<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> ConnectionCommon for FlumeServerEndpoint<In, Out> {
+    type In = In;
+    type Out = Out;
     type SendSink = SendSink<Out>;
     type RecvStream = RecvStream<In>;
 }
 
-impl<In: RpcMessage, Out: RpcMessage> ServerEndpoint<In, Out> for FlumeServerEndpoint<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> ServerEndpoint for FlumeServerEndpoint<In, Out> {
     #[allow(refining_impl_trait)]
     fn accept(&self) -> AcceptBiFuture<In, Out> {
         AcceptBiFuture {
@@ -222,12 +224,14 @@ impl<In: RpcMessage, Out: RpcMessage> ConnectionErrors for FlumeConnection<In, O
     type OpenError = self::OpenBiError;
 }
 
-impl<In: RpcMessage, Out: RpcMessage> ConnectionCommon<In, Out> for FlumeConnection<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> ConnectionCommon for FlumeConnection<In, Out> {
+    type In = In;
+    type Out = Out;
     type SendSink = SendSink<Out>;
     type RecvStream = RecvStream<In>;
 }
 
-impl<In: RpcMessage, Out: RpcMessage> Connection<In, Out> for FlumeConnection<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> Connection for FlumeConnection<In, Out> {
     #[allow(refining_impl_trait)]
     fn open(&self) -> OpenBiFuture<In, Out> {
         let (local_send, remote_recv) = flume::bounded::<Out>(128);

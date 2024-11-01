@@ -13,42 +13,31 @@ use std::{
 };
 
 /// A connection that combines two other connections
-pub struct CombinedConnection<A, B, In, Out> {
+pub struct CombinedConnection<A, B> {
     /// First connection
     pub a: Option<A>,
     /// Second connection
     pub b: Option<B>,
-    /// Phantom data so we can have `S` as type parameters
-    _p: PhantomData<(In, Out)>,
 }
 
-impl<A: Connection<In, Out>, B: Connection<In, Out>, In, Out> CombinedConnection<A, B, In, Out> {
+impl<A: Connection, B: Connection<In = A::In, Out = A::Out>> CombinedConnection<A, B> {
     /// Create a combined connection from two other connections
     ///
     /// It will always use the first connection that is not `None`.
     pub fn new(a: Option<A>, b: Option<B>) -> Self {
-        Self {
-            a,
-            b,
-            _p: PhantomData,
-        }
+        Self { a, b }
     }
 }
-impl<A: Clone, B: Clone, In: RpcMessage, Out: RpcMessage> Clone
-    for CombinedConnection<A, B, In, Out>
-{
+impl<A: Clone, B: Clone> Clone for CombinedConnection<A, B> {
     fn clone(&self) -> Self {
         Self {
             a: self.a.clone(),
             b: self.b.clone(),
-            _p: PhantomData,
         }
     }
 }
 
-impl<A: Debug, B: Debug, In: RpcMessage, Out: RpcMessage> Debug
-    for CombinedConnection<A, B, In, Out>
-{
+impl<A: Debug, B: Debug> Debug for CombinedConnection<A, B> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("CombinedConnection")
             .field("a", &self.a)
@@ -58,20 +47,16 @@ impl<A: Debug, B: Debug, In: RpcMessage, Out: RpcMessage> Debug
 }
 
 /// An endpoint that combines two other endpoints
-pub struct CombinedServerEndpoint<A, B, In, Out> {
+pub struct CombinedServerEndpoint<A, B> {
     /// First endpoint
     pub a: Option<A>,
     /// Second endpoint
     pub b: Option<B>,
     /// Local addresses from all endpoints
     local_addr: Vec<LocalAddr>,
-    /// Phantom data so we can have `S` as type parameters
-    _p: PhantomData<(In, Out)>,
 }
 
-impl<A: ServerEndpoint<In, Out>, B: ServerEndpoint<In, Out>, In: RpcMessage, Out: RpcMessage>
-    CombinedServerEndpoint<A, B, In, Out>
-{
+impl<A: ServerEndpoint, B: ServerEndpoint<In = A::In, Out = A::Out>> CombinedServerEndpoint<A, B> {
     /// Create a combined server endpoint from two other server endpoints
     ///
     /// When listening for incoming connections with
@@ -86,12 +71,7 @@ impl<A: ServerEndpoint<In, Out>, B: ServerEndpoint<In, Out>, In: RpcMessage, Out
         if let Some(b) = &b {
             local_addr.extend(b.local_addr().iter().cloned())
         };
-        Self {
-            a,
-            b,
-            local_addr,
-            _p: PhantomData,
-        }
+        Self { a, b, local_addr }
     }
 
     /// Get back the inner endpoints
@@ -100,22 +80,17 @@ impl<A: ServerEndpoint<In, Out>, B: ServerEndpoint<In, Out>, In: RpcMessage, Out
     }
 }
 
-impl<A: Clone, B: Clone, In: RpcMessage, Out: RpcMessage> Clone
-    for CombinedServerEndpoint<A, B, In, Out>
-{
+impl<A: Clone, B: Clone> Clone for CombinedServerEndpoint<A, B> {
     fn clone(&self) -> Self {
         Self {
             a: self.a.clone(),
             b: self.b.clone(),
             local_addr: self.local_addr.clone(),
-            _p: PhantomData,
         }
     }
 }
 
-impl<A: Debug, B: Debug, In: RpcMessage, Out: RpcMessage> Debug
-    for CombinedServerEndpoint<A, B, In, Out>
-{
+impl<A: Debug, B: Debug> Debug for CombinedServerEndpoint<A, B> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("CombinedServerEndpoint")
             .field("a", &self.a)
@@ -126,24 +101,15 @@ impl<A: Debug, B: Debug, In: RpcMessage, Out: RpcMessage> Debug
 
 /// Send sink for combined channels
 #[pin_project(project = SendSinkProj)]
-pub enum SendSink<
-    A: ConnectionCommon<In, Out>,
-    B: ConnectionCommon<In, Out>,
-    In: RpcMessage,
-    Out: RpcMessage,
-> {
+pub enum SendSink<A: ConnectionCommon, B: ConnectionCommon> {
     /// A variant
     A(#[pin] A::SendSink),
     /// B variant
     B(#[pin] B::SendSink),
 }
 
-impl<
-        A: ConnectionCommon<In, Out>,
-        B: ConnectionCommon<In, Out>,
-        In: RpcMessage,
-        Out: RpcMessage,
-    > Sink<Out> for SendSink<A, B, In, Out>
+impl<A: ConnectionCommon, B: ConnectionCommon<In = A::In, Out = A::Out>> Sink<A::Out>
+    for SendSink<A, B>
 {
     type Error = self::SendError<A, B>;
 
@@ -154,7 +120,7 @@ impl<
         }
     }
 
-    fn start_send(self: Pin<&mut Self>, item: Out) -> Result<(), Self::Error> {
+    fn start_send(self: Pin<&mut Self>, item: A::Out) -> Result<(), Self::Error> {
         match self.project() {
             SendSinkProj::A(sink) => sink.start_send(item).map_err(Self::Error::A),
             SendSinkProj::B(sink) => sink.start_send(item).map_err(Self::Error::B),
@@ -178,26 +144,17 @@ impl<
 
 /// RecvStream for combined channels
 #[pin_project(project = ResStreamProj)]
-pub enum RecvStream<
-    A: ConnectionCommon<In, Out>,
-    B: ConnectionCommon<In, Out>,
-    In: RpcMessage,
-    Out: RpcMessage,
-> {
+pub enum RecvStream<A: ConnectionCommon, B: ConnectionCommon> {
     /// A variant
     A(#[pin] A::RecvStream),
     /// B variant
     B(#[pin] B::RecvStream),
 }
 
-impl<
-        A: ConnectionCommon<In, Out>,
-        B: ConnectionCommon<In, Out>,
-        In: RpcMessage,
-        Out: RpcMessage,
-    > Stream for RecvStream<A, B, In, Out>
+impl<A: ConnectionCommon, B: ConnectionCommon<In = A::In, Out = A::Out>> Stream
+    for RecvStream<A, B>
 {
-    type Item = Result<In, RecvError<A, B>>;
+    type Item = Result<A::In, RecvError<A, B>>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         match self.project() {
@@ -277,23 +234,23 @@ impl<A: ConnectionErrors, B: ConnectionErrors> fmt::Display for AcceptBiError<A,
 
 impl<A: ConnectionErrors, B: ConnectionErrors> error::Error for AcceptBiError<A, B> {}
 
-impl<A: ConnectionErrors, B: ConnectionErrors, In: RpcMessage, Out: RpcMessage> ConnectionErrors
-    for CombinedConnection<A, B, In, Out>
-{
+impl<A: ConnectionErrors, B: ConnectionErrors> ConnectionErrors for CombinedConnection<A, B> {
     type SendError = self::SendError<A, B>;
     type RecvError = self::RecvError<A, B>;
     type OpenError = self::OpenBiError<A, B>;
 }
 
-impl<A: Connection<In, Out>, B: Connection<In, Out>, In: RpcMessage, Out: RpcMessage>
-    ConnectionCommon<In, Out> for CombinedConnection<A, B, In, Out>
+impl<A: Connection, B: Connection<In = A::In, Out = A::Out>> ConnectionCommon
+    for CombinedConnection<A, B>
 {
-    type RecvStream = self::RecvStream<A, B, In, Out>;
-    type SendSink = self::SendSink<A, B, In, Out>;
+    type In = A::In;
+    type Out = A::Out;
+    type RecvStream = self::RecvStream<A, B>;
+    type SendSink = self::SendSink<A, B>;
 }
 
-impl<A: Connection<In, Out>, B: Connection<In, Out>, In: RpcMessage, Out: RpcMessage>
-    Connection<In, Out> for CombinedConnection<A, B, In, Out>
+impl<A: Connection, B: Connection<In = A::In, Out = A::Out>> Connection
+    for CombinedConnection<A, B>
 {
     async fn open(&self) -> Result<(Self::SendSink, Self::RecvStream), Self::OpenError> {
         let this = self.clone();
@@ -310,23 +267,23 @@ impl<A: Connection<In, Out>, B: Connection<In, Out>, In: RpcMessage, Out: RpcMes
     }
 }
 
-impl<A: ConnectionErrors, B: ConnectionErrors, In: RpcMessage, Out: RpcMessage> ConnectionErrors
-    for CombinedServerEndpoint<A, B, In, Out>
-{
+impl<A: ConnectionErrors, B: ConnectionErrors> ConnectionErrors for CombinedServerEndpoint<A, B> {
     type SendError = self::SendError<A, B>;
     type RecvError = self::RecvError<A, B>;
     type OpenError = self::AcceptBiError<A, B>;
 }
 
-impl<A: ServerEndpoint<In, Out>, B: ServerEndpoint<In, Out>, In: RpcMessage, Out: RpcMessage>
-    ConnectionCommon<In, Out> for CombinedServerEndpoint<A, B, In, Out>
+impl<A: ServerEndpoint, B: ServerEndpoint<In = A::In, Out = A::Out>> ConnectionCommon
+    for CombinedServerEndpoint<A, B>
 {
-    type RecvStream = self::RecvStream<A, B, In, Out>;
-    type SendSink = self::SendSink<A, B, In, Out>;
+    type In = A::In;
+    type Out = A::Out;
+    type RecvStream = self::RecvStream<A, B>;
+    type SendSink = self::SendSink<A, B>;
 }
 
-impl<A: ServerEndpoint<In, Out>, B: ServerEndpoint<In, Out>, In: RpcMessage, Out: RpcMessage>
-    ServerEndpoint<In, Out> for CombinedServerEndpoint<A, B, In, Out>
+impl<A: ServerEndpoint, B: ServerEndpoint<In = A::In, Out = A::Out>> ServerEndpoint
+    for CombinedServerEndpoint<A, B>
 {
     async fn accept(&self) -> Result<(Self::SendSink, Self::RecvStream), Self::OpenError> {
         let a_fut = async {
@@ -374,8 +331,6 @@ mod tests {
         let channel = combined::CombinedConnection::<
             flume::FlumeConnection<(), ()>,
             flume::FlumeConnection<(), ()>,
-            (),
-            (),
         >::new(None, None);
         let res = channel.open().await;
         assert!(matches!(res, Err(OpenBiError::NoChannel)));

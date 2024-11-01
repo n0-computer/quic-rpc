@@ -8,7 +8,7 @@ use crate::{
     message::{InteractionPattern, Msg},
     server::{race2, RpcChannel, RpcServerError},
     transport::{ConnectionCommon, ConnectionErrors},
-    RpcClient, Service, ServiceConnection, ServiceEndpoint,
+    RpcClient, Service, ServiceConnection,
 };
 
 use std::{
@@ -103,7 +103,7 @@ where
 impl<S, C, SC> RpcChannel<S, C, SC>
 where
     S: Service,
-    C: ConnectionCommon<SC::Req, SC::Res>,
+    C: ConnectionCommon<In = SC::Req, Out = SC::Res>,
     SC: Service,
 {
     /// handle the message M using the given function on the target object

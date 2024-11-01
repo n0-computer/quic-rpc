@@ -195,12 +195,14 @@ impl<In: RpcMessage, Out: RpcMessage> ConnectionErrors for QuinnServerEndpoint<I
     type OpenError = quinn::ConnectionError;
 }
 
-impl<In: RpcMessage, Out: RpcMessage> ConnectionCommon<In, Out> for QuinnServerEndpoint<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> ConnectionCommon for QuinnServerEndpoint<In, Out> {
+    type In = In;
+    type Out = Out;
     type SendSink = self::SendSink<Out>;
     type RecvStream = self::RecvStream<In>;
 }
 
-impl<In: RpcMessage, Out: RpcMessage> ServerEndpoint<In, Out> for QuinnServerEndpoint<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> ServerEndpoint for QuinnServerEndpoint<In, Out> {
     async fn accept(&self) -> Result<(Self::SendSink, Self::RecvStream), AcceptBiError> {
         let (send, recv) = self
             .inner
@@ -626,12 +628,14 @@ impl<In: RpcMessage, Out: RpcMessage> ConnectionErrors for QuinnConnection<In, O
     type OpenError = quinn::ConnectionError;
 }
 
-impl<In: RpcMessage, Out: RpcMessage> ConnectionCommon<In, Out> for QuinnConnection<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> ConnectionCommon for QuinnConnection<In, Out> {
+    type In = In;
+    type Out = Out;
     type SendSink = self::SendSink<Out>;
     type RecvStream = self::RecvStream<In>;
 }
 
-impl<In: RpcMessage, Out: RpcMessage> Connection<In, Out> for QuinnConnection<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> Connection for QuinnConnection<In, Out> {
     async fn open(&self) -> Result<(Self::SendSink, Self::RecvStream), Self::OpenError> {
         let (sender, receiver) = oneshot::channel();
         self.inner

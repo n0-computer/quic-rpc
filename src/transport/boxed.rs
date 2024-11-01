@@ -230,7 +230,9 @@ impl<In: RpcMessage, Out: RpcMessage> Clone for Connection<In, Out> {
     }
 }
 
-impl<In: RpcMessage, Out: RpcMessage> ConnectionCommon<In, Out> for Connection<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> ConnectionCommon for Connection<In, Out> {
+    type In = In;
+    type Out = Out;
     type RecvStream = RecvStream<In>;
     type SendSink = SendSink<Out>;
 }
@@ -241,7 +243,7 @@ impl<In: RpcMessage, Out: RpcMessage> ConnectionErrors for Connection<In, Out> {
     type RecvError = anyhow::Error;
 }
 
-impl<In: RpcMessage, Out: RpcMessage> super::Connection<In, Out> for Connection<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> super::Connection for Connection<In, Out> {
     async fn open(&self) -> Result<(Self::SendSink, Self::RecvStream), Self::OpenError> {
         self.0.open_boxed().await
     }
@@ -278,7 +280,9 @@ impl<In: RpcMessage, Out: RpcMessage> Clone for ServerEndpoint<In, Out> {
     }
 }
 
-impl<In: RpcMessage, Out: RpcMessage> ConnectionCommon<In, Out> for ServerEndpoint<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> ConnectionCommon for ServerEndpoint<In, Out> {
+    type In = In;
+    type Out = Out;
     type RecvStream = RecvStream<In>;
     type SendSink = SendSink<Out>;
 }
@@ -289,7 +293,7 @@ impl<In: RpcMessage, Out: RpcMessage> ConnectionErrors for ServerEndpoint<In, Ou
     type RecvError = anyhow::Error;
 }
 
-impl<In: RpcMessage, Out: RpcMessage> super::ServerEndpoint<In, Out> for ServerEndpoint<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> super::ServerEndpoint for ServerEndpoint<In, Out> {
     fn accept(
         &self,
     ) -> impl Future<Output = Result<(Self::SendSink, Self::RecvStream), Self::OpenError>> + Send

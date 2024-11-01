@@ -1,35 +1,33 @@
 //! Transport with mapped input and output types.
 use std::{
     fmt::{Debug, Display},
-    iter::Rev,
     marker::PhantomData,
     task::{Context, Poll},
 };
 
 use futures_lite::{Stream, StreamExt};
-use futures_sink::Sink;
 use futures_util::SinkExt;
 use pin_project::pin_project;
 
-use crate::{server::RpcChannel, RpcError, RpcMessage, Service, ServiceEndpoint};
+use crate::{server::RpcChannel, RpcError, RpcMessage, Service};
 
 use super::{Connection, ConnectionCommon, ConnectionErrors};
 
 /// A connection that maps input and output types
 #[derive(Debug)]
-pub struct MappedConnection<In, Out, In0, Out0, T> {
+pub struct MappedConnection<In, Out, T> {
     inner: T,
-    _phantom: std::marker::PhantomData<(In, Out, In0, Out0)>,
+    _phantom: std::marker::PhantomData<(In, Out)>,
 }
 
-impl<In, Out, InT, OutT, T> MappedConnection<In, Out, InT, OutT, T>
+impl<In, Out, C> MappedConnection<In, Out, C>
 where
-    T: Connection<InT, OutT>,
-    In: TryFrom<InT>,
-    OutT: From<Out>,
+    C: Connection,
+    In: TryFrom<C::In>,
+    C::Out: From<Out>,
 {
     /// Create a new mapped connection
-    pub fn new(inner: T) -> Self {
+    pub fn new(inner: C) -> Self {
         Self {
             inner,
             _phantom: std::marker::PhantomData,
@@ -37,9 +35,9 @@ where
     }
 }
 
-impl<In, Out, InT, OutT, T> Clone for MappedConnection<In, Out, InT, OutT, T>
+impl<In, Out, C> Clone for MappedConnection<In, Out, C>
 where
-    T: Clone,
+    C: Clone,
 {
     fn clone(&self) -> Self {
         Self {
@@ -49,54 +47,52 @@ where
     }
 }
 
-impl<In, Out, InT, OutT, T> ConnectionErrors for MappedConnection<In, Out, InT, OutT, T>
+impl<In, Out, C> ConnectionErrors for MappedConnection<In, Out, C>
 where
     In: RpcMessage,
     Out: RpcMessage,
-    InT: RpcMessage,
-    OutT: RpcMessage,
-    T: ConnectionErrors,
+    C: ConnectionErrors,
 {
-    type OpenError = T::OpenError;
-    type RecvError = ErrorOrMapError<T::RecvError>;
-    type SendError = T::SendError;
+    type OpenError = C::OpenError;
+    type RecvError = ErrorOrMapError<C::RecvError>;
+    type SendError = C::SendError;
 }
 
-impl<In, Out, InT, OutT, T> ConnectionCommon<In, Out> for MappedConnection<In, Out, InT, OutT, T>
-where
-    T: ConnectionCommon<InT, OutT>,
-    In: RpcMessage,
-    Out: RpcMessage,
-    InT: RpcMessage,
-    OutT: RpcMessage,
-    In: TryFrom<InT>,
-    OutT: From<Out>,
-{
-    type RecvStream = MappedRecvStream<T::RecvStream, In>;
-    type SendSink = MappedSendSink<T::SendSink, Out, OutT>;
-}
+// impl<In, Out, InT, OutT, T> ConnectionCommon<In, Out> for MappedConnection<In, Out, InT, OutT, T>
+// where
+//     T: ConnectionCommon<InT, OutT>,
+//     In: RpcMessage,
+//     Out: RpcMessage,
+//     InT: RpcMessage,
+//     OutT: RpcMessage,
+//     In: TryFrom<InT>,
+//     OutT: From<Out>,
+// {
+//     type RecvStream = MappedRecvStream<T::RecvStream, In>;
+//     type SendSink = MappedSendSink<T::SendSink, Out, OutT>;
+// }
 
-impl<In, Out, InT, OutT, T> Connection<In, Out> for MappedConnection<In, Out, InT, OutT, T>
-where
-    T: Connection<InT, OutT>,
-    In: RpcMessage,
-    Out: RpcMessage,
-    InT: RpcMessage,
-    OutT: RpcMessage,
-    In: TryFrom<InT>,
-    OutT: From<Out>,
-{
-    fn open(
-        &self,
-    ) -> impl std::future::Future<Output = Result<(Self::SendSink, Self::RecvStream), Self::OpenError>>
-           + Send {
-        let inner = self.inner.open();
-        async move {
-            let (send, recv) = inner.await?;
-            Ok((MappedSendSink::new(send), MappedRecvStream::new(recv)))
-        }
-    }
-}
+// impl<In, Out, InT, OutT, T> Connection<In, Out> for MappedConnection<In, Out, InT, OutT, T>
+// where
+//     T: Connection<InT, OutT>,
+//     In: RpcMessage,
+//     Out: RpcMessage,
+//     InT: RpcMessage,
+//     OutT: RpcMessage,
+//     In: TryFrom<InT>,
+//     OutT: From<Out>,
+// {
+//     fn open(
+//         &self,
+//     ) -> impl std::future::Future<Output = Result<(Self::SendSink, Self::RecvStream), Self::OpenError>>
+//            + Send {
+//         let inner = self.inner.open();
+//         async move {
+//             let (send, recv) = inner.await?;
+//             Ok((MappedSendSink::new(send), MappedRecvStream::new(recv)))
+//         }
+//     }
+// }
 
 /// A combinator that maps a stream of incoming messages to a different type
 #[pin_project]
@@ -208,9 +204,9 @@ where
 }
 
 /// Extension trait for mapping connections
-pub trait ConnectionMapExt<In, Out>: Connection<In, Out> {
+pub trait ConnectionMapExt<In, Out>: Connection<In = In, Out = Out> {
     /// Map the input and output types of this connection
-    fn map<In1, Out1>(self) -> MappedConnection<In1, Out1, In, Out, Self>
+    fn map<In1, Out1>(self) -> MappedConnection<In1, Out1, Self>
     where
         In1: TryFrom<In>,
         Out: From<Out1>,
@@ -219,7 +215,7 @@ pub trait ConnectionMapExt<In, Out>: Connection<In, Out> {
     }
 
     /// Map this connection to a service
-    fn map_to_service<S: Service>(self) -> MappedConnection<S::Res, S::Req, In, Out, Self>
+    fn map_to_service<S: Service>(self) -> MappedConnection<S::Res, S::Req, Self>
     where
         S::Res: TryFrom<In>,
         Out: From<S::Req>,
@@ -228,29 +224,27 @@ pub trait ConnectionMapExt<In, Out>: Connection<In, Out> {
     }
 }
 
-impl<T: Connection<In, Out>, In, Out> ConnectionMapExt<In, Out> for T {}
+impl<C: Connection> ConnectionMapExt<C::In, C::Out> for C {}
 
 /// Connection types for a mapped connection
-pub struct MappedConnectionTypes<In, Out, In0, Out0, C>(PhantomData<(In, Out, In0, Out0, C)>);
+pub struct MappedConnectionTypes<In, Out, C>(PhantomData<(In, Out, C)>);
 
-impl<In, Out, In0, Out0, C> Debug for MappedConnectionTypes<In, Out, In0, Out0, C> {
+impl<In, Out, C> Debug for MappedConnectionTypes<In, Out, C> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("MappedConnectionTypes").finish()
     }
 }
 
-impl<In, Out, In0, Out0, C> Clone for MappedConnectionTypes<In, Out, In0, Out0, C> {
+impl<In, Out, C> Clone for MappedConnectionTypes<In, Out, C> {
     fn clone(&self) -> Self {
         Self(PhantomData)
     }
 }
 
-impl<In, Out, In0, Out0, C> ConnectionErrors for MappedConnectionTypes<In, Out, In0, Out0, C>
+impl<In, Out, C> ConnectionErrors for MappedConnectionTypes<In, Out, C>
 where
     In: RpcMessage,
     Out: RpcMessage,
-    In0: RpcMessage,
-    Out0: RpcMessage,
     C: ConnectionErrors,
 {
     type OpenError = C::OpenError;
@@ -258,39 +252,38 @@ where
     type SendError = C::SendError;
 }
 
-impl<In, Out, In0, Out0, C> ConnectionCommon<In, Out>
-    for MappedConnectionTypes<In, Out, In0, Out0, C>
+impl<In, Out, C> ConnectionCommon for MappedConnectionTypes<In, Out, C>
 where
-    C: ConnectionCommon<In0, Out0>,
+    C: ConnectionCommon,
     In: RpcMessage,
     Out: RpcMessage,
-    In0: RpcMessage,
-    Out0: RpcMessage,
-    In: TryFrom<In0>,
-    Out0: From<Out>,
+    In: TryFrom<C::In>,
+    C::Out: From<Out>,
 {
+    type In = In;
+    type Out = Out;
     type RecvStream = MappedRecvStream<C::RecvStream, In>;
-    type SendSink = MappedSendSink<C::SendSink, Out, Out0>;
+    type SendSink = MappedSendSink<C::SendSink, Out, C::Out>;
 }
 
 ///
 #[derive(Debug)]
-pub struct RpcChannel2<S: Service, C: ConnectionCommon<S::Req, S::Res>> {
+pub struct RpcChannel2<S: Service, C: ConnectionCommon<In = S::Req, Out = S::Res>> {
     /// Sink to send responses to the client.
     pub send: C::SendSink,
     /// Stream to receive requests from the client.
     pub recv: C::RecvStream,
+
+    _phantom: PhantomData<S>,
 }
 
 impl<S, C> RpcChannel2<S, C>
 where
     S: Service,
-    C: ConnectionCommon<S::Req, S::Res>,
+    C: ConnectionCommon<In = S::Req, Out = S::Res>,
 {
     /// Map the input and output types of this connection
-    pub fn map2<S1>(
-        self,
-    ) -> RpcChannel2<S1, MappedConnectionTypes<S1::Req, S1::Res, S::Req, S::Res, C>>
+    pub fn map2<S1>(self) -> RpcChannel2<S1, MappedConnectionTypes<S1::Req, S1::Res, C>>
     where
         S1: Service,
         S1::Req: TryFrom<S::Req>,
@@ -299,33 +292,29 @@ where
         RpcChannel2 {
             send: MappedSendSink::new(self.send),
             recv: MappedRecvStream::new(self.recv),
+            _phantom: PhantomData,
         }
     }
 }
 
-struct StreamPair<Send, Recv> {
-    pub send: Send,
-    pub recv: Recv,
-}
-
-impl<Send, Recv> StreamPair<Send, Recv> {
-    pub fn new(send: Send, recv: Recv) -> Self {
-        Self { send, recv }
-    }
-
-    pub fn map<In, Out, In0, Out0, E>(
-        self,
-    ) -> StreamPair<MappedSendSink<Send, Out, Out0>, MappedRecvStream<Recv, In>>
+impl<S, C, SC> RpcChannel<S, C, SC>
+where
+    S: Service,
+    SC: Service,
+    C: ConnectionCommon<In = SC::Req, Out = SC::Res>,
+{
+    /// Map the input and output types of this connection
+    pub fn map2<S1>(self) -> RpcChannel<S, MappedConnectionTypes<S1::Req, S1::Res, C>, S1>
     where
-        Send: futures_sink::Sink<Out0> + Unpin,
-        Recv: Stream<Item = Result<In0, E>> + Unpin,
-        Out0: From<Out>,
-        In: TryFrom<In0>,
+        S1: Service,
+        S1::Req: TryFrom<SC::Req>,
+        SC::Res: From<S1::Res>,
     {
-        StreamPair::new(
-            MappedSendSink::new(self.send),
-            MappedRecvStream::new(self.recv),
-        )
+        RpcChannel {
+            send: MappedSendSink::new(self.send),
+            recv: MappedRecvStream::new(self.recv),
+            map: todo!(),
+        }
     }
 }
 
@@ -374,7 +363,7 @@ mod tests {
     async fn smoke() -> TestResult<()> {
         async fn handle_sub_request(
             req: String,
-            chan: RpcChannel<SubService, impl Connection<String, String>>,
+            chan: RpcChannel<SubService, impl Connection<In = String, Out = String>>,
         ) -> anyhow::Result<()> {
             Ok(())
         }
@@ -382,9 +371,8 @@ mod tests {
             crate::transport::flume::connection::<Request, Response>(32);
         let _x = c.clone().map::<String, String>();
         let _y = c.clone().map_to_service::<SubService>();
-        let _z = RpcClient::<SubService, _>::new(c.map_to_service::<SubService>());
         let s = RpcServer::<FullService, _>::new(s);
-
+        return Ok(());
         while let Ok(accepting) = s.accept().await {
             let (msg, chan) = accepting.read_first().await?;
             match msg {

@@ -79,7 +79,7 @@ impl<S: Service, C: ServiceEndpoint<S>> RpcServer<S, C> {
 #[derive(Debug)]
 pub struct RpcChannel<
     S: Service,
-    C: ConnectionCommon<SC::Req, SC::Res> = BoxedServiceEndpoint<S>,
+    C: ConnectionCommon<In = SC::Req, Out = SC::Res> = BoxedServiceEndpoint<S>,
     SC: Service = S,
 > {
     /// Sink to send responses to the client.
@@ -93,7 +93,7 @@ pub struct RpcChannel<
 impl<S, C> RpcChannel<S, C, S>
 where
     S: Service,
-    C: ConnectionCommon<S::Req, S::Res>,
+    C: ConnectionCommon<In = S::Req, Out = S::Res>,
 {
     /// Create a new RPC channel.
     pub fn new(send: C::SendSink, recv: C::RecvStream) -> Self {
@@ -109,7 +109,7 @@ impl<SC, S, C> RpcChannel<S, C, SC>
 where
     S: Service,
     SC: Service,
-    C: ConnectionCommon<SC::Req, SC::Res>,
+    C: ConnectionCommon<In = SC::Req, Out = SC::Res>,
 {
     /// Map this channel's service into an inner service.
     ///
@@ -139,6 +139,7 @@ where
 pub struct Accepting<S: Service, C: ServiceEndpoint<S>> {
     send: C::SendSink,
     recv: C::RecvStream,
+    p: PhantomData<S>,
 }
 
 impl<S: Service, C: ServiceEndpoint<S>> Accepting<S, C> {
@@ -154,7 +155,7 @@ impl<S: Service, C: ServiceEndpoint<S>> Accepting<S, C> {
     pub async fn read_first(
         self,
     ) -> result::Result<(S::Req, RpcChannel<S, C, S>), RpcServerError<C>> {
-        let Accepting { send, mut recv } = self;
+        let Accepting { send, mut recv, .. } = self;
         // get the first message from the client. This will tell us what it wants to do.
         let request: S::Req = recv
             .next()
@@ -172,7 +173,11 @@ impl<S: Service, C: ServiceEndpoint<S>> RpcServer<S, C> {
     /// can be used to read the first request.
     pub async fn accept(&self) -> result::Result<Accepting<S, C>, RpcServerError<C>> {
         let (send, recv) = self.source.accept().await.map_err(RpcServerError::Accept)?;
-        Ok(Accepting { send, recv })
+        Ok(Accepting {
+            send,
+            recv,
+            p: PhantomData,
+        })
     }
 
     /// Get the underlying service endpoint
@@ -202,13 +207,13 @@ pub struct UpdateStream<SC, C, T, S = SC>(
 where
     SC: Service,
     S: Service,
-    C: ConnectionCommon<SC::Req, SC::Res>;
+    C: ConnectionCommon<In = SC::Req, Out = SC::Res>;
 
 impl<SC, C, T, S> UpdateStream<SC, C, T, S>
 where
     SC: Service,
     S: Service,
-    C: ConnectionCommon<SC::Req, SC::Res>,
+    C: ConnectionCommon<In = SC::Req, Out = SC::Res>,
     T: TryFrom<S::Req>,
 {
     pub(crate) fn new(
@@ -225,7 +230,7 @@ impl<SC, C, T, S> Stream for UpdateStream<SC, C, T, S>
 where
     SC: Service,
     S: Service,
-    C: ConnectionCommon<SC::Req, SC::Res>,
+    C: ConnectionCommon<In = SC::Req, Out = SC::Res>,
     T: TryFrom<S::Req>,
 {
     type Item = T;
