@@ -62,18 +62,17 @@ impl<C: ConnectionErrors> fmt::Display for Error<C> {
 
 impl<C: ConnectionErrors> error::Error for Error<C> {}
 
-impl<S, C, SC> RpcClient<S, C, SC>
+impl<S, C> RpcClient<S, C>
 where
     S: Service,
-    SC: Service,
-    C: ServiceConnection<SC>,
+    C: ServiceConnection<S>,
 {
     /// RPC call to the server, single request, single response
     pub async fn rpc<M>(&self, msg: M) -> result::Result<M::Response, Error<C>>
     where
         M: RpcMsg<S>,
     {
-        let msg = self.map.req_into_outer(msg.into());
+        let msg = msg.into();
         let (mut send, mut recv) = self.source.open().await.map_err(Error::Open)?;
         send.send(msg).await.map_err(Error::<C>::Send)?;
         let res = recv
@@ -83,10 +82,6 @@ where
             .map_err(Error::<C>::RecvError)?;
         // keep send alive until we have the answer
         drop(send);
-        let res = self
-            .map
-            .res_try_into_inner(res)
-            .map_err(|_| Error::DowncastError)?;
         M::Response::try_from(res).map_err(|_| Error::DowncastError)
     }
 }

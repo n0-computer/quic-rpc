@@ -83,8 +83,8 @@ async fn flume_channel_mapped_bench() -> anyhow::Result<()> {
         });
 
     let client = RpcClient::<OuterService, _>::new(client);
-    let client: RpcClient<InnerService, _, OuterService> = client.map();
-    let client: RpcClient<ComputeService, _, OuterService> = client.map();
+    let client: RpcClient<InnerService, _> = client.map();
+    let client: RpcClient<ComputeService, _> = client.map();
     bench(client, 1000000).await?;
     // dropping the client will cause the server to terminate
     match server_handle.await? {

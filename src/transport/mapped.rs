@@ -58,41 +58,39 @@ where
     type SendError = C::SendError;
 }
 
-// impl<In, Out, InT, OutT, T> ConnectionCommon<In, Out> for MappedConnection<In, Out, InT, OutT, T>
-// where
-//     T: ConnectionCommon<InT, OutT>,
-//     In: RpcMessage,
-//     Out: RpcMessage,
-//     InT: RpcMessage,
-//     OutT: RpcMessage,
-//     In: TryFrom<InT>,
-//     OutT: From<Out>,
-// {
-//     type RecvStream = MappedRecvStream<T::RecvStream, In>;
-//     type SendSink = MappedSendSink<T::SendSink, Out, OutT>;
-// }
+impl<In, Out, C> ConnectionCommon for MappedConnection<In, Out, C>
+where
+    C: ConnectionCommon,
+    In: RpcMessage,
+    Out: RpcMessage,
+    In: TryFrom<C::In>,
+    C::Out: From<Out>,
+{
+    type In = In;
+    type Out = Out;
+    type RecvStream = MappedRecvStream<C::RecvStream, In>;
+    type SendSink = MappedSendSink<C::SendSink, Out, C::Out>;
+}
 
-// impl<In, Out, InT, OutT, T> Connection<In, Out> for MappedConnection<In, Out, InT, OutT, T>
-// where
-//     T: Connection<InT, OutT>,
-//     In: RpcMessage,
-//     Out: RpcMessage,
-//     InT: RpcMessage,
-//     OutT: RpcMessage,
-//     In: TryFrom<InT>,
-//     OutT: From<Out>,
-// {
-//     fn open(
-//         &self,
-//     ) -> impl std::future::Future<Output = Result<(Self::SendSink, Self::RecvStream), Self::OpenError>>
-//            + Send {
-//         let inner = self.inner.open();
-//         async move {
-//             let (send, recv) = inner.await?;
-//             Ok((MappedSendSink::new(send), MappedRecvStream::new(recv)))
-//         }
-//     }
-// }
+impl<In, Out, C> Connection for MappedConnection<In, Out, C>
+where
+    C: Connection,
+    In: RpcMessage,
+    Out: RpcMessage,
+    In: TryFrom<C::In>,
+    C::Out: From<Out>,
+{
+    fn open(
+        &self,
+    ) -> impl std::future::Future<Output = Result<(Self::SendSink, Self::RecvStream), Self::OpenError>>
+           + Send {
+        let inner = self.inner.open();
+        async move {
+            let (send, recv) = inner.await?;
+            Ok((MappedSendSink::new(send), MappedRecvStream::new(recv)))
+        }
+    }
+}
 
 /// A combinator that maps a stream of incoming messages to a different type
 #[pin_project]

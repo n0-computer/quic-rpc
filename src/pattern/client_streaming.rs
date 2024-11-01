@@ -16,7 +16,6 @@ use std::{
     fmt::{self, Debug},
     marker::PhantomData,
     result,
-    sync::Arc,
 };
 
 /// Client streaming interaction pattern
@@ -77,11 +76,10 @@ impl<C: ConnectionErrors> fmt::Display for ItemError<C> {
 
 impl<C: ConnectionErrors> error::Error for ItemError<C> {}
 
-impl<S, C, SC> RpcClient<S, C, SC>
+impl<S, C> RpcClient<S, C>
 where
     S: Service,
-    SC: Service,
-    C: ServiceConnection<SC>,
+    C: ServiceConnection<S>,
 {
     /// Call to the server that allows the client to stream, single response
     pub async fn client_streaming<M>(
@@ -89,7 +87,7 @@ where
         msg: M,
     ) -> result::Result<
         (
-            UpdateSink<SC, C, M::Update, S>,
+            UpdateSink<C, M::Update>,
             Boxed<result::Result<M::Response, ItemError<C>>>,
         ),
         Error<C>,
@@ -97,21 +95,15 @@ where
     where
         M: ClientStreamingMsg<S>,
     {
-        let msg = self.map.req_into_outer(msg.into());
+        let msg = msg.into();
         let (mut send, mut recv) = self.source.open().await.map_err(Error::Open)?;
         send.send(msg).map_err(Error::Send).await?;
-        let send = UpdateSink::<SC, C, M::Update, S>(send, PhantomData, Arc::clone(&self.map));
-        let map = Arc::clone(&self.map);
+        let send = UpdateSink::<C, M::Update>(send, PhantomData);
         let recv = async move {
             let item = recv.next().await.ok_or(ItemError::EarlyClose)?;
 
             match item {
-                Ok(x) => {
-                    let x = map
-                        .res_try_into_inner(x)
-                        .map_err(|_| ItemError::DowncastError)?;
-                    M::Response::try_from(x).map_err(|_| ItemError::DowncastError)
-                }
+                Ok(msg) => M::Response::try_from(msg).map_err(|_| ItemError::DowncastError),
                 Err(e) => Err(ItemError::RecvError(e)),
             }
         }

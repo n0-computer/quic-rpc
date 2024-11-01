@@ -2,7 +2,10 @@
 //!
 //! The main entry point is [RpcClient].
 use crate::{
-    map::{ChainedMapper, MapService, Mapper},
+    transport::{
+        mapped::MappedConnection,
+        ConnectionCommon,
+    },
     Service, ServiceConnection,
 };
 use futures_lite::Stream;
@@ -13,7 +16,6 @@ use std::{
     fmt::Debug,
     marker::PhantomData,
     pin::Pin,
-    sync::Arc,
     task::{Context, Poll},
 };
 
@@ -32,19 +34,18 @@ pub type BoxStreamSync<'a, T> = Pin<Box<dyn Stream<Item = T> + Send + Sync + 'a>
 /// Type parameters:
 ///
 /// `S` is the service type that determines what interactions this client supports.
-/// `SC` is the service type that is compatible with the connection.
 /// `C` is the substream source.
 #[derive(Debug)]
-pub struct RpcClient<S, C = BoxedServiceConnection<S>, SC = S> {
+pub struct RpcClient<S, C = BoxedServiceConnection<S>> {
     pub(crate) source: C,
-    pub(crate) map: Arc<dyn MapService<SC, S>>,
+    pub(crate) p: PhantomData<S>,
 }
 
-impl<SC, S, C: Clone> Clone for RpcClient<S, C, SC> {
+impl<S, C: Clone> Clone for RpcClient<S, C> {
     fn clone(&self) -> Self {
         Self {
             source: self.source.clone(),
-            map: Arc::clone(&self.map),
+            p: PhantomData,
         }
     }
 }
@@ -53,23 +54,15 @@ impl<SC, S, C: Clone> Clone for RpcClient<S, C, SC> {
 /// that support it, [crate::message::ClientStreaming] and [crate::message::BidiStreaming].
 #[pin_project]
 #[derive(Debug)]
-pub struct UpdateSink<SC, C, T, S = SC>(
-    #[pin] pub C::SendSink,
-    pub PhantomData<T>,
-    pub Arc<dyn MapService<SC, S>>,
-)
+pub struct UpdateSink<C, T>(#[pin] pub C::SendSink, pub PhantomData<T>)
 where
-    SC: Service,
-    S: Service,
-    C: ServiceConnection<SC>,
-    T: Into<S::Req>;
+    C: ConnectionCommon,
+    T: Into<C::Out>;
 
-impl<SC, C, T, S> Sink<T> for UpdateSink<SC, C, T, S>
+impl<C, T> Sink<T> for UpdateSink<C, T>
 where
-    SC: Service,
-    S: Service,
-    C: ServiceConnection<SC>,
-    T: Into<S::Req>,
+    C: ConnectionCommon,
+    T: Into<C::Out>,
 {
     type Error = C::SendError;
 
@@ -78,7 +71,7 @@ where
     }
 
     fn start_send(self: Pin<&mut Self>, item: T) -> Result<(), Self::Error> {
-        let req = self.2.req_into_outer(item.into());
+        let req = item.into();
         self.project().0.start_send(req)
     }
 
@@ -91,7 +84,7 @@ where
     }
 }
 
-impl<S, C> RpcClient<S, C, S>
+impl<S, C> RpcClient<S, C>
 where
     S: Service,
     C: ServiceConnection<S>,
@@ -101,24 +94,21 @@ where
     ///
     /// This is where a generic typed connection is converted into a client for a specific service.
     ///
-    /// When creating a new client, the outer service type `S` and the inner
-    /// service type `SC` that is compatible with the underlying connection will
-    /// be identical.
-    ///
     /// You can get a client for a nested service by calling [map](RpcClient::map).
     pub fn new(source: C) -> Self {
         Self {
             source,
-            map: Arc::new(Mapper::new()),
+            p: PhantomData,
         }
     }
 }
 
-impl<S, C, SC> RpcClient<S, C, SC>
+use crate::transport::mapped::ConnectionMapExt;
+
+impl<S, C> RpcClient<S, C>
 where
     S: Service,
-    SC: Service,
-    C: ServiceConnection<SC>,
+    C: ServiceConnection<S>,
 {
     /// Get the underlying connection
     pub fn into_inner(self) -> C {
@@ -134,25 +124,23 @@ where
     /// Where SNext is the new service to map to and S is the current inner service.
     ///
     /// This method can be chained infintely.
-    pub fn map<SNext>(self) -> RpcClient<SNext, C, SC>
+    pub fn map<SNext>(self) -> RpcClient<SNext, MappedConnection<SNext::Res, SNext::Req, C>>
     where
         SNext: Service,
-        SNext::Req: Into<S::Req> + TryFrom<S::Req>,
-        SNext::Res: Into<S::Res> + TryFrom<S::Res>,
+        S::Req: From<SNext::Req>,
+        SNext::Res: TryFrom<S::Res>,
     {
-        let map = ChainedMapper::new(self.map);
         RpcClient {
-            source: self.source,
-            map: Arc::new(map),
+            source: self.source.map::<SNext::Res, SNext::Req>(),
+            p: PhantomData,
         }
     }
 }
 
-impl<S, C, SC> AsRef<C> for RpcClient<S, C, SC>
+impl<S, C> AsRef<C> for RpcClient<S, C>
 where
     S: Service,
-    SC: Service,
-    C: ServiceConnection<SC>,
+    C: ServiceConnection<S>,
 {
     fn as_ref(&self) -> &C {
         &self.source

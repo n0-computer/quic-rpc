@@ -67,10 +67,9 @@ impl<S: ConnectionErrors> fmt::Display for ItemError<S> {
 
 impl<S: ConnectionErrors> error::Error for ItemError<S> {}
 
-impl<S, C, SC> RpcClient<S, C, SC>
+impl<S, C> RpcClient<S, C>
 where
-    SC: Service,
-    C: ServiceConnection<SC>,
+    C: ServiceConnection<S>,
     S: Service,
 {
     /// Bidi call to the server, request opens a stream, response is a stream
@@ -81,17 +80,11 @@ where
     where
         M: ServerStreamingMsg<S>,
     {
-        let msg = self.map.req_into_outer(msg.into());
+        let msg = msg.into();
         let (mut send, recv) = self.source.open().await.map_err(Error::Open)?;
         send.send(msg).map_err(Error::<C>::Send).await?;
-        let map = Arc::clone(&self.map);
         let recv = recv.map(move |x| match x {
-            Ok(x) => {
-                let x = map
-                    .res_try_into_inner(x)
-                    .map_err(|_| ItemError::DowncastError)?;
-                M::Response::try_from(x).map_err(|_| ItemError::DowncastError)
-            }
+            Ok(msg) => M::Response::try_from(msg).map_err(|_| ItemError::DowncastError),
             Err(e) => Err(ItemError::RecvError(e)),
         });
         // keep send alive so the request on the server side does not get cancelled

@@ -2,7 +2,10 @@
 //!
 //! The main entry point is [RpcServer]
 use crate::{
-    transport::{mapped::{MappedConnectionTypes, MappedRecvStream, MappedSendSink}, ConnectionCommon, ConnectionErrors},
+    transport::{
+        mapped::{MappedConnectionTypes, MappedRecvStream, MappedSendSink},
+        ConnectionCommon, ConnectionErrors,
+    },
     Service, ServiceEndpoint,
 };
 use futures_lite::{Future, Stream, StreamExt};

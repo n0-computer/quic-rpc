@@ -75,10 +75,9 @@ impl<C: ConnectionErrors> fmt::Display for ItemError<C> {
 
 impl<C: ConnectionErrors> error::Error for ItemError<C> {}
 
-impl<S, C, SC> RpcClient<S, C, SC>
+impl<S, C> RpcClient<S, C>
 where
-    SC: Service,
-    C: ServiceConnection<SC>,
+    C: ServiceConnection<S>,
     S: Service,
 {
     /// Bidi call to the server, request opens a stream, response is a stream
@@ -87,7 +86,7 @@ where
         msg: M,
     ) -> result::Result<
         (
-            UpdateSink<SC, C, M::Update, S>,
+            UpdateSink<C, M::Update>,
             BoxStreamSync<'static, result::Result<M::Response, ItemError<C>>>,
         ),
         Error<C>,
@@ -95,18 +94,12 @@ where
     where
         M: BidiStreamingMsg<S>,
     {
-        let msg = self.map.req_into_outer(msg.into());
+        let msg = msg.into();
         let (mut send, recv) = self.source.open().await.map_err(Error::Open)?;
         send.send(msg).await.map_err(Error::<C>::Send)?;
-        let send = UpdateSink(send, PhantomData, Arc::clone(&self.map));
-        let map = Arc::clone(&self.map);
+        let send = UpdateSink(send, PhantomData);
         let recv = Box::pin(recv.map(move |x| match x {
-            Ok(x) => {
-                let x = map
-                    .res_try_into_inner(x)
-                    .map_err(|_| ItemError::DowncastError)?;
-                M::Response::try_from(x).map_err(|_| ItemError::DowncastError)
-            }
+            Ok(msg) => M::Response::try_from(msg).map_err(|_| ItemError::DowncastError),
             Err(e) => Err(ItemError::RecvError(e)),
         }));
         Ok((send, recv))

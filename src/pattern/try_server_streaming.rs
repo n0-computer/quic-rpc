@@ -169,10 +169,9 @@ where
     }
 }
 
-impl<S, C, SC> RpcClient<S, C, SC>
+impl<S, C> RpcClient<S, C>
 where
-    SC: Service,
-    C: ServiceConnection<SC>,
+    C: ServiceConnection<S>,
     S: Service,
 {
     /// Bidi call to the server, request opens a stream, response is a stream
@@ -188,23 +187,18 @@ where
         Result<M::Item, M::ItemError>: Into<S::Res> + TryFrom<S::Res>,
         Result<StreamCreated, M::CreateError>: Into<S::Res> + TryFrom<S::Res>,
     {
-        let msg = self.map.req_into_outer(msg.into());
+        let msg = msg.into();
         let (mut send, mut recv) = self.source.open().await.map_err(Error::Open)?;
         send.send(msg).map_err(Error::Send).await?;
-        let map = Arc::clone(&self.map);
         let Some(initial) = recv.next().await else {
             return Err(Error::EarlyClose);
         };
         let initial = initial.map_err(Error::Recv)?; // initial response
-        let initial = map
-            .res_try_into_inner(initial)
-            .map_err(|_| Error::Downcast)?;
         let initial = <std::result::Result<StreamCreated, M::CreateError>>::try_from(initial)
             .map_err(|_| Error::Downcast)?;
         let _ = initial.map_err(Error::Application)?;
         let recv = recv.map(move |x| {
             let x = x.map_err(ItemError::Recv)?;
-            let x = map.res_try_into_inner(x).map_err(|_| ItemError::Downcast)?;
             let x = <std::result::Result<M::Item, M::ItemError>>::try_from(x)
                 .map_err(|_| ItemError::Downcast)?;
             let x = x.map_err(ItemError::Application)?;
