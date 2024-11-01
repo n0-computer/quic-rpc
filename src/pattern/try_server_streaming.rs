@@ -16,7 +16,6 @@ use std::{
     error,
     fmt::{self, Debug},
     result,
-    sync::Arc,
 };
 
 /// A guard message to indicate that the stream has been created.

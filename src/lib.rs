@@ -102,7 +102,6 @@ pub use client::RpcClient;
 pub use server::RpcServer;
 #[cfg(feature = "macros")]
 mod macros;
-mod map;
 
 pub mod pattern;
 

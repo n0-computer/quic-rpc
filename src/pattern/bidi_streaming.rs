@@ -16,7 +16,6 @@ use std::{
     fmt::{self, Debug},
     marker::PhantomData,
     result,
-    sync::Arc,
 };
 
 /// Bidirectional streaming interaction pattern

@@ -264,37 +264,6 @@ where
     type SendSink = MappedSendSink<C::SendSink, Out, C::Out>;
 }
 
-///
-#[derive(Debug)]
-pub struct RpcChannel2<S: Service, C: ConnectionCommon<In = S::Req, Out = S::Res>> {
-    /// Sink to send responses to the client.
-    pub send: C::SendSink,
-    /// Stream to receive requests from the client.
-    pub recv: C::RecvStream,
-
-    _phantom: PhantomData<S>,
-}
-
-impl<S, C> RpcChannel2<S, C>
-where
-    S: Service,
-    C: ConnectionCommon<In = S::Req, Out = S::Res>,
-{
-    /// Map the input and output types of this connection
-    pub fn map2<S1>(self) -> RpcChannel2<S1, MappedConnectionTypes<S1::Req, S1::Res, C>>
-    where
-        S1: Service,
-        S1::Req: TryFrom<S::Req>,
-        S::Res: From<S1::Res>,
-    {
-        RpcChannel2 {
-            send: MappedSendSink::new(self.send),
-            recv: MappedRecvStream::new(self.recv),
-            _phantom: PhantomData,
-        }
-    }
-}
-
 impl<S, C> RpcChannel<S, C>
 where
     S: Service,

@@ -15,7 +15,6 @@ use std::{
     error,
     fmt::{self, Debug},
     result,
-    sync::Arc,
 };
 
 /// Server streaming interaction pattern
