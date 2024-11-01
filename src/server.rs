@@ -3,7 +3,7 @@
 //! The main entry point is [RpcServer]
 use crate::{
     map::{ChainedMapper, MapService, Mapper},
-    transport::ConnectionErrors,
+    transport::{ConnectionCommon, ConnectionErrors},
     Service, ServiceEndpoint,
 };
 use futures_lite::{Future, Stream, StreamExt};
@@ -77,8 +77,11 @@ impl<S: Service, C: ServiceEndpoint<S>> RpcServer<S, C> {
 /// `SC` is the service type that is compatible with the connection.
 /// `C` is the service endpoint from which the channel was created.
 #[derive(Debug)]
-pub struct RpcChannel<S: Service, C: ServiceEndpoint<SC> = BoxedServiceEndpoint<S>, SC: Service = S>
-{
+pub struct RpcChannel<
+    S: Service,
+    C: ConnectionCommon<SC::Req, SC::Res> = BoxedServiceEndpoint<S>,
+    SC: Service = S,
+> {
     /// Sink to send responses to the client.
     pub send: C::SendSink,
     /// Stream to receive requests from the client.
@@ -90,7 +93,7 @@ pub struct RpcChannel<S: Service, C: ServiceEndpoint<SC> = BoxedServiceEndpoint<
 impl<S, C> RpcChannel<S, C, S>
 where
     S: Service,
-    C: ServiceEndpoint<S>,
+    C: ConnectionCommon<S::Req, S::Res>,
 {
     /// Create a new RPC channel.
     pub fn new(send: C::SendSink, recv: C::RecvStream) -> Self {
@@ -106,7 +109,7 @@ impl<SC, S, C> RpcChannel<S, C, SC>
 where
     S: Service,
     SC: Service,
-    C: ServiceEndpoint<SC>,
+    C: ConnectionCommon<SC::Req, SC::Res>,
 {
     /// Map this channel's service into an inner service.
     ///
@@ -199,13 +202,13 @@ pub struct UpdateStream<SC, C, T, S = SC>(
 where
     SC: Service,
     S: Service,
-    C: ServiceEndpoint<SC>;
+    C: ConnectionCommon<SC::Req, SC::Res>;
 
 impl<SC, C, T, S> UpdateStream<SC, C, T, S>
 where
     SC: Service,
     S: Service,
-    C: ServiceEndpoint<SC>,
+    C: ConnectionCommon<SC::Req, SC::Res>,
     T: TryFrom<S::Req>,
 {
     pub(crate) fn new(
@@ -222,7 +225,7 @@ impl<SC, C, T, S> Stream for UpdateStream<SC, C, T, S>
 where
     SC: Service,
     S: Service,
-    C: ServiceEndpoint<SC>,
+    C: ConnectionCommon<SC::Req, SC::Res>,
     T: TryFrom<S::Req>,
 {
     type Item = T;

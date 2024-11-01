@@ -7,7 +7,7 @@ use crate::{
     client::{BoxStreamSync, UpdateSink},
     message::{InteractionPattern, Msg},
     server::{race2, RpcChannel, RpcServerError, UpdateStream},
-    transport::ConnectionErrors,
+    transport::{ConnectionCommon, ConnectionErrors},
     RpcClient, Service, ServiceConnection, ServiceEndpoint,
 };
 
@@ -116,7 +116,7 @@ where
 impl<SC, C, S> RpcChannel<S, C, SC>
 where
     SC: Service,
-    C: ServiceEndpoint<SC>,
+    C: ConnectionCommon<SC::Req, SC::Res>,
     S: Service,
 {
     /// handle the message M using the given function on the target object

@@ -41,6 +41,8 @@ pub mod misc;
 #[cfg(any(feature = "quinn-transport", feature = "hyper-transport"))]
 mod util;
 
+pub mod mapped;
+
 /// Errors that can happen when creating and using a [`Connection`] or [`ServerEndpoint`].
 pub trait ConnectionErrors: Debug + Clone + Send + Sync + 'static {
     /// Error when opening or accepting a channel
