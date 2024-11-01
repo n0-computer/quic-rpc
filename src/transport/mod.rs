@@ -20,7 +20,7 @@
 use futures_lite::{Future, Stream};
 use futures_sink::Sink;
 
-use crate::RpcError;
+use crate::{RpcError, RpcMessage};
 use std::{
     fmt::{self, Debug, Display},
     net::SocketAddr,

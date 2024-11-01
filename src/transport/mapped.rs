@@ -7,6 +7,7 @@ use std::{
 };
 
 use futures_lite::{Stream, StreamExt};
+use futures_sink::Sink;
 use futures_util::SinkExt;
 use pin_project::pin_project;
 
@@ -229,40 +230,27 @@ pub trait ConnectionMapExt<In, Out>: Connection<In, Out> {
 
 impl<T: Connection<In, Out>, In, Out> ConnectionMapExt<In, Out> for T {}
 
-struct MappedStreamTypes<Send, Recv, OE> {
-    p: PhantomData<(Send, Recv, OE)>,
-}
+/// Connection types for a mapped connection
+pub struct MappedConnectionTypes<In, Out, In0, Out0, C>(PhantomData<(In, Out, In0, Out0, C)>);
 
-impl<Send, Recv, OE> std::fmt::Debug for MappedStreamTypes<Send, Recv, OE> {
+impl<In, Out, In0, Out0, C> Debug for MappedConnectionTypes<In, Out, In0, Out0, C> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("MappedStreamTypes").finish()
+        f.debug_struct("MappedConnectionTypes").finish()
     }
 }
 
-impl<Send, Recv, OE> Clone for MappedStreamTypes<Send, Recv, OE> {
-    fn clone(&self) -> Self {
-        Self { p: PhantomData }
-    }
-}
-
-struct MappedCC<In, Out, C>(PhantomData<(In, Out, C)>);
-
-impl<In, Out, C> Debug for MappedCC<In, Out, C> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("MappedCC").finish()
-    }
-}
-
-impl<In, Out, C> Clone for MappedCC<In, Out, C> {
+impl<In, Out, In0, Out0, C> Clone for MappedConnectionTypes<In, Out, In0, Out0, C> {
     fn clone(&self) -> Self {
         Self(PhantomData)
     }
 }
 
-impl<In, Out, C> ConnectionErrors for MappedCC<In, Out, C>
+impl<In, Out, In0, Out0, C> ConnectionErrors for MappedConnectionTypes<In, Out, In0, Out0, C>
 where
     In: RpcMessage,
     Out: RpcMessage,
+    In0: RpcMessage,
+    Out0: RpcMessage,
     C: ConnectionErrors,
 {
     type OpenError = C::OpenError;
@@ -270,14 +258,49 @@ where
     type SendError = C::SendError;
 }
 
-impl<In, Out, C> ConnectionCommon<In, Out> for MappedCC<In, Out, C>
+impl<In, Out, In0, Out0, C> ConnectionCommon<In, Out>
+    for MappedConnectionTypes<In, Out, In0, Out0, C>
 where
-    C: ConnectionCommon<In, Out>,
+    C: ConnectionCommon<In0, Out0>,
     In: RpcMessage,
     Out: RpcMessage,
+    In0: RpcMessage,
+    Out0: RpcMessage,
+    In: TryFrom<In0>,
+    Out0: From<Out>,
 {
     type RecvStream = MappedRecvStream<C::RecvStream, In>;
-    type SendSink = MappedSendSink<C::SendSink, Out, Out>;
+    type SendSink = MappedSendSink<C::SendSink, Out, Out0>;
+}
+
+///
+#[derive(Debug)]
+pub struct RpcChannel2<S: Service, C: ConnectionCommon<S::Req, S::Res>> {
+    /// Sink to send responses to the client.
+    pub send: C::SendSink,
+    /// Stream to receive requests from the client.
+    pub recv: C::RecvStream,
+}
+
+impl<S, C> RpcChannel2<S, C>
+where
+    S: Service,
+    C: ConnectionCommon<S::Req, S::Res>,
+{
+    /// Map the input and output types of this connection
+    pub fn map2<S1>(
+        self,
+    ) -> RpcChannel2<S1, MappedConnectionTypes<S1::Req, S1::Res, S::Req, S::Res, C>>
+    where
+        S1: Service,
+        S1::Req: TryFrom<S::Req>,
+        S::Res: From<S1::Res>,
+    {
+        RpcChannel2 {
+            send: MappedSendSink::new(self.send),
+            recv: MappedRecvStream::new(self.recv),
+        }
+    }
 }
 
 struct StreamPair<Send, Recv> {
