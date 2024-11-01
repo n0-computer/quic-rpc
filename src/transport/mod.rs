@@ -33,12 +33,18 @@ pub mod combined;
 pub mod flume;
 #[cfg(feature = "hyper-transport")]
 pub mod hyper;
+#[cfg(feature = "iroh-net-transport")]
+pub mod iroh_net;
 #[cfg(feature = "quinn-transport")]
 pub mod quinn;
 
 pub mod misc;
 
-#[cfg(any(feature = "quinn-transport", feature = "hyper-transport"))]
+#[cfg(any(
+    feature = "quinn-transport",
+    feature = "hyper-transport",
+    feature = "iroh-net-transport"
+))]
 mod util;
 
 /// Errors that can happen when creating and using a [`Connection`] or [`ServerEndpoint`].

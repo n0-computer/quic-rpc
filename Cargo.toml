@@ -21,6 +21,7 @@ futures-lite = "2.3.0"
 futures-sink = "0.3.30"
 futures-util = { version = "0.3.30", features = ["sink"] }
 hyper = { version = "0.14.16", features = ["full"], optional = true }
+iroh-net = { version = "0.27.0", optional = true }
 pin-project = "1"
 quinn = { package = "iroh-quinn", version = "0.11", optional = true }
 serde = { version = "1.0.183", features = ["derive"] }
@@ -54,6 +55,7 @@ futures-buffered = "0.2.4"
 hyper-transport = ["dep:flume", "dep:hyper", "dep:bincode", "dep:bytes", "dep:tokio-serde", "dep:tokio-util"]
 quinn-transport = ["dep:flume", "dep:quinn", "dep:bincode", "dep:tokio-serde", "dep:tokio-util"]
 flume-transport = ["dep:flume"]
+iroh-net-transport = ["dep:iroh-net", "dep:flume", "dep:quinn", "dep:bincode", "dep:tokio-serde", "dep:tokio-util"]
 combined-transport = []
 macros = []
 default = ["flume-transport"]
