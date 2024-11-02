@@ -126,9 +126,10 @@ impl<T> RpcMessage for T where
 ///
 /// We don't require them to implement [std::error::Error] so we can use
 /// anyhow::Error as an error type.
-pub trait RpcError: Debug + Display + Send + Sync + Unpin + 'static {}
+pub trait RpcError: Debug + Display + Into<anyhow::Error> + Send + Sync + Unpin + 'static {}
 
-impl<T> RpcError for T where T: Debug + Display + Send + Sync + Unpin + 'static {}
+impl<T> RpcError for T where T: Debug + Display + Into<anyhow::Error> + Send + Sync + Unpin + 'static
+{}
 
 /// A service
 ///

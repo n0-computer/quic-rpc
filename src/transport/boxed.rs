@@ -1,6 +1,7 @@
 //! Boxed transport with concrete types
 
 use std::{
+    any,
     fmt::Debug,
     pin::Pin,
     task::{Context, Poll},
@@ -144,7 +145,7 @@ impl<'a, In: RpcMessage, Out: RpcMessage> OpenFuture<'a, In, Out> {
 
     /// Create a new boxed future
     pub fn boxed(
-        f: impl Future<Output = anyhow::Result<(SendSink<Out>, RecvStream<In>)>> + Send + Sync + 'a,
+        f: impl Future<Output = anyhow::Result<(SendSink<Out>, RecvStream<In>)>> + Send + 'a,
     ) -> Self {
         Self(OpenFutureInner::Boxed(Box::pin(f)))
     }
@@ -377,6 +378,34 @@ impl<In: RpcMessage, Out: RpcMessage> BoxableServerEndpoint<In, Out>
 
     fn local_addr(&self) -> &[super::LocalAddr] {
         super::ServerEndpoint::local_addr(self)
+    }
+}
+
+impl<In, Out, C> BoxableConnection<In, Out> for super::mapped::MappedConnection<In, Out, C>
+where
+    In: RpcMessage,
+    Out: RpcMessage,
+    C: super::Connection,
+    C::Out: From<Out>,
+    In: TryFrom<C::In>,
+    C::SendError: Into<anyhow::Error>,
+    C::RecvError: Into<anyhow::Error>,
+    C::OpenError: Into<anyhow::Error>,
+{
+    fn clone_box(&self) -> Box<dyn BoxableConnection<In, Out>> {
+        Box::new(self.clone())
+    }
+
+    fn open_boxed(&self) -> OpenFuture<In, Out> {
+        let f = Box::pin(async move {
+            let (send, recv) = super::Connection::open(self).await.map_err(|e| e.into())?;
+            // map the error types to anyhow
+            let send = send.sink_map_err(|e| e.into());
+            let recv = recv.map_err(|e| e.into());
+            // return the boxed streams
+            anyhow::Ok((SendSink::boxed(send), RecvStream::boxed(recv)))
+        });
+        OpenFuture::boxed(f)
     }
 }
 

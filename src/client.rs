@@ -2,10 +2,7 @@
 //!
 //! The main entry point is [RpcClient].
 use crate::{
-    transport::{
-        mapped::MappedConnection,
-        ConnectionCommon,
-    },
+    transport::{boxed::BoxableConnection, mapped::MappedConnection, ConnectionCommon},
     Service, ServiceConnection,
 };
 use futures_lite::Stream;
@@ -132,6 +129,17 @@ where
     {
         RpcClient {
             source: self.source.map::<SNext::Res, SNext::Req>(),
+            p: PhantomData,
+        }
+    }
+
+    /// box
+    pub fn boxed(self) -> RpcClient<S, BoxedServiceConnection<S>>
+    where
+        C: BoxableConnection<S::Res, S::Req>,
+    {
+        RpcClient {
+            source: BoxedServiceConnection::<S>::new(self.source),
             p: PhantomData,
         }
     }

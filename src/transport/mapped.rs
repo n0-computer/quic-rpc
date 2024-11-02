@@ -15,8 +15,8 @@ use super::{Connection, ConnectionCommon, ConnectionErrors};
 
 /// A connection that maps input and output types
 #[derive(Debug)]
-pub struct MappedConnection<In, Out, T> {
-    inner: T,
+pub struct MappedConnection<In, Out, C> {
+    inner: C,
     _phantom: std::marker::PhantomData<(In, Out)>,
 }
 
@@ -117,6 +117,8 @@ pub enum ErrorOrMapError<E> {
     /// Conversion error
     Conversion,
 }
+
+impl<E: Debug + Display> std::error::Error for ErrorOrMapError<E> {}
 
 impl<E: Display> Display for ErrorOrMapError<E> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -291,8 +293,9 @@ where
 mod tests {
 
     use crate::{
-        server::RpcChannel,
-        transport::{flume::FlumeConnection, ServerEndpoint},
+        client::BoxedServiceConnection,
+        server::{BoxedServiceChannel, RpcChannel},
+        transport::{boxed::BoxableConnection, flume::FlumeConnection, ServerEndpoint},
         RpcClient, RpcServer, ServiceConnection, ServiceEndpoint,
     };
     use serde::{Deserialize, Serialize};
@@ -332,13 +335,14 @@ mod tests {
     async fn smoke() -> TestResult<()> {
         async fn handle_sub_request(
             req: String,
-            chan: RpcChannel<SubService, impl Connection<In = String, Out = String>>,
+            chan: RpcChannel<SubService, BoxedServiceChannel<SubService>>,
         ) -> anyhow::Result<()> {
             Ok(())
         }
         let (s, c): (_, FlumeConnection<Response, Request>) =
             crate::transport::flume::connection::<Request, Response>(32);
         let _x = c.clone().map::<String, String>();
+
         let _y = c.clone().map_to_service::<SubService>();
         let s = RpcServer::<FullService, _>::new(s);
         return Ok(());
@@ -346,7 +350,7 @@ mod tests {
             let (msg, chan) = accepting.read_first().await?;
             match msg {
                 Request::A(x) => todo!(),
-                Request::B(x) => todo!(), // handle_sub_request(x, chan).await?,
+                Request::B(x) => handle_sub_request(x, chan.map::<SubService>().boxed()).await?,
             }
         }
         Ok(())

@@ -2,23 +2,30 @@
 //!
 //! The main entry point is [RpcServer]
 use crate::{
+    client::BoxedServiceConnection,
     transport::{
+        self,
         mapped::{MappedConnectionTypes, MappedRecvStream, MappedSendSink},
         ConnectionCommon, ConnectionErrors,
     },
     Service, ServiceEndpoint,
 };
 use futures_lite::{Future, Stream, StreamExt};
+use futures_util::{SinkExt, TryStreamExt};
 use pin_project::pin_project;
 use std::{
     error,
-    fmt::{self, Debug},
+    fmt::{self, Debug, Display},
     marker::PhantomData,
     pin::Pin,
     result,
     task::{self, Poll},
 };
 use tokio::sync::oneshot;
+
+/// Type alias for a boxed connection to a specific service
+pub type BoxedServiceChannel<S> =
+    crate::transport::boxed::Connection<<S as crate::Service>::Req, <S as crate::Service>::Res>;
 
 /// Type alias for a service endpoint
 pub type BoxedServiceEndpoint<S> =
@@ -75,12 +82,11 @@ impl<S: Service, C: ServiceEndpoint<S>> RpcServer<S, C> {
 /// Type parameters:
 ///
 /// `S` is the service type.
-/// `SC` is the service type that is compatible with the connection.
 /// `C` is the service endpoint from which the channel was created.
 #[derive(Debug)]
 pub struct RpcChannel<
     S: Service,
-    C: ConnectionCommon<In = S::Req, Out = S::Res> = BoxedServiceEndpoint<S>,
+    C: ConnectionCommon<In = S::Req, Out = S::Res> = BoxedServiceChannel<S>,
 > {
     /// Sink to send responses to the client.
     pub send: C::SendSink,
@@ -103,13 +109,23 @@ where
             p: PhantomData,
         }
     }
-}
 
-impl<S, C> RpcChannel<S, C>
-where
-    S: Service,
-    C: ConnectionCommon<In = S::Req, Out = S::Res>,
-{
+    /// Convert this channel into a boxed channel.
+    pub fn boxed(self) -> RpcChannel<S, BoxedServiceChannel<S>>
+    where
+        C::SendError: Into<anyhow::Error> + Send + Sync + 'static,
+        C::RecvError: Into<anyhow::Error> + Send + Sync + 'static,
+    {
+        let send =
+            transport::boxed::SendSink::boxed(Box::new(self.send.sink_map_err(|e| e.into())));
+        let recv = transport::boxed::RecvStream::boxed(Box::new(self.recv.map_err(|e| e.into())));
+        RpcChannel {
+            send,
+            recv,
+            p: PhantomData,
+        }
+    }
+
     /// Map this channel's service into an inner service.
     ///
     /// This method is available if the required bounds are upheld:
