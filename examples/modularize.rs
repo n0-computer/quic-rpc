@@ -22,7 +22,7 @@ use app::AppService;
 async fn main() -> Result<()> {
     // Spawn an inmemory connection.
     // Could use quic equally (all code in this example is generic over the transport)
-    let (server_conn, client_conn) = flume::service_connection::<AppService>(1);
+    let (server_conn, client_conn) = flume::connection(1);
 
     // spawn the server
     let handler = app::Handler::default();
@@ -166,7 +166,7 @@ mod app {
             match req {
                 Request::Iroh(req) => {
                     self.iroh
-                        .handle_rpc_request(req, chan.map::<IrohService>().boxed())
+                        .handle_rpc_request(req, chan.map().boxed())
                         .await?
                 }
                 Request::AppVersion(req) => chan.rpc(req, self, Self::on_version).await?,
@@ -188,8 +188,8 @@ mod app {
     impl Client {
         pub fn new(client: RpcClient<AppService>) -> Self {
             Self {
-                iroh: iroh::Client::new(client.clone().map::<IrohService>().boxed()),
-                client,
+                client: client.clone(),
+                iroh: iroh::Client::new(client.map().boxed()),
             }
         }
 
@@ -285,7 +285,7 @@ mod calc {
     use quic_rpc::{
         message::{ClientStreaming, ClientStreamingMsg, Msg, RpcMsg},
         server::RpcChannel,
-        RpcClient, Service, ServiceConnection, ServiceEndpoint,
+        RpcClient, Service,
     };
     use serde::{Deserialize, Serialize};
     use std::fmt::Debug;
@@ -400,7 +400,7 @@ mod clock {
     use quic_rpc::{
         message::{Msg, ServerStreaming, ServerStreamingMsg},
         server::RpcChannel,
-        RpcClient, Service, ServiceConnection, ServiceEndpoint,
+        RpcClient, Service,
     };
     use serde::{Deserialize, Serialize};
     use std::{

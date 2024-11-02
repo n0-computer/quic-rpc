@@ -306,6 +306,17 @@ impl<In: RpcMessage, Out: RpcMessage> super::ServerEndpoint for ServerEndpoint<I
         self.0.local_addr()
     }
 }
+impl<In: RpcMessage, Out: RpcMessage> BoxableConnection<In, Out>
+    for Connection<In, Out>
+{
+    fn clone_box(&self) -> Box<dyn BoxableConnection<In, Out>> {
+        Box::new(self.clone())
+    }
+
+    fn open_boxed(&self) -> OpenFuture<In, Out> {
+        OpenFuture::boxed(crate::transport::Connection::open(self))
+    }
+}
 
 #[cfg(feature = "quinn-transport")]
 impl<In: RpcMessage, Out: RpcMessage> BoxableConnection<In, Out>

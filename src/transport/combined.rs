@@ -11,6 +11,7 @@ use std::{
 };
 
 /// A connection that combines two other connections
+#[derive(Debug, Clone)]
 pub struct CombinedConnection<A, B> {
     /// First connection
     pub a: Option<A>,
@@ -26,25 +27,9 @@ impl<A: Connection, B: Connection<In = A::In, Out = A::Out>> CombinedConnection<
         Self { a, b }
     }
 }
-impl<A: Clone, B: Clone> Clone for CombinedConnection<A, B> {
-    fn clone(&self) -> Self {
-        Self {
-            a: self.a.clone(),
-            b: self.b.clone(),
-        }
-    }
-}
-
-impl<A: Debug, B: Debug> Debug for CombinedConnection<A, B> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("CombinedConnection")
-            .field("a", &self.a)
-            .field("b", &self.b)
-            .finish()
-    }
-}
 
 /// An endpoint that combines two other endpoints
+#[derive(Debug, Clone)]
 pub struct CombinedServerEndpoint<A, B> {
     /// First endpoint
     pub a: Option<A>,
@@ -75,25 +60,6 @@ impl<A: ServerEndpoint, B: ServerEndpoint<In = A::In, Out = A::Out>> CombinedSer
     /// Get back the inner endpoints
     pub fn into_inner(self) -> (Option<A>, Option<B>) {
         (self.a, self.b)
-    }
-}
-
-impl<A: Clone, B: Clone> Clone for CombinedServerEndpoint<A, B> {
-    fn clone(&self) -> Self {
-        Self {
-            a: self.a.clone(),
-            b: self.b.clone(),
-            local_addr: self.local_addr.clone(),
-        }
-    }
-}
-
-impl<A: Debug, B: Debug> Debug for CombinedServerEndpoint<A, B> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("CombinedServerEndpoint")
-            .field("a", &self.a)
-            .field("b", &self.b)
-            .finish()
     }
 }
 
