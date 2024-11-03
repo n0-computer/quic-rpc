@@ -124,25 +124,25 @@ impl<In: RpcMessage, Out: RpcMessage> fmt::Debug for FlumeServerEndpoint<In, Out
 impl<In: RpcMessage, Out: RpcMessage> ConnectionErrors for FlumeServerEndpoint<In, Out> {
     type SendError = self::SendError;
     type RecvError = self::RecvError;
-    type OpenError = self::OpenBiError;
-    type AcceptError = self::AcceptBiError;
+    type OpenError = self::OpenError;
+    type AcceptError = self::AcceptError;
 }
 
 type Socket<In, Out> = (self::SendSink<Out>, self::RecvStream<In>);
 
 /// Future returned by [FlumeConnection::open]
-pub struct OpenBiFuture<In: RpcMessage, Out: RpcMessage> {
+pub struct OpenFuture<In: RpcMessage, Out: RpcMessage> {
     inner: flume::r#async::SendFut<'static, Socket<Out, In>>,
     res: Option<Socket<In, Out>>,
 }
 
-impl<In: RpcMessage, Out: RpcMessage> fmt::Debug for OpenBiFuture<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> fmt::Debug for OpenFuture<In, Out> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("OpenBiFuture").finish()
+        f.debug_struct("OpenFuture").finish()
     }
 }
 
-impl<In: RpcMessage, Out: RpcMessage> OpenBiFuture<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> OpenFuture<In, Out> {
     fn new(inner: flume::r#async::SendFut<'static, Socket<Out, In>>, res: Socket<In, Out>) -> Self {
         Self {
             inner,
@@ -151,8 +151,8 @@ impl<In: RpcMessage, Out: RpcMessage> OpenBiFuture<In, Out> {
     }
 }
 
-impl<In: RpcMessage, Out: RpcMessage> Future for OpenBiFuture<In, Out> {
-    type Output = result::Result<Socket<In, Out>, self::OpenBiError>;
+impl<In: RpcMessage, Out: RpcMessage> Future for OpenFuture<In, Out> {
+    type Output = result::Result<Socket<In, Out>, self::OpenError>;
 
     fn poll(
         mut self: Pin<&mut Self>,
@@ -164,31 +164,31 @@ impl<In: RpcMessage, Out: RpcMessage> Future for OpenBiFuture<In, Out> {
                 .take()
                 .map(|x| Poll::Ready(Ok(x)))
                 .unwrap_or(Poll::Pending),
-            Poll::Ready(Err(_)) => Poll::Ready(Err(self::OpenBiError::RemoteDropped)),
+            Poll::Ready(Err(_)) => Poll::Ready(Err(self::OpenError::RemoteDropped)),
             Poll::Pending => Poll::Pending,
         }
     }
 }
 
 /// Future returned by [FlumeServerEndpoint::accept]
-pub struct AcceptBiFuture<In: RpcMessage, Out: RpcMessage> {
+pub struct AcceptFuture<In: RpcMessage, Out: RpcMessage> {
     wrapped: flume::r#async::RecvFut<'static, (SendSink<Out>, RecvStream<In>)>,
     _p: PhantomData<(In, Out)>,
 }
 
-impl<In: RpcMessage, Out: RpcMessage> fmt::Debug for AcceptBiFuture<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> fmt::Debug for AcceptFuture<In, Out> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("AcceptBiFuture").finish()
+        f.debug_struct("AcceptFuture").finish()
     }
 }
 
-impl<In: RpcMessage, Out: RpcMessage> Future for AcceptBiFuture<In, Out> {
-    type Output = result::Result<(SendSink<Out>, RecvStream<In>), AcceptBiError>;
+impl<In: RpcMessage, Out: RpcMessage> Future for AcceptFuture<In, Out> {
+    type Output = result::Result<(SendSink<Out>, RecvStream<In>), AcceptError>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
         match Pin::new(&mut self.wrapped).poll(cx) {
             Poll::Ready(Ok((send, recv))) => Poll::Ready(Ok((send, recv))),
-            Poll::Ready(Err(_)) => Poll::Ready(Err(AcceptBiError::RemoteDropped)),
+            Poll::Ready(Err(_)) => Poll::Ready(Err(AcceptError::RemoteDropped)),
             Poll::Pending => Poll::Pending,
         }
     }
@@ -203,8 +203,8 @@ impl<In: RpcMessage, Out: RpcMessage> ConnectionCommon for FlumeServerEndpoint<I
 
 impl<In: RpcMessage, Out: RpcMessage> ServerEndpoint for FlumeServerEndpoint<In, Out> {
     #[allow(refining_impl_trait)]
-    fn accept(&self) -> AcceptBiFuture<In, Out> {
-        AcceptBiFuture {
+    fn accept(&self) -> AcceptFuture<In, Out> {
+        AcceptFuture {
             wrapped: self.stream.clone().into_recv_async(),
             _p: PhantomData,
         }
@@ -218,8 +218,8 @@ impl<In: RpcMessage, Out: RpcMessage> ServerEndpoint for FlumeServerEndpoint<In,
 impl<In: RpcMessage, Out: RpcMessage> ConnectionErrors for FlumeConnection<In, Out> {
     type SendError = self::SendError;
     type RecvError = self::RecvError;
-    type OpenError = self::OpenBiError;
-    type AcceptError = self::AcceptBiError;
+    type OpenError = self::OpenError;
+    type AcceptError = self::AcceptError;
 }
 
 impl<In: RpcMessage, Out: RpcMessage> ConnectionCommon for FlumeConnection<In, Out> {
@@ -231,7 +231,7 @@ impl<In: RpcMessage, Out: RpcMessage> ConnectionCommon for FlumeConnection<In, O
 
 impl<In: RpcMessage, Out: RpcMessage> Connection for FlumeConnection<In, Out> {
     #[allow(refining_impl_trait)]
-    fn open(&self) -> OpenBiFuture<In, Out> {
+    fn open(&self) -> OpenFuture<In, Out> {
         let (local_send, remote_recv) = flume::bounded::<Out>(128);
         let (remote_send, local_recv) = flume::bounded::<In>(128);
         let remote_chan = (
@@ -242,7 +242,7 @@ impl<In: RpcMessage, Out: RpcMessage> Connection for FlumeConnection<In, Out> {
             SendSink(local_send.into_sink()),
             RecvStream(local_recv.into_stream()),
         );
-        OpenBiFuture::new(self.sink.clone().into_send_async(remote_chan), local_chan)
+        OpenFuture::new(self.sink.clone().into_send_async(remote_chan), local_chan)
     }
 }
 
@@ -270,22 +270,22 @@ impl<In: RpcMessage, Out: RpcMessage> fmt::Debug for FlumeConnection<In, Out> {
     }
 }
 
-/// AcceptBiError for mem channels.
+/// AcceptError for mem channels.
 ///
 /// There is not much that can go wrong with mem channels.
 #[derive(Debug)]
-pub enum AcceptBiError {
+pub enum AcceptError {
     /// The remote side of the channel was dropped
     RemoteDropped,
 }
 
-impl fmt::Display for AcceptBiError {
+impl fmt::Display for AcceptError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Debug::fmt(self, f)
     }
 }
 
-impl error::Error for AcceptBiError {}
+impl error::Error for AcceptError {}
 
 /// SendError for mem channels.
 ///
@@ -304,20 +304,20 @@ impl Display for SendError {
 
 impl std::error::Error for SendError {}
 
-/// OpenBiError for mem channels.
+/// OpenError for mem channels.
 #[derive(Debug)]
-pub enum OpenBiError {
+pub enum OpenError {
     /// The remote side of the channel was dropped
     RemoteDropped,
 }
 
-impl Display for OpenBiError {
+impl Display for OpenError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Debug::fmt(self, f)
     }
 }
 
-impl std::error::Error for OpenBiError {}
+impl std::error::Error for OpenError {}
 
 /// CreateChannelError for mem channels.
 ///

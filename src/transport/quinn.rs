@@ -202,7 +202,7 @@ impl<In: RpcMessage, Out: RpcMessage> ConnectionCommon for QuinnServerEndpoint<I
 }
 
 impl<In: RpcMessage, Out: RpcMessage> ServerEndpoint for QuinnServerEndpoint<In, Out> {
-    async fn accept(&self) -> Result<(Self::SendSink, Self::RecvStream), AcceptBiError> {
+    async fn accept(&self) -> Result<(Self::SendSink, Self::RecvStream), AcceptError> {
         let (send, recv) = self
             .inner
             .receiver
@@ -745,10 +745,10 @@ impl<In: DeserializeOwned> Stream for RecvStream<In> {
 }
 
 /// Error for open. Currently just a quinn::ConnectionError
-pub type OpenBiError = quinn::ConnectionError;
+pub type OpenError = quinn::ConnectionError;
 
 /// Error for accept. Currently just a quinn::ConnectionError
-pub type AcceptBiError = quinn::ConnectionError;
+pub type AcceptError = quinn::ConnectionError;
 
 /// CreateChannelError for quinn channels.
 #[derive(Debug, Clone)]

@@ -536,9 +536,9 @@ impl fmt::Display for RecvError {
 
 impl error::Error for RecvError {}
 
-/// OpenBiError for hyper channels.
+/// OpenError for hyper channels.
 #[derive(Debug)]
-pub enum OpenBiError {
+pub enum OpenError {
     /// Hyper http error
     HyperHttp(hyper::http::Error),
     /// Generic hyper error
@@ -547,41 +547,41 @@ pub enum OpenBiError {
     RemoteDropped,
 }
 
-impl fmt::Display for OpenBiError {
+impl fmt::Display for OpenError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Debug::fmt(self, f)
     }
 }
 
-impl std::error::Error for OpenBiError {}
+impl std::error::Error for OpenError {}
 
-/// AcceptBiError for hyper channels.
+/// AcceptError for hyper channels.
 ///
 /// There is not much that can go wrong with hyper channels.
 #[derive(Debug)]
-pub enum AcceptBiError {
+pub enum AcceptError {
     /// Hyper error
     Hyper(hyper::http::Error),
     /// The remote side of the channel was dropped
     RemoteDropped,
 }
 
-impl fmt::Display for AcceptBiError {
+impl fmt::Display for AcceptError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Debug::fmt(self, f)
     }
 }
 
-impl error::Error for AcceptBiError {}
+impl error::Error for AcceptError {}
 
 impl<In: RpcMessage, Out: RpcMessage> ConnectionErrors for HyperConnection<In, Out> {
     type SendError = self::SendError;
 
     type RecvError = self::RecvError;
 
-    type OpenError = OpenBiError;
+    type OpenError = OpenError;
 
-    type AcceptError = AcceptBiError;
+    type AcceptError = AcceptError;
 }
 
 impl<In: RpcMessage, Out: RpcMessage> ConnectionCommon for HyperConnection<In, Out> {
@@ -596,13 +596,13 @@ impl<In: RpcMessage, Out: RpcMessage> Connection for HyperConnection<In, Out> {
         let (out_tx, out_rx) = flume::bounded::<io::Result<Bytes>>(32);
         let req: Request<Body> = Request::post(&self.inner.uri)
             .body(Body::wrap_stream(out_rx.into_stream()))
-            .map_err(OpenBiError::HyperHttp)?;
+            .map_err(OpenError::HyperHttp)?;
         let res = self
             .inner
             .client
             .request(req)
             .await
-            .map_err(OpenBiError::Hyper)?;
+            .map_err(OpenError::Hyper)?;
         let (in_tx, in_rx) = flume::bounded::<result::Result<In, RecvError>>(32);
         spawn_recv_forwarder(res.into_body(), in_tx);
 
@@ -615,8 +615,8 @@ impl<In: RpcMessage, Out: RpcMessage> Connection for HyperConnection<In, Out> {
 impl<In: RpcMessage, Out: RpcMessage> ConnectionErrors for HyperServerEndpoint<In, Out> {
     type SendError = self::SendError;
     type RecvError = self::RecvError;
-    type OpenError = AcceptBiError;
-    type AcceptError = AcceptBiError;
+    type OpenError = AcceptError;
+    type AcceptError = AcceptError;
 }
 
 impl<In: RpcMessage, Out: RpcMessage> ConnectionCommon for HyperServerEndpoint<In, Out> {
@@ -631,12 +631,12 @@ impl<In: RpcMessage, Out: RpcMessage> ServerEndpoint for HyperServerEndpoint<In,
         &self.local_addr
     }
 
-    async fn accept(&self) -> Result<(Self::SendSink, Self::RecvStream), AcceptBiError> {
+    async fn accept(&self) -> Result<(Self::SendSink, Self::RecvStream), AcceptError> {
         let (recv, send) = self
             .channel
             .recv_async()
             .await
-            .map_err(|_| AcceptBiError::RemoteDropped)?;
+            .map_err(|_| AcceptError::RemoteDropped)?;
         Ok((
             SendSink::new(send, self.config.clone()),
             RecvStream::new(recv),

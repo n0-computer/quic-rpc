@@ -162,9 +162,9 @@ impl<A: ConnectionErrors, B: ConnectionErrors> fmt::Display for RecvError<A, B> 
 
 impl<A: ConnectionErrors, B: ConnectionErrors> error::Error for RecvError<A, B> {}
 
-/// OpenBiError for combined channels
+/// OpenError for combined channels
 #[derive(Debug)]
-pub enum OpenBiError<A: ConnectionErrors, B: ConnectionErrors> {
+pub enum OpenError<A: ConnectionErrors, B: ConnectionErrors> {
     /// A variant
     A(A::OpenError),
     /// B variant
@@ -173,36 +173,36 @@ pub enum OpenBiError<A: ConnectionErrors, B: ConnectionErrors> {
     NoChannel,
 }
 
-impl<A: ConnectionErrors, B: ConnectionErrors> fmt::Display for OpenBiError<A, B> {
+impl<A: ConnectionErrors, B: ConnectionErrors> fmt::Display for OpenError<A, B> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Debug::fmt(self, f)
     }
 }
 
-impl<A: ConnectionErrors, B: ConnectionErrors> error::Error for OpenBiError<A, B> {}
+impl<A: ConnectionErrors, B: ConnectionErrors> error::Error for OpenError<A, B> {}
 
-/// AcceptBiError for combined channels
+/// AcceptError for combined channels
 #[derive(Debug)]
-pub enum AcceptBiError<A: ConnectionErrors, B: ConnectionErrors> {
+pub enum AcceptError<A: ConnectionErrors, B: ConnectionErrors> {
     /// A variant
     A(A::AcceptError),
     /// B variant
     B(B::AcceptError),
 }
 
-impl<A: ConnectionErrors, B: ConnectionErrors> fmt::Display for AcceptBiError<A, B> {
+impl<A: ConnectionErrors, B: ConnectionErrors> fmt::Display for AcceptError<A, B> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Debug::fmt(self, f)
     }
 }
 
-impl<A: ConnectionErrors, B: ConnectionErrors> error::Error for AcceptBiError<A, B> {}
+impl<A: ConnectionErrors, B: ConnectionErrors> error::Error for AcceptError<A, B> {}
 
 impl<A: ConnectionErrors, B: ConnectionErrors> ConnectionErrors for CombinedConnection<A, B> {
     type SendError = self::SendError<A, B>;
     type RecvError = self::RecvError<A, B>;
-    type OpenError = self::OpenBiError<A, B>;
-    type AcceptError = self::AcceptBiError<A, B>;
+    type OpenError = self::OpenError<A, B>;
+    type AcceptError = self::AcceptError<A, B>;
 }
 
 impl<A: Connection, B: Connection<In = A::In, Out = A::Out>> ConnectionCommon
@@ -221,13 +221,13 @@ impl<A: Connection, B: Connection<In = A::In, Out = A::Out>> Connection
         let this = self.clone();
         // try a first, then b
         if let Some(a) = this.a {
-            let (send, recv) = a.open().await.map_err(OpenBiError::A)?;
+            let (send, recv) = a.open().await.map_err(OpenError::A)?;
             Ok((SendSink::A(send), RecvStream::A(recv)))
         } else if let Some(b) = this.b {
-            let (send, recv) = b.open().await.map_err(OpenBiError::B)?;
+            let (send, recv) = b.open().await.map_err(OpenError::B)?;
             Ok((SendSink::B(send), RecvStream::B(recv)))
         } else {
-            Err(OpenBiError::NoChannel)
+            Err(OpenError::NoChannel)
         }
     }
 }
@@ -235,8 +235,8 @@ impl<A: Connection, B: Connection<In = A::In, Out = A::Out>> Connection
 impl<A: ConnectionErrors, B: ConnectionErrors> ConnectionErrors for CombinedServerEndpoint<A, B> {
     type SendError = self::SendError<A, B>;
     type RecvError = self::RecvError<A, B>;
-    type OpenError = self::OpenBiError<A, B>;
-    type AcceptError = self::AcceptBiError<A, B>;
+    type OpenError = self::OpenError<A, B>;
+    type AcceptError = self::AcceptError<A, B>;
 }
 
 impl<A: ServerEndpoint, B: ServerEndpoint<In = A::In, Out = A::Out>> ConnectionCommon
@@ -254,7 +254,7 @@ impl<A: ServerEndpoint, B: ServerEndpoint<In = A::In, Out = A::Out>> ServerEndpo
     async fn accept(&self) -> Result<(Self::SendSink, Self::RecvStream), Self::AcceptError> {
         let a_fut = async {
             if let Some(a) = &self.a {
-                let (send, recv) = a.accept().await.map_err(AcceptBiError::A)?;
+                let (send, recv) = a.accept().await.map_err(AcceptError::A)?;
                 Ok((SendSink::A(send), RecvStream::A(recv)))
             } else {
                 std::future::pending().await
@@ -262,7 +262,7 @@ impl<A: ServerEndpoint, B: ServerEndpoint<In = A::In, Out = A::Out>> ServerEndpo
         };
         let b_fut = async {
             if let Some(b) = &self.b {
-                let (send, recv) = b.accept().await.map_err(AcceptBiError::B)?;
+                let (send, recv) = b.accept().await.map_err(AcceptError::B)?;
                 Ok((SendSink::B(send), RecvStream::B(recv)))
             } else {
                 std::future::pending().await
@@ -286,7 +286,7 @@ impl<A: ServerEndpoint, B: ServerEndpoint<In = A::In, Out = A::Out>> ServerEndpo
 mod tests {
     use crate::{
         transport::{
-            combined::{self, OpenBiError},
+            combined::{self, OpenError},
             flume,
         },
         Connection,
@@ -299,6 +299,6 @@ mod tests {
             flume::FlumeConnection<(), ()>,
         >::new(None, None);
         let res = channel.open().await;
-        assert!(matches!(res, Err(OpenBiError::NoChannel)));
+        assert!(matches!(res, Err(OpenError::NoChannel)));
     }
 }

@@ -128,7 +128,7 @@ impl<T: RpcMessage> Stream for RecvStream<T> {
 
 enum OpenFutureInner<'a, In: RpcMessage, Out: RpcMessage> {
     /// A direct future (todo)
-    Direct(super::flume::OpenBiFuture<In, Out>),
+    Direct(super::flume::OpenFuture<In, Out>),
     /// A boxed future
     Boxed(BoxFuture<'a, anyhow::Result<(SendSink<Out>, RecvStream<In>)>>),
 }
@@ -138,7 +138,7 @@ enum OpenFutureInner<'a, In: RpcMessage, Out: RpcMessage> {
 pub struct OpenFuture<'a, In: RpcMessage, Out: RpcMessage>(OpenFutureInner<'a, In, Out>);
 
 impl<'a, In: RpcMessage, Out: RpcMessage> OpenFuture<'a, In, Out> {
-    fn direct(f: super::flume::OpenBiFuture<In, Out>) -> Self {
+    fn direct(f: super::flume::OpenFuture<In, Out>) -> Self {
         Self(OpenFutureInner::Direct(f))
     }
 
@@ -166,7 +166,7 @@ impl<'a, In: RpcMessage, Out: RpcMessage> Future for OpenFuture<'a, In, Out> {
 
 enum AcceptFutureInner<'a, In: RpcMessage, Out: RpcMessage> {
     /// A direct future
-    Direct(super::flume::AcceptBiFuture<In, Out>),
+    Direct(super::flume::AcceptFuture<In, Out>),
     /// A boxed future
     Boxed(BoxedFuture<'a, anyhow::Result<(SendSink<Out>, RecvStream<In>)>>),
 }
@@ -176,7 +176,7 @@ enum AcceptFutureInner<'a, In: RpcMessage, Out: RpcMessage> {
 pub struct AcceptFuture<'a, In: RpcMessage, Out: RpcMessage>(AcceptFutureInner<'a, In, Out>);
 
 impl<'a, In: RpcMessage, Out: RpcMessage> AcceptFuture<'a, In, Out> {
-    fn direct(f: super::flume::AcceptBiFuture<In, Out>) -> Self {
+    fn direct(f: super::flume::AcceptFuture<In, Out>) -> Self {
         Self(AcceptFutureInner::Direct(f))
     }
 
