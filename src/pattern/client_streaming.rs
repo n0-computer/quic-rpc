@@ -7,7 +7,7 @@ use crate::{
     client::UpdateSink,
     message::{InteractionPattern, Msg},
     server::{race2, RpcChannel, RpcServerError, UpdateStream},
-    transport::{ConnectionCommon, ConnectionErrors},
+    transport::{Connection, ConnectionCommon, ConnectionErrors},
     RpcClient, Service, ServiceConnection,
 };
 
@@ -49,13 +49,13 @@ pub enum Error<C: ConnectionErrors> {
     Send(C::SendError),
 }
 
-impl<C: ConnectionErrors> fmt::Display for Error<C> {
+impl<C: Connection> fmt::Display for Error<C> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Debug::fmt(self, f)
     }
 }
 
-impl<C: ConnectionErrors> error::Error for Error<C> {}
+impl<C: Connection> error::Error for Error<C> {}
 
 /// Server error when receiving an item for a client streaming request
 #[derive(Debug)]

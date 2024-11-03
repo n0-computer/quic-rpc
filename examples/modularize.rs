@@ -11,8 +11,7 @@ use anyhow::Result;
 use futures_lite::StreamExt;
 use futures_util::SinkExt;
 use quic_rpc::{
-    client::BoxedServiceConnection, transport::flume, RpcClient, RpcServer, ServiceConnection,
-    ServiceEndpoint,
+    client::BoxedServiceConnection, transport::flume, RpcClient, RpcServer, ServiceEndpoint,
 };
 use tracing::warn;
 
@@ -104,9 +103,7 @@ mod app {
 
     use anyhow::Result;
     use derive_more::{From, TryInto};
-    use quic_rpc::{
-        message::RpcMsg, server::RpcChannel, RpcClient, Service, ServiceConnection, ServiceEndpoint,
-    };
+    use quic_rpc::{message::RpcMsg, server::RpcChannel, RpcClient, Service, ServiceEndpoint};
     use serde::{Deserialize, Serialize};
 
     use crate::iroh::IrohService;
@@ -207,7 +204,7 @@ mod iroh {
 
     use anyhow::Result;
     use derive_more::{From, TryInto};
-    use quic_rpc::{server::RpcChannel, RpcClient, Service, ServiceConnection, ServiceEndpoint};
+    use quic_rpc::{server::RpcChannel, RpcClient, Service};
     use serde::{Deserialize, Serialize};
 
     use super::{calc, clock};

@@ -1,7 +1,6 @@
 //! Boxed transport with concrete types
 
 use std::{
-    any,
     fmt::Debug,
     pin::Pin,
     task::{Context, Poll},
@@ -239,9 +238,10 @@ impl<In: RpcMessage, Out: RpcMessage> ConnectionCommon for Connection<In, Out> {
 }
 
 impl<In: RpcMessage, Out: RpcMessage> ConnectionErrors for Connection<In, Out> {
-    type OpenError = anyhow::Error;
     type SendError = anyhow::Error;
     type RecvError = anyhow::Error;
+    type OpenError = anyhow::Error;
+    type AcceptError = anyhow::Error;
 }
 
 impl<In: RpcMessage, Out: RpcMessage> super::Connection for Connection<In, Out> {
@@ -289,15 +289,16 @@ impl<In: RpcMessage, Out: RpcMessage> ConnectionCommon for ServerEndpoint<In, Ou
 }
 
 impl<In: RpcMessage, Out: RpcMessage> ConnectionErrors for ServerEndpoint<In, Out> {
-    type OpenError = anyhow::Error;
     type SendError = anyhow::Error;
     type RecvError = anyhow::Error;
+    type OpenError = anyhow::Error;
+    type AcceptError = anyhow::Error;
 }
 
 impl<In: RpcMessage, Out: RpcMessage> super::ServerEndpoint for ServerEndpoint<In, Out> {
     fn accept(
         &self,
-    ) -> impl Future<Output = Result<(Self::SendSink, Self::RecvStream), Self::OpenError>> + Send
+    ) -> impl Future<Output = Result<(Self::SendSink, Self::RecvStream), Self::AcceptError>> + Send
     {
         self.0.accept_bi_boxed()
     }
@@ -306,9 +307,7 @@ impl<In: RpcMessage, Out: RpcMessage> super::ServerEndpoint for ServerEndpoint<I
         self.0.local_addr()
     }
 }
-impl<In: RpcMessage, Out: RpcMessage> BoxableConnection<In, Out>
-    for Connection<In, Out>
-{
+impl<In: RpcMessage, Out: RpcMessage> BoxableConnection<In, Out> for Connection<In, Out> {
     fn clone_box(&self) -> Box<dyn BoxableConnection<In, Out>> {
         Box::new(self.clone())
     }

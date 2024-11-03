@@ -185,9 +185,9 @@ impl<A: ConnectionErrors, B: ConnectionErrors> error::Error for OpenBiError<A, B
 #[derive(Debug)]
 pub enum AcceptBiError<A: ConnectionErrors, B: ConnectionErrors> {
     /// A variant
-    A(A::OpenError),
+    A(A::AcceptError),
     /// B variant
-    B(B::OpenError),
+    B(B::AcceptError),
 }
 
 impl<A: ConnectionErrors, B: ConnectionErrors> fmt::Display for AcceptBiError<A, B> {
@@ -202,6 +202,7 @@ impl<A: ConnectionErrors, B: ConnectionErrors> ConnectionErrors for CombinedConn
     type SendError = self::SendError<A, B>;
     type RecvError = self::RecvError<A, B>;
     type OpenError = self::OpenBiError<A, B>;
+    type AcceptError = self::AcceptBiError<A, B>;
 }
 
 impl<A: Connection, B: Connection<In = A::In, Out = A::Out>> ConnectionCommon
@@ -234,7 +235,8 @@ impl<A: Connection, B: Connection<In = A::In, Out = A::Out>> Connection
 impl<A: ConnectionErrors, B: ConnectionErrors> ConnectionErrors for CombinedServerEndpoint<A, B> {
     type SendError = self::SendError<A, B>;
     type RecvError = self::RecvError<A, B>;
-    type OpenError = self::AcceptBiError<A, B>;
+    type OpenError = self::OpenBiError<A, B>;
+    type AcceptError = self::AcceptBiError<A, B>;
 }
 
 impl<A: ServerEndpoint, B: ServerEndpoint<In = A::In, Out = A::Out>> ConnectionCommon
@@ -249,7 +251,7 @@ impl<A: ServerEndpoint, B: ServerEndpoint<In = A::In, Out = A::Out>> ConnectionC
 impl<A: ServerEndpoint, B: ServerEndpoint<In = A::In, Out = A::Out>> ServerEndpoint
     for CombinedServerEndpoint<A, B>
 {
-    async fn accept(&self) -> Result<(Self::SendSink, Self::RecvStream), Self::OpenError> {
+    async fn accept(&self) -> Result<(Self::SendSink, Self::RecvStream), Self::AcceptError> {
         let a_fut = async {
             if let Some(a) = &self.a {
                 let (send, recv) = a.accept().await.map_err(AcceptBiError::A)?;

@@ -8,7 +8,7 @@ use crate::{
     client::{BoxStreamSync, DeferDrop},
     message::{InteractionPattern, Msg},
     server::{race2, RpcChannel, RpcServerError},
-    transport::{ConnectionCommon, ConnectionErrors},
+    transport::{Connection, ConnectionCommon, ConnectionErrors},
     RpcClient, Service, ServiceConnection,
 };
 
@@ -53,7 +53,7 @@ where
 /// care about the exact nature of the error, but if you want to handle
 /// application errors differently, you can match on this enum.
 #[derive(Debug)]
-pub enum Error<C: ConnectionErrors, E: Debug> {
+pub enum Error<C: Connection, E: Debug> {
     /// Unable to open a substream at all
     Open(C::OpenError),
     /// Unable to send the request to the server
@@ -68,13 +68,13 @@ pub enum Error<C: ConnectionErrors, E: Debug> {
     Application(E),
 }
 
-impl<S: ConnectionErrors, E: Debug> fmt::Display for Error<S, E> {
+impl<S: Connection, E: Debug> fmt::Display for Error<S, E> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Debug::fmt(self, f)
     }
 }
 
-impl<S: ConnectionErrors, E: Debug> error::Error for Error<S, E> {}
+impl<S: Connection, E: Debug> error::Error for Error<S, E> {}
 
 /// Client error when handling responses from a server streaming request.
 ///

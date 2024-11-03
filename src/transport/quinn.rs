@@ -189,10 +189,9 @@ impl<In: RpcMessage, Out: RpcMessage> Clone for QuinnServerEndpoint<In, Out> {
 
 impl<In: RpcMessage, Out: RpcMessage> ConnectionErrors for QuinnServerEndpoint<In, Out> {
     type SendError = io::Error;
-
     type RecvError = io::Error;
-
     type OpenError = quinn::ConnectionError;
+    type AcceptError = quinn::ConnectionError;
 }
 
 impl<In: RpcMessage, Out: RpcMessage> ConnectionCommon for QuinnServerEndpoint<In, Out> {
@@ -622,10 +621,9 @@ impl<In: RpcMessage, Out: RpcMessage> Clone for QuinnConnection<In, Out> {
 
 impl<In: RpcMessage, Out: RpcMessage> ConnectionErrors for QuinnConnection<In, Out> {
     type SendError = io::Error;
-
     type RecvError = io::Error;
-
     type OpenError = quinn::ConnectionError;
+    type AcceptError = quinn::ConnectionError;
 }
 
 impl<In: RpcMessage, Out: RpcMessage> ConnectionCommon for QuinnConnection<In, Out> {

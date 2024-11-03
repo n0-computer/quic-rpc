@@ -53,9 +53,10 @@ where
     Out: RpcMessage,
     C: ConnectionErrors,
 {
-    type OpenError = C::OpenError;
     type RecvError = ErrorOrMapError<C::RecvError>;
     type SendError = C::SendError;
+    type OpenError = C::OpenError;
+    type AcceptError = C::AcceptError;
 }
 
 impl<In, Out, C> ConnectionCommon for MappedConnection<In, Out, C>
@@ -247,9 +248,10 @@ where
     Out: RpcMessage,
     C: ConnectionErrors,
 {
-    type OpenError = C::OpenError;
     type RecvError = ErrorOrMapError<C::RecvError>;
     type SendError = C::SendError;
+    type OpenError = C::OpenError;
+    type AcceptError = C::AcceptError;
 }
 
 impl<In, Out, C> ConnectionCommon for MappedConnectionTypes<In, Out, C>

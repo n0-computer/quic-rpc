@@ -7,8 +7,8 @@ use crate::{
     client::{BoxStreamSync, UpdateSink},
     message::{InteractionPattern, Msg},
     server::{race2, RpcChannel, RpcServerError, UpdateStream},
-    transport::{ConnectionCommon, ConnectionErrors},
-    RpcClient, Service, ServiceConnection,
+    transport::{Connection, ConnectionCommon, ConnectionErrors},
+    RpcClient, Service,
 };
 
 use std::{
@@ -49,13 +49,13 @@ pub enum Error<C: ConnectionErrors> {
     Send(C::SendError),
 }
 
-impl<C: ConnectionErrors> fmt::Display for Error<C> {
+impl<C: Connection> fmt::Display for Error<C> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Debug::fmt(self, f)
     }
 }
 
-impl<C: ConnectionErrors> error::Error for Error<C> {}
+impl<C: Connection> error::Error for Error<C> {}
 
 /// Server error when receiving an item for a bidi request
 #[derive(Debug)]
@@ -66,18 +66,18 @@ pub enum ItemError<C: ConnectionErrors> {
     DowncastError,
 }
 
-impl<C: ConnectionErrors> fmt::Display for ItemError<C> {
+impl<C: Connection> fmt::Display for ItemError<C> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Debug::fmt(self, f)
     }
 }
 
-impl<C: ConnectionErrors> error::Error for ItemError<C> {}
+impl<C: Connection> error::Error for ItemError<C> {}
 
 impl<S, C> RpcClient<S, C>
 where
-    C: ServiceConnection<S>,
     S: Service,
+    C: Connection<In = S::Res, Out = S::Req>,
 {
     /// Bidi call to the server, request opens a stream, response is a stream
     pub async fn bidi<M>(

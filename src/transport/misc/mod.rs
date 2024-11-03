@@ -28,9 +28,10 @@ impl<In, Out> Clone for DummyServerEndpoint<In, Out> {
 }
 
 impl<In: RpcMessage, Out: RpcMessage> ConnectionErrors for DummyServerEndpoint<In, Out> {
-    type OpenError = Infallible;
     type RecvError = Infallible;
     type SendError = Infallible;
+    type OpenError = Infallible;
+    type AcceptError = Infallible;
 }
 
 impl<In: RpcMessage, Out: RpcMessage> ConnectionCommon for DummyServerEndpoint<In, Out> {
@@ -41,7 +42,7 @@ impl<In: RpcMessage, Out: RpcMessage> ConnectionCommon for DummyServerEndpoint<I
 }
 
 impl<In: RpcMessage, Out: RpcMessage> ServerEndpoint for DummyServerEndpoint<In, Out> {
-    async fn accept(&self) -> Result<(Self::SendSink, Self::RecvStream), Self::OpenError> {
+    async fn accept(&self) -> Result<(Self::SendSink, Self::RecvStream), Self::AcceptError> {
         futures_lite::future::pending().await
     }
 

@@ -580,6 +580,8 @@ impl<In: RpcMessage, Out: RpcMessage> ConnectionErrors for HyperConnection<In, O
     type RecvError = self::RecvError;
 
     type OpenError = OpenBiError;
+
+    type AcceptError = AcceptBiError;
 }
 
 impl<In: RpcMessage, Out: RpcMessage> ConnectionCommon for HyperConnection<In, Out> {
@@ -612,10 +614,9 @@ impl<In: RpcMessage, Out: RpcMessage> Connection for HyperConnection<In, Out> {
 
 impl<In: RpcMessage, Out: RpcMessage> ConnectionErrors for HyperServerEndpoint<In, Out> {
     type SendError = self::SendError;
-
     type RecvError = self::RecvError;
-
     type OpenError = AcceptBiError;
+    type AcceptError = AcceptBiError;
 }
 
 impl<In: RpcMessage, Out: RpcMessage> ConnectionCommon for HyperServerEndpoint<In, Out> {

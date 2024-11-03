@@ -123,10 +123,9 @@ impl<In: RpcMessage, Out: RpcMessage> fmt::Debug for FlumeServerEndpoint<In, Out
 
 impl<In: RpcMessage, Out: RpcMessage> ConnectionErrors for FlumeServerEndpoint<In, Out> {
     type SendError = self::SendError;
-
     type RecvError = self::RecvError;
-
-    type OpenError = self::AcceptBiError;
+    type OpenError = self::OpenBiError;
+    type AcceptError = self::AcceptBiError;
 }
 
 type Socket<In, Out> = (self::SendSink<Out>, self::RecvStream<In>);
@@ -218,10 +217,9 @@ impl<In: RpcMessage, Out: RpcMessage> ServerEndpoint for FlumeServerEndpoint<In,
 
 impl<In: RpcMessage, Out: RpcMessage> ConnectionErrors for FlumeConnection<In, Out> {
     type SendError = self::SendError;
-
     type RecvError = self::RecvError;
-
     type OpenError = self::OpenBiError;
+    type AcceptError = self::AcceptBiError;
 }
 
 impl<In: RpcMessage, Out: RpcMessage> ConnectionCommon for FlumeConnection<In, Out> {

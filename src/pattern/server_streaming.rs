@@ -7,7 +7,7 @@ use crate::{
     client::{BoxStreamSync, DeferDrop},
     message::{InteractionPattern, Msg},
     server::{race2, RpcChannel, RpcServerError},
-    transport::{ConnectionCommon, ConnectionErrors},
+    transport::{Connection, ConnectionCommon, ConnectionErrors},
     RpcClient, Service, ServiceConnection,
 };
 
@@ -41,13 +41,13 @@ pub enum Error<C: ConnectionErrors> {
     Send(C::SendError),
 }
 
-impl<S: ConnectionErrors> fmt::Display for Error<S> {
+impl<S: Connection> fmt::Display for Error<S> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Debug::fmt(self, f)
     }
 }
 
-impl<S: ConnectionErrors> error::Error for Error<S> {}
+impl<S: Connection> error::Error for Error<S> {}
 
 /// Client error when handling responses from a server streaming request
 #[derive(Debug)]

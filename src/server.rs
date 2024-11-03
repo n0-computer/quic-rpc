@@ -2,7 +2,6 @@
 //!
 //! The main entry point is [RpcServer]
 use crate::{
-    client::BoxedServiceConnection,
     transport::{
         self,
         mapped::{MappedConnectionTypes, MappedRecvStream, MappedSendSink},
@@ -15,7 +14,7 @@ use futures_util::{SinkExt, TryStreamExt};
 use pin_project::pin_project;
 use std::{
     error,
-    fmt::{self, Debug, Display},
+    fmt::{self, Debug},
     marker::PhantomData,
     pin::Pin,
     result,
@@ -271,7 +270,7 @@ where
 /// Server error. All server DSL methods return a `Result` with this error type.
 pub enum RpcServerError<C: ConnectionErrors> {
     /// Unable to open a new channel
-    Accept(C::OpenError),
+    Accept(C::AcceptError),
     /// Recv side for a channel was closed before getting the first message
     EarlyClose,
     /// Got an unexpected first message, e.g. an update message

@@ -45,12 +45,14 @@ pub mod mapped;
 
 /// Errors that can happen when creating and using a [`Connection`] or [`ServerEndpoint`].
 pub trait ConnectionErrors: Debug + Clone + Send + Sync + 'static {
-    /// Error when opening or accepting a channel
-    type OpenError: RpcError;
     /// Error when sending a message via a channel
     type SendError: RpcError;
     /// Error when receiving a message via a channel
     type RecvError: RpcError;
+    /// Error when opening a channel
+    type OpenError: RpcError;
+    /// Error when accepting a channel
+    type AcceptError: RpcError;
 }
 
 /// Types that are common to both [`Connection`] and [`ServerEndpoint`].
@@ -90,7 +92,7 @@ pub trait ServerEndpoint: ConnectionCommon {
     /// have currently opened.
     fn accept(
         &self,
-    ) -> impl Future<Output = Result<(Self::SendSink, Self::RecvStream), Self::OpenError>> + Send;
+    ) -> impl Future<Output = Result<(Self::SendSink, Self::RecvStream), Self::AcceptError>> + Send;
 
     /// The local addresses this endpoint is bound to.
     fn local_addr(&self) -> &[LocalAddr];
