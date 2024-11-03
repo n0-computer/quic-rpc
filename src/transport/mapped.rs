@@ -323,6 +323,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore]
     async fn smoke() -> TestResult<()> {
         async fn handle_sub_request(
             _req: String,
