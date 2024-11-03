@@ -146,7 +146,6 @@ enum OpenFutureInner<'a, In: RpcMessage, Out: RpcMessage> {
 pub struct OpenFuture<'a, In: RpcMessage, Out: RpcMessage>(OpenFutureInner<'a, In, Out>);
 
 impl<'a, In: RpcMessage, Out: RpcMessage> OpenFuture<'a, In, Out> {
-
     #[cfg(feature = "flume-transport")]
     fn direct(f: super::flume::OpenFuture<In, Out>) -> Self {
         Self(OpenFutureInner::Direct(f))
@@ -188,7 +187,6 @@ enum AcceptFutureInner<'a, In: RpcMessage, Out: RpcMessage> {
 pub struct AcceptFuture<'a, In: RpcMessage, Out: RpcMessage>(AcceptFutureInner<'a, In, Out>);
 
 impl<'a, In: RpcMessage, Out: RpcMessage> AcceptFuture<'a, In, Out> {
-
     #[cfg(feature = "flume-transport")]
     fn direct(f: super::flume::AcceptFuture<In, Out>) -> Self {
         Self(AcceptFutureInner::Direct(f))
@@ -454,7 +452,7 @@ mod tests {
 
         use crate::transport::{Connection, ServerEndpoint};
 
-        let (server, client) = crate::transport::flume::service_connection::<FooService>(1);
+        let (server, client) = crate::transport::flume::connection(1);
         let server = super::ServerEndpoint::new(server);
         let client = super::Connection::new(client);
         // spawn echo server

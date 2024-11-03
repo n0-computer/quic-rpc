@@ -11,7 +11,7 @@ use quic_rpc::{
 #[tokio::test]
 async fn flume_channel_bench() -> anyhow::Result<()> {
     tracing_subscriber::fmt::try_init().ok();
-    let (server, client) = flume::service_connection::<ComputeService>(1);
+    let (server, client) = flume::connection(1);
 
     let server = RpcServer::<ComputeService, _>::new(server);
     let server_handle = tokio::task::spawn(ComputeService::server(server));
@@ -60,7 +60,7 @@ async fn flume_channel_mapped_bench() -> anyhow::Result<()> {
         type Req = InnerRequest;
         type Res = InnerResponse;
     }
-    let (server, client) = flume::service_connection::<OuterService>(1);
+    let (server, client) = flume::connection(1);
 
     let server = RpcServer::<OuterService, _>::new(server);
     let server_handle: tokio::task::JoinHandle<Result<(), RpcServerError<_>>> =
@@ -98,7 +98,7 @@ async fn flume_channel_mapped_bench() -> anyhow::Result<()> {
 #[tokio::test]
 async fn flume_channel_smoke() -> anyhow::Result<()> {
     tracing_subscriber::fmt::try_init().ok();
-    let (server, client) = flume::service_connection::<ComputeService>(1);
+    let (server, client) = flume::connection(1);
 
     let server = RpcServer::<ComputeService, _>::new(server);
     let server_handle = tokio::task::spawn(ComputeService::server(server));

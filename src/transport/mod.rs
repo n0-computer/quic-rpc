@@ -26,7 +26,6 @@ use std::{
     net::SocketAddr,
 };
 pub mod boxed;
-#[cfg(feature = "combined-transport")]
 pub mod combined;
 #[cfg(feature = "flume-transport")]
 pub mod flume;

@@ -184,7 +184,7 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
-    let (server, client) = flume::service_connection::<StoreService>(1);
+    let (server, client) = flume::connection(1);
     let client = RpcClient::<StoreService, _>::new(client);
     let server = RpcServer::<StoreService, _>::new(server);
     let server_handle = tokio::task::spawn(server_future(server));
@@ -237,7 +237,7 @@ async fn _main_unsugared() -> anyhow::Result<()> {
         type Req = u64;
         type Res = String;
     }
-    let (server, client) = flume::service_connection::<Service>(1);
+    let (server, client) = flume::connection::<u64, String>(1);
     let to_string_service = tokio::spawn(async move {
         let (mut send, mut recv) = server.accept().await?;
         while let Some(item) = recv.next().await {

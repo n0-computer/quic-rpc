@@ -56,9 +56,8 @@ nested_enum_utils = "0.1.0"
 hyper-transport = ["dep:flume", "dep:hyper", "dep:bincode", "dep:bytes", "dep:tokio-serde", "dep:tokio-util"]
 quinn-transport = ["dep:flume", "dep:quinn", "dep:bincode", "dep:tokio-serde", "dep:tokio-util"]
 flume-transport = ["dep:flume"]
-combined-transport = []
 macros = []
-default = ["quinn-transport", "combined-transport"]
+default = ["flume-transport", "quinn-transport"]
 
 [package.metadata.docs.rs]
 all-features = true

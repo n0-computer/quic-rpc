@@ -72,7 +72,7 @@ impl Handler {
 #[tokio::test]
 async fn try_server_streaming() -> anyhow::Result<()> {
     tracing_subscriber::fmt::try_init().ok();
-    let (server, client) = flume::service_connection::<TryService>(1);
+    let (server, client) = flume::connection(1);
 
     let server = RpcServer::<TryService, _>::new(server);
     let server_handle = tokio::task::spawn(async move {
