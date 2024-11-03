@@ -8,9 +8,7 @@ use std::{
 
 use futures_lite::FutureExt;
 use futures_sink::Sink;
-#[cfg(feature = "quinn-transport")]
-use futures_util::TryStreamExt;
-use futures_util::{future::BoxFuture, SinkExt, Stream, StreamExt};
+use futures_util::{future::BoxFuture, SinkExt, Stream, StreamExt, TryStreamExt};
 use pin_project::pin_project;
 use std::future::Future;
 
@@ -20,6 +18,7 @@ use super::{ConnectionCommon, ConnectionErrors};
 type BoxedFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + Sync + 'a>>;
 
 enum SendSinkInner<T: RpcMessage> {
+    #[cfg(feature = "flume-transport")]
     Direct(::flume::r#async::SendSink<'static, T>),
     Boxed(Pin<Box<dyn Sink<T, Error = anyhow::Error> + Send + Sync + 'static>>),
 }
@@ -39,6 +38,7 @@ impl<T: RpcMessage> SendSink<T> {
     }
 
     /// Create a new send sink from a direct flume send sink
+    #[cfg(feature = "flume-transport")]
     pub(crate) fn direct(sink: ::flume::r#async::SendSink<'static, T>) -> Self {
         Self(SendSinkInner::Direct(sink))
     }
@@ -52,6 +52,7 @@ impl<T: RpcMessage> Sink<T> for SendSink<T> {
         cx: &mut std::task::Context<'_>,
     ) -> Poll<Result<(), Self::Error>> {
         match self.project().0 {
+            #[cfg(feature = "flume-transport")]
             SendSinkInner::Direct(sink) => sink.poll_ready_unpin(cx).map_err(anyhow::Error::from),
             SendSinkInner::Boxed(sink) => sink.poll_ready_unpin(cx).map_err(anyhow::Error::from),
         }
@@ -59,6 +60,7 @@ impl<T: RpcMessage> Sink<T> for SendSink<T> {
 
     fn start_send(self: std::pin::Pin<&mut Self>, item: T) -> Result<(), Self::Error> {
         match self.project().0 {
+            #[cfg(feature = "flume-transport")]
             SendSinkInner::Direct(sink) => sink.start_send_unpin(item).map_err(anyhow::Error::from),
             SendSinkInner::Boxed(sink) => sink.start_send_unpin(item).map_err(anyhow::Error::from),
         }
@@ -69,6 +71,7 @@ impl<T: RpcMessage> Sink<T> for SendSink<T> {
         cx: &mut Context<'_>,
     ) -> Poll<Result<(), Self::Error>> {
         match self.project().0 {
+            #[cfg(feature = "flume-transport")]
             SendSinkInner::Direct(sink) => sink.poll_flush_unpin(cx).map_err(anyhow::Error::from),
             SendSinkInner::Boxed(sink) => sink.poll_flush_unpin(cx).map_err(anyhow::Error::from),
         }
@@ -79,6 +82,7 @@ impl<T: RpcMessage> Sink<T> for SendSink<T> {
         cx: &mut Context<'_>,
     ) -> Poll<Result<(), Self::Error>> {
         match self.project().0 {
+            #[cfg(feature = "flume-transport")]
             SendSinkInner::Direct(sink) => sink.poll_close_unpin(cx).map_err(anyhow::Error::from),
             SendSinkInner::Boxed(sink) => sink.poll_close_unpin(cx).map_err(anyhow::Error::from),
         }
@@ -86,6 +90,7 @@ impl<T: RpcMessage> Sink<T> for SendSink<T> {
 }
 
 enum RecvStreamInner<T: RpcMessage> {
+    #[cfg(feature = "flume-transport")]
     Direct(::flume::r#async::RecvStream<'static, T>),
     Boxed(Pin<Box<dyn Stream<Item = Result<T, anyhow::Error>> + Send + Sync + 'static>>),
 }
@@ -106,6 +111,7 @@ impl<T: RpcMessage> RecvStream<T> {
     }
 
     /// Create a new receive stream from a direct flume receive stream
+    #[cfg(feature = "flume-transport")]
     pub(crate) fn direct(stream: ::flume::r#async::RecvStream<'static, T>) -> Self {
         Self(RecvStreamInner::Direct(stream))
     }
@@ -116,6 +122,7 @@ impl<T: RpcMessage> Stream for RecvStream<T> {
 
     fn poll_next(self: std::pin::Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         match self.project().0 {
+            #[cfg(feature = "flume-transport")]
             RecvStreamInner::Direct(stream) => match stream.poll_next_unpin(cx) {
                 Poll::Ready(Some(item)) => Poll::Ready(Some(Ok(item))),
                 Poll::Ready(None) => Poll::Ready(None),
@@ -128,6 +135,7 @@ impl<T: RpcMessage> Stream for RecvStream<T> {
 
 enum OpenFutureInner<'a, In: RpcMessage, Out: RpcMessage> {
     /// A direct future (todo)
+    #[cfg(feature = "flume-transport")]
     Direct(super::flume::OpenFuture<In, Out>),
     /// A boxed future
     Boxed(BoxFuture<'a, anyhow::Result<(SendSink<Out>, RecvStream<In>)>>),
@@ -138,6 +146,8 @@ enum OpenFutureInner<'a, In: RpcMessage, Out: RpcMessage> {
 pub struct OpenFuture<'a, In: RpcMessage, Out: RpcMessage>(OpenFutureInner<'a, In, Out>);
 
 impl<'a, In: RpcMessage, Out: RpcMessage> OpenFuture<'a, In, Out> {
+
+    #[cfg(feature = "flume-transport")]
     fn direct(f: super::flume::OpenFuture<In, Out>) -> Self {
         Self(OpenFutureInner::Direct(f))
     }
@@ -155,6 +165,7 @@ impl<'a, In: RpcMessage, Out: RpcMessage> Future for OpenFuture<'a, In, Out> {
 
     fn poll(self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
         match self.project().0 {
+            #[cfg(feature = "flume-transport")]
             OpenFutureInner::Direct(f) => f
                 .poll(cx)
                 .map_ok(|(send, recv)| (SendSink::direct(send.0), RecvStream::direct(recv.0)))
@@ -166,6 +177,7 @@ impl<'a, In: RpcMessage, Out: RpcMessage> Future for OpenFuture<'a, In, Out> {
 
 enum AcceptFutureInner<'a, In: RpcMessage, Out: RpcMessage> {
     /// A direct future
+    #[cfg(feature = "flume-transport")]
     Direct(super::flume::AcceptFuture<In, Out>),
     /// A boxed future
     Boxed(BoxedFuture<'a, anyhow::Result<(SendSink<Out>, RecvStream<In>)>>),
@@ -176,6 +188,8 @@ enum AcceptFutureInner<'a, In: RpcMessage, Out: RpcMessage> {
 pub struct AcceptFuture<'a, In: RpcMessage, Out: RpcMessage>(AcceptFutureInner<'a, In, Out>);
 
 impl<'a, In: RpcMessage, Out: RpcMessage> AcceptFuture<'a, In, Out> {
+
+    #[cfg(feature = "flume-transport")]
     fn direct(f: super::flume::AcceptFuture<In, Out>) -> Self {
         Self(AcceptFutureInner::Direct(f))
     }
@@ -193,6 +207,7 @@ impl<'a, In: RpcMessage, Out: RpcMessage> Future for AcceptFuture<'a, In, Out> {
 
     fn poll(self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
         match self.project().0 {
+            #[cfg(feature = "flume-transport")]
             AcceptFutureInner::Direct(f) => f
                 .poll(cx)
                 .map_ok(|(send, recv)| (SendSink::direct(send.0), RecvStream::direct(recv.0)))

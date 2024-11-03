@@ -283,6 +283,7 @@ impl<A: ServerEndpoint, B: ServerEndpoint<In = A::In, Out = A::Out>> ServerEndpo
 }
 
 #[cfg(test)]
+#[cfg(feature = "flume-transport")]
 mod tests {
     use crate::{
         transport::{

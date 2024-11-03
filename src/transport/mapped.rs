@@ -283,6 +283,7 @@ where
 }
 
 #[cfg(test)]
+#[cfg(feature = "flume-transport")]
 mod tests {
 
     use crate::{
