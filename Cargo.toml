@@ -50,6 +50,7 @@ tempfile = "3.5.0"
 proc-macro2 = "1.0.66"
 futures-buffered = "0.2.4"
 testresult = "0.4.1"
+nested_enum_utils = "0.1.0"
 
 [features]
 hyper-transport = ["dep:flume", "dep:hyper", "dep:bincode", "dep:bytes", "dep:tokio-serde", "dep:tokio-util"]

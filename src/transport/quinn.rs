@@ -58,7 +58,7 @@ impl Drop for ServerEndpointInner {
 #[derive(Debug)]
 pub struct QuinnServerEndpoint<In: RpcMessage, Out: RpcMessage> {
     inner: Arc<ServerEndpointInner>,
-    _phantom: PhantomData<(In, Out)>,
+    _p: PhantomData<(In, Out)>,
 }
 
 impl<In: RpcMessage, Out: RpcMessage> QuinnServerEndpoint<In, Out> {
@@ -128,7 +128,7 @@ impl<In: RpcMessage, Out: RpcMessage> QuinnServerEndpoint<In, Out> {
                 local_addr: [LocalAddr::Socket(local_addr)],
                 receiver,
             }),
-            _phantom: PhantomData,
+            _p: PhantomData,
         })
     }
 
@@ -154,7 +154,7 @@ impl<In: RpcMessage, Out: RpcMessage> QuinnServerEndpoint<In, Out> {
                 local_addr: [LocalAddr::Socket(local_addr)],
                 receiver,
             }),
-            _phantom: PhantomData,
+            _p: PhantomData,
         }
     }
 
@@ -173,7 +173,7 @@ impl<In: RpcMessage, Out: RpcMessage> QuinnServerEndpoint<In, Out> {
                 local_addr: [LocalAddr::Socket(local_addr)],
                 receiver,
             }),
-            _phantom: PhantomData,
+            _p: PhantomData,
         }
     }
 }
@@ -182,7 +182,7 @@ impl<In: RpcMessage, Out: RpcMessage> Clone for QuinnServerEndpoint<In, Out> {
     fn clone(&self) -> Self {
         Self {
             inner: self.inner.clone(),
-            _phantom: PhantomData,
+            _p: PhantomData,
         }
     }
 }
@@ -257,7 +257,7 @@ impl Drop for ClientConnectionInner {
 /// A connection using a quinn connection
 pub struct QuinnConnection<In: RpcMessage, Out: RpcMessage> {
     inner: Arc<ClientConnectionInner>,
-    _phantom: PhantomData<(In, Out)>,
+    _p: PhantomData<(In, Out)>,
 }
 
 impl<In: RpcMessage, Out: RpcMessage> QuinnConnection<In, Out> {
@@ -442,7 +442,7 @@ impl<In: RpcMessage, Out: RpcMessage> QuinnConnection<In, Out> {
                 task: Some(task),
                 sender,
             }),
-            _phantom: PhantomData,
+            _p: PhantomData,
         }
     }
 
@@ -461,7 +461,7 @@ impl<In: RpcMessage, Out: RpcMessage> QuinnConnection<In, Out> {
                 task: Some(task),
                 sender,
             }),
-            _phantom: PhantomData,
+            _p: PhantomData,
         }
     }
 }
@@ -614,7 +614,7 @@ impl<In: RpcMessage, Out: RpcMessage> Clone for QuinnConnection<In, Out> {
     fn clone(&self) -> Self {
         Self {
             inner: self.inner.clone(),
-            _phantom: PhantomData,
+            _p: PhantomData,
         }
     }
 }

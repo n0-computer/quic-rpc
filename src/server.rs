@@ -45,14 +45,14 @@ pub struct RpcServer<S, C = BoxedServiceEndpoint<S>> {
     /// Each new request is a receiver and channel pair on which messages for this request
     /// are received and responses sent.
     source: C,
-    p: PhantomData<S>,
+    _p: PhantomData<S>,
 }
 
 impl<S, C: Clone> Clone for RpcServer<S, C> {
     fn clone(&self) -> Self {
         Self {
             source: self.source.clone(),
-            p: PhantomData,
+            _p: PhantomData,
         }
     }
 }
@@ -65,7 +65,7 @@ impl<S: Service, C: ServiceEndpoint<S>> RpcServer<S, C> {
     pub fn new(source: C) -> Self {
         Self {
             source,
-            p: PhantomData,
+            _p: PhantomData,
         }
     }
 }
@@ -92,7 +92,7 @@ pub struct RpcChannel<
     /// Stream to receive requests from the client.
     pub recv: C::RecvStream,
 
-    pub(crate) p: PhantomData<S>,
+    pub(crate) _p: PhantomData<S>,
 }
 
 impl<S, C> RpcChannel<S, C>
@@ -105,7 +105,7 @@ where
         Self {
             send,
             recv,
-            p: PhantomData,
+            _p: PhantomData,
         }
     }
 
@@ -118,11 +118,7 @@ where
         let send =
             transport::boxed::SendSink::boxed(Box::new(self.send.sink_map_err(|e| e.into())));
         let recv = transport::boxed::RecvStream::boxed(Box::new(self.recv.map_err(|e| e.into())));
-        RpcChannel {
-            send,
-            recv,
-            p: PhantomData,
-        }
+        RpcChannel::new(send, recv)
     }
 
     /// Map this channel's service into an inner service.
@@ -140,11 +136,10 @@ where
         SNext::Req: TryFrom<S::Req>,
         S::Res: From<SNext::Res>,
     {
-        RpcChannel {
-            send: MappedSendSink::new(self.send),
-            recv: MappedRecvStream::new(self.recv),
-            p: PhantomData,
-        }
+        RpcChannel::new(
+            MappedSendSink::new(self.send),
+            MappedRecvStream::new(self.recv),
+        )
     }
 }
 
@@ -152,7 +147,7 @@ where
 pub struct Accepting<S: Service, C: ServiceEndpoint<S>> {
     send: C::SendSink,
     recv: C::RecvStream,
-    p: PhantomData<S>,
+    _p: PhantomData<S>,
 }
 
 impl<S: Service, C: ServiceEndpoint<S>> Accepting<S, C> {
@@ -187,7 +182,7 @@ impl<S: Service, C: ServiceEndpoint<S>> RpcServer<S, C> {
         Ok(Accepting {
             send,
             recv,
-            p: PhantomData,
+            _p: PhantomData,
         })
     }
 

@@ -101,14 +101,11 @@ mod app {
     //!
     //! It could also easily compose services from other crates or internal modules.
 
+    use super::iroh;
     use anyhow::Result;
     use derive_more::{From, TryInto};
     use quic_rpc::{message::RpcMsg, server::RpcChannel, RpcClient, Service, ServiceEndpoint};
     use serde::{Deserialize, Serialize};
-
-    use crate::iroh::IrohService;
-
-    use super::iroh;
 
     #[derive(Debug, Serialize, Deserialize, From, TryInto)]
     pub enum Request {

@@ -17,6 +17,8 @@ use std::{
 };
 
 /// Type alias for a boxed connection to a specific service
+///
+/// This is a convenience type alias for a boxed connection to a specific service.
 pub type BoxedServiceConnection<S> =
     crate::transport::boxed::Connection<<S as crate::Service>::Res, <S as crate::Service>::Req>;
 
@@ -35,14 +37,14 @@ pub type BoxStreamSync<'a, T> = Pin<Box<dyn Stream<Item = T> + Send + Sync + 'a>
 #[derive(Debug)]
 pub struct RpcClient<S, C = BoxedServiceConnection<S>> {
     pub(crate) source: C,
-    pub(crate) p: PhantomData<S>,
+    pub(crate) _p: PhantomData<S>,
 }
 
 impl<S, C: Clone> Clone for RpcClient<S, C> {
     fn clone(&self) -> Self {
         Self {
             source: self.source.clone(),
-            p: PhantomData,
+            _p: PhantomData,
         }
     }
 }
@@ -95,7 +97,7 @@ where
     pub fn new(source: C) -> Self {
         Self {
             source,
-            p: PhantomData,
+            _p: PhantomData,
         }
     }
 }
@@ -127,10 +129,7 @@ where
         S::Req: From<SNext::Req>,
         SNext::Res: TryFrom<S::Res>,
     {
-        RpcClient {
-            source: self.source.map::<SNext::Res, SNext::Req>(),
-            p: PhantomData,
-        }
+        RpcClient::new(self.source.map::<SNext::Res, SNext::Req>())
     }
 
     /// box
@@ -138,10 +137,7 @@ where
     where
         C: BoxableConnection<S::Res, S::Req>,
     {
-        RpcClient {
-            source: BoxedServiceConnection::<S>::new(self.source),
-            p: PhantomData,
-        }
+        RpcClient::new(BoxedServiceConnection::<S>::new(self.source))
     }
 }
 

@@ -16,13 +16,13 @@ use super::ConnectionCommon;
 /// an optional server endpoint.
 #[derive(Debug, Default)]
 pub struct DummyServerEndpoint<In, Out> {
-    _phantom: std::marker::PhantomData<(In, Out)>,
+    _p: std::marker::PhantomData<(In, Out)>,
 }
 
 impl<In, Out> Clone for DummyServerEndpoint<In, Out> {
     fn clone(&self) -> Self {
         Self {
-            _phantom: std::marker::PhantomData,
+            _p: std::marker::PhantomData,
         }
     }
 }

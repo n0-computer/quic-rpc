@@ -159,19 +159,18 @@ pub trait Service: Send + Sync + Debug + Clone + 'static {
 
 /// A connection to a specific service on a specific remote machine
 ///
-/// This is just a trait alias for a [Connection] with the right types.
-///
-/// This can be used to create a [RpcClient] that can be used to send requests.
+/// This is just a trait alias for a [Connection] with the right types. It is used
+/// to make it easier to specify the bounds of a connection that matches a specific
+/// service.
 pub trait ServiceConnection<S: Service>: Connection<In = S::Res, Out = S::Req> {}
 
 impl<T: Connection<In = S::Res, Out = S::Req>, S: Service> ServiceConnection<S> for T {}
 
 /// A server endpoint for a specific service
 ///
-/// This is just a trait alias for a [ServerEndpoint] with the right types.
-///
-/// This can be used to create a [RpcServer] that can be used to handle
-/// requests.
+/// This is just a trait alias for a [ServerEndpoint] with the right types. It is used
+/// to make it easier to specify the bounds of a server endpoint that matches a specific
+/// service.
 pub trait ServiceEndpoint<S: Service>: ServerEndpoint<In = S::Req, Out = S::Res> {}
 
 impl<T: ServerEndpoint<In = S::Req, Out = S::Res>, S: Service> ServiceEndpoint<S> for T {}

@@ -17,7 +17,7 @@ use super::{Connection, ConnectionCommon, ConnectionErrors};
 #[derive(Debug)]
 pub struct MappedConnection<In, Out, C> {
     inner: C,
-    _phantom: std::marker::PhantomData<(In, Out)>,
+    _p: std::marker::PhantomData<(In, Out)>,
 }
 
 impl<In, Out, C> MappedConnection<In, Out, C>
@@ -30,7 +30,7 @@ where
     pub fn new(inner: C) -> Self {
         Self {
             inner,
-            _phantom: std::marker::PhantomData,
+            _p: std::marker::PhantomData,
         }
     }
 }
@@ -42,7 +42,7 @@ where
     fn clone(&self) -> Self {
         Self {
             inner: self.inner.clone(),
-            _phantom: std::marker::PhantomData,
+            _p: std::marker::PhantomData,
         }
     }
 }
@@ -97,7 +97,7 @@ where
 #[pin_project]
 pub struct MappedRecvStream<S, In> {
     inner: S,
-    _phantom: std::marker::PhantomData<In>,
+    _p: std::marker::PhantomData<In>,
 }
 
 impl<S, In> MappedRecvStream<S, In> {
@@ -105,7 +105,7 @@ impl<S, In> MappedRecvStream<S, In> {
     pub fn new(inner: S) -> Self {
         Self {
             inner,
-            _phantom: std::marker::PhantomData,
+            _p: std::marker::PhantomData,
         }
     }
 }
@@ -158,7 +158,7 @@ where
 #[pin_project]
 pub struct MappedSendSink<S, Out, OutS> {
     inner: S,
-    _phantom: std::marker::PhantomData<(Out, OutS)>,
+    _p: std::marker::PhantomData<(Out, OutS)>,
 }
 
 impl<S, Out, Out0> MappedSendSink<S, Out, Out0> {
@@ -166,7 +166,7 @@ impl<S, Out, Out0> MappedSendSink<S, Out, Out0> {
     pub fn new(inner: S) -> Self {
         Self {
             inner,
-            _phantom: std::marker::PhantomData,
+            _p: std::marker::PhantomData,
         }
     }
 }
@@ -211,15 +211,6 @@ pub trait ConnectionMapExt<In, Out>: Connection<In = In, Out = Out> {
     where
         In1: TryFrom<In>,
         Out: From<Out1>,
-    {
-        MappedConnection::new(self)
-    }
-
-    /// Map this connection to a service
-    fn map_to_service<S: Service>(self) -> MappedConnection<S::Res, S::Req, Self>
-    where
-        S::Res: TryFrom<In>,
-        Out: From<S::Req>,
     {
         MappedConnection::new(self)
     }
@@ -285,7 +276,7 @@ where
         let t: RpcChannel<S1, MappedConnectionTypes<S1::Req, S1::Res, C>> = RpcChannel {
             send,
             recv,
-            p: PhantomData,
+            _p: PhantomData,
         };
         t
     }
@@ -295,10 +286,8 @@ where
 mod tests {
 
     use crate::{
-        client::BoxedServiceConnection,
         server::{BoxedServiceChannel, RpcChannel},
-        transport::{boxed::BoxableConnection, flume::FlumeConnection, ServerEndpoint},
-        RpcClient, RpcServer, ServiceConnection, ServiceEndpoint,
+        RpcClient, RpcServer,
     };
     use serde::{Deserialize, Serialize};
     use testresult::TestResult;
@@ -336,22 +325,22 @@ mod tests {
     #[tokio::test]
     async fn smoke() -> TestResult<()> {
         async fn handle_sub_request(
-            req: String,
-            chan: RpcChannel<SubService, BoxedServiceChannel<SubService>>,
+            _req: String,
+            _chan: RpcChannel<SubService, BoxedServiceChannel<SubService>>,
         ) -> anyhow::Result<()> {
             Ok(())
         }
-        let (s, c): (_, FlumeConnection<Response, Request>) =
-            crate::transport::flume::connection::<Request, Response>(32);
-        let _x = c.clone().map::<String, String>();
-
-        let _y = c.clone().map_to_service::<SubService>();
-        let s = RpcServer::<FullService, _>::new(s);
-        return Ok(());
-        while let Ok(accepting) = s.accept().await {
+        // create a server endpoint / connection pair. Type will be inferred
+        let (s, c) = crate::transport::flume::connection(32);
+        // wrap the server in a RpcServer, this is where the service type is specified
+        let server = RpcServer::<FullService, _>::new(s);
+        // create a client in a RpcClient, this is where the service type is specified
+        let client = RpcClient::<FullService, _>::new(c);
+        let _sub_client = client.clone().map::<SubService>();
+        while let Ok(accepting) = server.accept().await {
             let (msg, chan) = accepting.read_first().await?;
             match msg {
-                Request::A(x) => todo!(),
+                Request::A(_x) => todo!(),
                 Request::B(x) => handle_sub_request(x, chan.map::<SubService>().boxed()).await?,
             }
         }
