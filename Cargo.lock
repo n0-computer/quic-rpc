@@ -1727,9 +1727,9 @@ dependencies = [
 
 [[package]]
 name = "iroh-quinn"
-version = "0.11.3"
+version = "0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4fd590a39a14cfc168efa4d894de5039d65641e62d8da4a80733018ababe3c33"
+checksum = "35ba75a5c57cff299d2d7ca1ddee053f66339d1756bd79ec637bcad5aa61100e"
 dependencies = [
  "bytes",
  "iroh-quinn-proto",
@@ -1745,9 +1745,9 @@ dependencies = [
 
 [[package]]
 name = "iroh-quinn-proto"
-version = "0.11.6"
+version = "0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5fd0538ff12efe3d61ea1deda2d7913f4270873a519d43e6995c6e87a1558538"
+checksum = "e2c869ba52683d3d067c83ab4c00a2fda18eaf13b1434d4c1352f428674d4a5d"
 dependencies = [
  "bytes",
  "rand",
@@ -2707,7 +2707,7 @@ dependencies = [
 
 [[package]]
 name = "quic-rpc"
-version = "0.13.0"
+version = "0.14.0"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -2741,7 +2741,7 @@ dependencies = [
 
 [[package]]
 name = "quic-rpc-derive"
-version = "0.13.0"
+version = "0.14.0"
 dependencies = [
  "derive_more",
  "proc-macro2",
