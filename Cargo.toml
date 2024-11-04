@@ -22,7 +22,7 @@ futures-sink = "0.3.30"
 futures-util = { version = "0.3.30", features = ["sink"] }
 hyper = { version = "0.14.16", features = ["full"], optional = true }
 pin-project = "1"
-quinn = { package = "iroh-quinn", version = "0.11", optional = true }
+quinn = { package = "iroh-quinn", version = "0.12", optional = true }
 serde = { version = "1.0.183", features = ["derive"] }
 tokio = { version = "1", default-features = false, features = ["macros", "sync"] }
 tokio-serde = { version = "0.8", features = ["bincode"], optional = true }
@@ -42,7 +42,7 @@ async-stream = "0.3.3"
 
 serde = { version = "1", features = ["derive"] }
 tokio = { version = "1", features = ["full"] }
-quinn = { package = "iroh-quinn", version = "0.11", features = ["ring"] }
+quinn = { package = "iroh-quinn", version = "0.12", features = ["ring"] }
 rcgen = "0.12"
 thousands = "0.2.0"
 tracing-subscriber = "0.3.16"
