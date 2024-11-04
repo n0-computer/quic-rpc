@@ -4,6 +4,7 @@
 use crate::{
     transport::{
         self,
+        boxed::BoxableServerEndpoint,
         mapped::{MappedConnectionTypes, MappedRecvStream, MappedSendSink},
         ConnectionCommon, ConnectionErrors,
     },
@@ -67,6 +68,17 @@ impl<S: Service, C: ServiceEndpoint<S>> RpcServer<S, C> {
             source,
             _p: PhantomData,
         }
+    }
+
+    /// Box the transport for the service.
+    ///
+    /// The boxed transport is the default for the `C` type parameter, so by boxing we can avoid
+    /// having to specify the type parameter.
+    pub fn boxed(self) -> RpcServer<S, BoxedServiceEndpoint<S>>
+    where
+        C: BoxableServerEndpoint<S::Req, S::Res>,
+    {
+        RpcServer::new(self.source.boxed())
     }
 }
 

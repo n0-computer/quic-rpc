@@ -6,7 +6,7 @@ use futures_util::{FutureExt, SinkExt};
 use crate::{
     message::{InteractionPattern, Msg},
     server::{race2, RpcChannel, RpcServerError},
-    transport::{Connection, ConnectionCommon, ConnectionErrors},
+    transport::{ConnectionCommon, ConnectionErrors},
     RpcClient, Service, ServiceConnection,
 };
 
@@ -54,13 +54,13 @@ pub enum Error<C: ConnectionErrors> {
     DowncastError,
 }
 
-impl<C: Connection> fmt::Display for Error<C> {
+impl<C: ConnectionErrors> fmt::Display for Error<C> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Debug::fmt(self, f)
     }
 }
 
-impl<C: Connection> error::Error for Error<C> {}
+impl<C: ConnectionErrors> error::Error for Error<C> {}
 
 impl<S, C> RpcClient<S, C>
 where

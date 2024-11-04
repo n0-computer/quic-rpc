@@ -14,7 +14,6 @@ use crate::{
 use std::{
     error,
     fmt::{self, Debug},
-    marker::PhantomData,
     result,
 };
 
@@ -49,13 +48,13 @@ pub enum Error<C: ConnectionErrors> {
     Send(C::SendError),
 }
 
-impl<C: Connection> fmt::Display for Error<C> {
+impl<C: ConnectionErrors> fmt::Display for Error<C> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Debug::fmt(self, f)
     }
 }
 
-impl<C: Connection> error::Error for Error<C> {}
+impl<C: ConnectionErrors> error::Error for Error<C> {}
 
 /// Server error when receiving an item for a bidi request
 #[derive(Debug)]
@@ -66,13 +65,13 @@ pub enum ItemError<C: ConnectionErrors> {
     DowncastError,
 }
 
-impl<C: Connection> fmt::Display for ItemError<C> {
+impl<C: ConnectionErrors> fmt::Display for ItemError<C> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Debug::fmt(self, f)
     }
 }
 
-impl<C: Connection> error::Error for ItemError<C> {}
+impl<C: ConnectionErrors> error::Error for ItemError<C> {}
 
 impl<S, C> RpcClient<S, C>
 where
@@ -96,7 +95,7 @@ where
         let msg = msg.into();
         let (mut send, recv) = self.source.open().await.map_err(Error::Open)?;
         send.send(msg).await.map_err(Error::<C>::Send)?;
-        let send = UpdateSink(send, PhantomData);
+        let send = UpdateSink::new(send);
         let recv = Box::pin(recv.map(move |x| match x {
             Ok(msg) => M::Response::try_from(msg).map_err(|_| ItemError::DowncastError),
             Err(e) => Err(ItemError::RecvError(e)),

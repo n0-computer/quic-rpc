@@ -7,14 +7,13 @@ use crate::{
     client::UpdateSink,
     message::{InteractionPattern, Msg},
     server::{race2, RpcChannel, RpcServerError, UpdateStream},
-    transport::{Connection, ConnectionCommon, ConnectionErrors},
+    transport::{ConnectionCommon, ConnectionErrors},
     RpcClient, Service, ServiceConnection,
 };
 
 use std::{
     error,
     fmt::{self, Debug},
-    marker::PhantomData,
     result,
 };
 
@@ -49,13 +48,13 @@ pub enum Error<C: ConnectionErrors> {
     Send(C::SendError),
 }
 
-impl<C: Connection> fmt::Display for Error<C> {
+impl<C: ConnectionErrors> fmt::Display for Error<C> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Debug::fmt(self, f)
     }
 }
 
-impl<C: Connection> error::Error for Error<C> {}
+impl<C: ConnectionErrors> error::Error for Error<C> {}
 
 /// Server error when receiving an item for a client streaming request
 #[derive(Debug)]
@@ -98,7 +97,7 @@ where
         let msg = msg.into();
         let (mut send, mut recv) = self.source.open().await.map_err(Error::Open)?;
         send.send(msg).map_err(Error::Send).await?;
-        let send = UpdateSink::<C, M::Update>(send, PhantomData);
+        let send = UpdateSink::<C, M::Update>::new(send);
         let recv = async move {
             let item = recv.next().await.ok_or(ItemError::EarlyClose)?;
 

@@ -288,6 +288,7 @@ mod tests {
 
     use crate::{
         server::{BoxedServiceChannel, RpcChannel},
+        transport::boxed::BoxableServerEndpoint,
         RpcClient, RpcServer,
     };
     use serde::{Deserialize, Serialize};
@@ -335,15 +336,26 @@ mod tests {
         // create a server endpoint / connection pair. Type will be inferred
         let (s, c) = crate::transport::flume::connection(32);
         // wrap the server in a RpcServer, this is where the service type is specified
-        let server = RpcServer::<FullService, _>::new(s);
+        let server = RpcServer::<FullService, _>::new(s.clone());
+        // when using a boxed transport, we can omit the transport type and use the default
+        let _server_boxed: RpcServer<FullService> = RpcServer::<FullService>::new(s.boxed());
         // create a client in a RpcClient, this is where the service type is specified
         let client = RpcClient::<FullService, _>::new(c);
-        let _sub_client = client.clone().map::<SubService>();
+        // when using a boxed transport, we can omit the transport type and use the default
+        let _boxed_client = client.clone().boxed();
+        // map the client to a sub-service
+        let _sub_client: RpcClient<SubService, _> = client.clone().map::<SubService>();
+        // when using a boxed transport, we can omit the transport type and use the default
+        let _sub_client_boxed: RpcClient<SubService> = client.clone().map::<SubService>().boxed();
+        // we can not map the service to a sub-service, since we need the first message to determine which sub-service to use
         while let Ok(accepting) = server.accept().await {
             let (msg, chan) = accepting.read_first().await?;
             match msg {
                 Request::A(_x) => todo!(),
-                Request::B(x) => handle_sub_request(x, chan.map::<SubService>().boxed()).await?,
+                Request::B(x) => {
+                    // map the channel to the sub-service
+                    handle_sub_request(x, chan.map::<SubService>().boxed()).await?
+                }
             }
         }
         Ok(())

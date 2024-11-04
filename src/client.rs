@@ -53,10 +53,20 @@ impl<S, C: Clone> Clone for RpcClient<S, C> {
 /// that support it, [crate::message::ClientStreaming] and [crate::message::BidiStreaming].
 #[pin_project]
 #[derive(Debug)]
-pub struct UpdateSink<C, T>(#[pin] pub C::SendSink, pub PhantomData<T>)
+pub struct UpdateSink<C, T>(#[pin] pub C::SendSink, PhantomData<T>)
+where
+    C: ConnectionCommon;
+
+impl<C, T> UpdateSink<C, T>
 where
     C: ConnectionCommon,
-    T: Into<C::Out>;
+    T: Into<C::Out>,
+{
+    /// Create a new update sink
+    pub fn new(sink: C::SendSink) -> Self {
+        Self(sink, PhantomData)
+    }
+}
 
 impl<C, T> Sink<T> for UpdateSink<C, T>
 where
@@ -137,7 +147,7 @@ where
     where
         C: BoxableConnection<S::Res, S::Req>,
     {
-        RpcClient::new(BoxedServiceConnection::<S>::new(self.source))
+        RpcClient::new(self.source.boxed())
     }
 }
 

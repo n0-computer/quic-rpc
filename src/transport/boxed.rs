@@ -224,6 +224,14 @@ pub trait BoxableConnection<In: RpcMessage, Out: RpcMessage>:
 
     /// Open a channel to the remote che
     fn open_boxed(&self) -> OpenFuture<In, Out>;
+
+    /// Box the connection
+    fn boxed(self) -> self::Connection<In, Out>
+    where
+        Self: Sized + 'static,
+    {
+        self::Connection::new(self)
+    }
 }
 
 /// A boxed connection
@@ -275,6 +283,14 @@ pub trait BoxableServerEndpoint<In: RpcMessage, Out: RpcMessage>:
 
     /// Get the local address
     fn local_addr(&self) -> &[super::LocalAddr];
+
+    /// Box the server endpoint
+    fn boxed(self) -> ServerEndpoint<In, Out>
+    where
+        Self: Sized + 'static,
+    {
+        ServerEndpoint::new(self)
+    }
 }
 
 /// A boxed server endpoint
