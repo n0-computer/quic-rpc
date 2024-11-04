@@ -112,8 +112,6 @@ where
     }
 }
 
-use crate::transport::mapped::ConnectionMapExt;
-
 impl<S, C> RpcClient<S, C>
 where
     S: Service,

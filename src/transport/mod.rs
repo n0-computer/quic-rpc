@@ -19,6 +19,7 @@
 //! Errors for both sides are defined by implementing the [`ConnectionErrors`] trait.
 use futures_lite::{Future, Stream};
 use futures_sink::Sink;
+use mapped::MappedConnection;
 
 use crate::{RpcError, RpcMessage};
 use std::{
@@ -79,6 +80,15 @@ pub trait Connection: ConnectionCommon {
     fn open(
         &self,
     ) -> impl Future<Output = Result<(Self::SendSink, Self::RecvStream), Self::OpenError>> + Send;
+
+    /// Map the input and output types of this connection
+    fn map<In1, Out1>(self) -> MappedConnection<In1, Out1, Self>
+    where
+        In1: TryFrom<Self::In>,
+        Self::Out: From<Out1>,
+    {
+        MappedConnection::new(self)
+    }
 }
 
 /// A server endpoint that listens for connections

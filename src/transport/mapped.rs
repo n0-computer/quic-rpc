@@ -9,7 +9,7 @@ use futures_lite::{Stream, StreamExt};
 use futures_util::SinkExt;
 use pin_project::pin_project;
 
-use crate::{server::RpcChannel, RpcError, RpcMessage, Service};
+use crate::{RpcError, RpcMessage};
 
 use super::{Connection, ConnectionCommon, ConnectionErrors};
 
@@ -204,20 +204,6 @@ where
     }
 }
 
-/// Extension trait for mapping connections
-pub trait ConnectionMapExt<In, Out>: Connection<In = In, Out = Out> {
-    /// Map the input and output types of this connection
-    fn map<In1, Out1>(self) -> MappedConnection<In1, Out1, Self>
-    where
-        In1: TryFrom<In>,
-        Out: From<Out1>,
-    {
-        MappedConnection::new(self)
-    }
-}
-
-impl<C: Connection> ConnectionMapExt<C::In, C::Out> for C {}
-
 /// Connection types for a mapped connection
 pub struct MappedConnectionTypes<In, Out, C>(PhantomData<(In, Out, C)>);
 
@@ -257,29 +243,6 @@ where
     type Out = Out;
     type RecvStream = MappedRecvStream<C::RecvStream, In>;
     type SendSink = MappedSendSink<C::SendSink, Out, C::Out>;
-}
-
-impl<S, C> RpcChannel<S, C>
-where
-    S: Service,
-    C: ConnectionCommon<In = S::Req, Out = S::Res>,
-{
-    /// Map the input and output types of this connection
-    pub fn map2<S1>(self) -> RpcChannel<S1, MappedConnectionTypes<S1::Req, S1::Res, C>>
-    where
-        S1: Service,
-        S1::Req: TryFrom<S::Req>,
-        S::Res: From<S1::Res>,
-    {
-        let send = MappedSendSink::<C::SendSink, S1::Res, S::Res>::new(self.send);
-        let recv = MappedRecvStream::<C::RecvStream, S1::Req>::new(self.recv);
-        let t: RpcChannel<S1, MappedConnectionTypes<S1::Req, S1::Res, C>> = RpcChannel {
-            send,
-            recv,
-            _p: PhantomData,
-        };
-        t
-    }
 }
 
 #[cfg(test)]
@@ -353,7 +316,7 @@ mod tests {
             match msg {
                 Request::A(_x) => todo!(),
                 Request::B(x) => {
-                    // map the channel to the sub-service
+                    // but we can map the channel to the sub-service, once we know which one to use
                     handle_sub_request(x, chan.map::<SubService>().boxed()).await?
                 }
             }
