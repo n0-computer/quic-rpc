@@ -215,24 +215,16 @@ impl<'a, In: RpcMessage, Out: RpcMessage> Future for AcceptFuture<'a, In, Out> {
     }
 }
 
-/// A boxable connection
+/// A boxable connector
 pub trait BoxableConnector<In: RpcMessage, Out: RpcMessage>: Debug + Send + Sync + 'static {
     /// Clone the connection and box it
     fn clone_box(&self) -> Box<dyn BoxableConnector<In, Out>>;
 
     /// Open a channel to the remote che
     fn open_boxed(&self) -> OpenFuture<In, Out>;
-
-    /// Box the connection
-    fn boxed(self) -> self::BoxedConnector<In, Out>
-    where
-        Self: Sized + 'static,
-    {
-        self::BoxedConnector::new(self)
-    }
 }
 
-/// A boxed connection
+/// A boxed connector
 #[derive(Debug)]
 pub struct BoxedConnector<In, Out>(Box<dyn BoxableConnector<In, Out>>);
 
@@ -307,14 +299,6 @@ pub trait BoxableListener<In: RpcMessage, Out: RpcMessage>: Debug + Send + Sync 
 
     /// Get the local address
     fn local_addr(&self) -> &[super::LocalAddr];
-
-    /// Box the listener
-    fn boxed(self) -> BoxedListener<In, Out>
-    where
-        Self: Sized + 'static,
-    {
-        BoxedListener::new(self)
-    }
 }
 
 /// A boxed listener

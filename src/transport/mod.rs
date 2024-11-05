@@ -17,6 +17,7 @@
 //! types are defined by implementing the [`StreamTypes`] trait.
 //!
 //! Errors for both sides are defined by implementing the [`ConnectionErrors`] trait.
+use boxed::{BoxableConnector, BoxableListener, BoxedConnector, BoxedListener};
 use futures_lite::{Future, Stream};
 use futures_sink::Sink;
 use mapped::MappedConnector;
@@ -88,6 +89,14 @@ pub trait Connector: StreamTypes {
     {
         MappedConnector::new(self)
     }
+
+    /// Box the connection
+    fn boxed(self) -> BoxedConnector<Self::In, Self::Out>
+    where
+        Self: BoxableConnector<Self::In, Self::Out> + Sized + 'static,
+    {
+        self::BoxedConnector::new(self)
+    }
 }
 
 /// A listener that listens for connections
@@ -103,6 +112,14 @@ pub trait Listener: StreamTypes {
 
     /// The local addresses this endpoint is bound to.
     fn local_addr(&self) -> &[LocalAddr];
+
+    /// Box the listener
+    fn boxed(self) -> BoxedListener<Self::In, Self::Out>
+    where
+        Self: BoxableListener<Self::In, Self::Out> + Sized + 'static,
+    {
+        BoxedListener::new(self)
+    }
 }
 
 /// The kinds of local addresses a [Listener] can be bound to.

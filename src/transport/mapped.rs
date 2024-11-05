@@ -251,7 +251,7 @@ mod tests {
 
     use crate::{
         server::{BoxedListenerTypes, RpcChannel},
-        transport::boxed::BoxableListener,
+        transport::Listener,
         RpcClient, RpcServer,
     };
     use serde::{Deserialize, Serialize};
