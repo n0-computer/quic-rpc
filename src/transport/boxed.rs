@@ -269,6 +269,34 @@ impl<In: RpcMessage, Out: RpcMessage> super::Connector for BoxedConnector<In, Ou
     }
 }
 
+/// Stream types for boxed streams
+#[derive(Debug)]
+pub struct BoxedStreamTypes<In, Out> {
+    _p: std::marker::PhantomData<(In, Out)>,
+}
+
+impl<In, Out> Clone for BoxedStreamTypes<In, Out> {
+    fn clone(&self) -> Self {
+        Self {
+            _p: std::marker::PhantomData,
+        }
+    }
+}
+
+impl<In: RpcMessage, Out: RpcMessage> ConnectionErrors for BoxedStreamTypes<In, Out> {
+    type SendError = anyhow::Error;
+    type RecvError = anyhow::Error;
+    type OpenError = anyhow::Error;
+    type AcceptError = anyhow::Error;
+}
+
+impl<In: RpcMessage, Out: RpcMessage> StreamTypes for BoxedStreamTypes<In, Out> {
+    type In = In;
+    type Out = Out;
+    type RecvStream = RecvStream<In>;
+    type SendSink = SendSink<Out>;
+}
+
 /// A boxable listener
 pub trait BoxableListener<In: RpcMessage, Out: RpcMessage>: Debug + Send + Sync + 'static {
     /// Clone the listener and box it
