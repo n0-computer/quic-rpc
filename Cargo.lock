@@ -902,7 +902,7 @@ dependencies = [
 
 [[package]]
 name = "quic-rpc"
-version = "0.14.0"
+version = "0.15.0"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -937,7 +937,7 @@ dependencies = [
 
 [[package]]
 name = "quic-rpc-derive"
-version = "0.14.0"
+version = "0.15.0"
 dependencies = [
  "derive_more",
  "proc-macro2",
