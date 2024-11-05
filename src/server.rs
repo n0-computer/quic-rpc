@@ -5,10 +5,10 @@ use crate::{
     transport::{
         self,
         boxed::BoxableServerEndpoint,
-        mapped::{MappedConnectionTypes, MappedRecvStream, MappedSendSink},
+        mapped::{ErrorOrMapError, MappedConnectionTypes, MappedRecvStream, MappedSendSink},
         ConnectionCommon, ConnectionErrors,
     },
-    Service, ServiceEndpoint,
+    RpcMessage, Service, ServiceEndpoint,
 };
 use futures_lite::{Future, Stream, StreamExt};
 use futures_util::{SinkExt, TryStreamExt};
@@ -288,6 +288,45 @@ pub enum RpcServerError<C: ConnectionErrors> {
     SendError(C::SendError),
     /// Got an unexpected update message, e.g. a request message or a non-matching update message
     UnexpectedUpdateMessage,
+}
+
+impl<In: RpcMessage, Out: RpcMessage, C: ConnectionErrors>
+    RpcServerError<MappedConnectionTypes<In, Out, C>>
+{
+    /// For a mapped connection, map the error back to the original error type
+    pub fn map_back(self) -> RpcServerError<C> {
+        match self {
+            RpcServerError::EarlyClose => RpcServerError::EarlyClose,
+            RpcServerError::UnexpectedStartMessage => RpcServerError::UnexpectedStartMessage,
+            RpcServerError::UnexpectedUpdateMessage => RpcServerError::UnexpectedUpdateMessage,
+            RpcServerError::SendError(x) => RpcServerError::SendError(x),
+            RpcServerError::Accept(x) => RpcServerError::Accept(x),
+            RpcServerError::RecvError(ErrorOrMapError::Inner(x)) => RpcServerError::RecvError(x),
+            RpcServerError::RecvError(ErrorOrMapError::Conversion) => {
+                RpcServerError::UnexpectedUpdateMessage
+            }
+        }
+    }
+}
+
+impl<C: ConnectionErrors> RpcServerError<C> {
+    /// Convert into a different error type provided the send, recv and accept errors can be converted
+    pub fn errors_into<T>(self) -> RpcServerError<T>
+    where
+        T: ConnectionErrors,
+        C::SendError: Into<T::SendError>,
+        C::RecvError: Into<T::RecvError>,
+        C::AcceptError: Into<T::AcceptError>,
+    {
+        match self {
+            RpcServerError::EarlyClose => RpcServerError::EarlyClose,
+            RpcServerError::UnexpectedStartMessage => RpcServerError::UnexpectedStartMessage,
+            RpcServerError::UnexpectedUpdateMessage => RpcServerError::UnexpectedUpdateMessage,
+            RpcServerError::SendError(x) => RpcServerError::SendError(x.into()),
+            RpcServerError::Accept(x) => RpcServerError::Accept(x.into()),
+            RpcServerError::RecvError(x) => RpcServerError::RecvError(x.into()),
+        }
+    }
 }
 
 impl<C: ConnectionErrors> fmt::Debug for RpcServerError<C> {
