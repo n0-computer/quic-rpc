@@ -57,7 +57,7 @@ hyper-transport = ["dep:flume", "dep:hyper", "dep:bincode", "dep:bytes", "dep:to
 quinn-transport = ["dep:flume", "dep:quinn", "dep:bincode", "dep:tokio-serde", "dep:tokio-util"]
 flume-transport = ["dep:flume"]
 macros = []
-default = ["flume-transport", "quinn-transport"]
+default = ["flume-transport"]
 
 [package.metadata.docs.rs]
 all-features = true
