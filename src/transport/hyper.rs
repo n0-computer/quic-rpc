@@ -6,7 +6,7 @@ use std::{
     sync::Arc, task::Poll,
 };
 
-use crate::transport::{Connection, ConnectionErrors, LocalAddr, ServerEndpoint};
+use crate::transport::{ConnectionErrors, Connector, Listener, LocalAddr, StreamTypes};
 use crate::RpcMessage;
 use bytes::Bytes;
 use flume::{Receiver, Sender};
@@ -22,8 +22,6 @@ use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use tracing::{debug, event, trace, Level};
 
-use super::ConnectionCommon;
-
 struct HyperConnectionInner {
     client: Box<dyn Requester>,
     config: Arc<ChannelConfig>,
@@ -31,12 +29,12 @@ struct HyperConnectionInner {
 }
 
 /// Hyper based connection to a server
-pub struct HyperConnection<In: RpcMessage, Out: RpcMessage> {
+pub struct HyperConnector<In: RpcMessage, Out: RpcMessage> {
     inner: Arc<HyperConnectionInner>,
     _p: PhantomData<(In, Out)>,
 }
 
-impl<In: RpcMessage, Out: RpcMessage> Clone for HyperConnection<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> Clone for HyperConnector<In, Out> {
     fn clone(&self) -> Self {
         Self {
             inner: self.inner.clone(),
@@ -56,7 +54,7 @@ impl<C: Connect + Clone + Send + Sync + 'static> Requester for Client<C, Body> {
     }
 }
 
-impl<In: RpcMessage, Out: RpcMessage> HyperConnection<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> HyperConnector<In, Out> {
     /// create a client given an uri and the default configuration
     pub fn new(uri: Uri) -> Self {
         Self::with_config(uri, ChannelConfig::default())
@@ -93,7 +91,7 @@ impl<In: RpcMessage, Out: RpcMessage> HyperConnection<In, Out> {
     }
 }
 
-impl<In: RpcMessage, Out: RpcMessage> fmt::Debug for HyperConnection<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> fmt::Debug for HyperConnector<In, Out> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ClientChannel")
             .field("uri", &self.inner.uri)
@@ -164,7 +162,7 @@ impl Default for ChannelConfig {
     }
 }
 
-/// A server endpoint using a hyper server
+/// A listener using a hyper server
 ///
 /// Each request made by the any client connection this channel will yield a `(recv, send)`
 /// pair which allows receiving the request and sending the response.  Both these are
@@ -173,7 +171,7 @@ impl Default for ChannelConfig {
 /// Creating this spawns a tokio task which runs the server, once dropped this task is shut
 /// down: no new connections will be accepted and existing channels will stop.
 #[derive(Debug)]
-pub struct HyperServerEndpoint<In: RpcMessage, Out: RpcMessage> {
+pub struct HyperListener<In: RpcMessage, Out: RpcMessage> {
     /// The channel.
     channel: Receiver<InternalChannel<In>>,
     /// The configuration.
@@ -192,7 +190,7 @@ pub struct HyperServerEndpoint<In: RpcMessage, Out: RpcMessage> {
     _p: PhantomData<(In, Out)>,
 }
 
-impl<In: RpcMessage, Out: RpcMessage> HyperServerEndpoint<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> HyperListener<In, Out> {
     /// Creates a server listening on the [`SocketAddr`], with the default configuration.
     pub fn serve(addr: &SocketAddr) -> hyper::Result<Self> {
         Self::serve_with_config(addr, Default::default())
@@ -365,7 +363,7 @@ fn spawn_recv_forwarder<In: RpcMessage>(
 // This does not want or need RpcMessage to be clone but still want to clone the
 // ServerChannel and it's containing channels itself.  The derive macro can't cope with this
 // so this needs to be written by hand.
-impl<In: RpcMessage, Out: RpcMessage> Clone for HyperServerEndpoint<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> Clone for HyperListener<In, Out> {
     fn clone(&self) -> Self {
         Self {
             channel: self.channel.clone(),
@@ -574,7 +572,7 @@ impl fmt::Display for AcceptError {
 
 impl error::Error for AcceptError {}
 
-impl<In: RpcMessage, Out: RpcMessage> ConnectionErrors for HyperConnection<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> ConnectionErrors for HyperConnector<In, Out> {
     type SendError = self::SendError;
 
     type RecvError = self::RecvError;
@@ -584,14 +582,14 @@ impl<In: RpcMessage, Out: RpcMessage> ConnectionErrors for HyperConnection<In, O
     type AcceptError = AcceptError;
 }
 
-impl<In: RpcMessage, Out: RpcMessage> ConnectionCommon for HyperConnection<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> StreamTypes for HyperConnector<In, Out> {
     type In = In;
     type Out = Out;
     type RecvStream = self::RecvStream<In>;
     type SendSink = self::SendSink<Out>;
 }
 
-impl<In: RpcMessage, Out: RpcMessage> Connection for HyperConnection<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> Connector for HyperConnector<In, Out> {
     async fn open(&self) -> Result<(Self::SendSink, Self::RecvStream), Self::OpenError> {
         let (out_tx, out_rx) = flume::bounded::<io::Result<Bytes>>(32);
         let req: Request<Body> = Request::post(&self.inner.uri)
@@ -612,21 +610,21 @@ impl<In: RpcMessage, Out: RpcMessage> Connection for HyperConnection<In, Out> {
     }
 }
 
-impl<In: RpcMessage, Out: RpcMessage> ConnectionErrors for HyperServerEndpoint<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> ConnectionErrors for HyperListener<In, Out> {
     type SendError = self::SendError;
     type RecvError = self::RecvError;
     type OpenError = AcceptError;
     type AcceptError = AcceptError;
 }
 
-impl<In: RpcMessage, Out: RpcMessage> ConnectionCommon for HyperServerEndpoint<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> StreamTypes for HyperListener<In, Out> {
     type In = In;
     type Out = Out;
     type RecvStream = self::RecvStream<In>;
     type SendSink = self::SendSink<Out>;
 }
 
-impl<In: RpcMessage, Out: RpcMessage> ServerEndpoint for HyperServerEndpoint<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> Listener for HyperListener<In, Out> {
     fn local_addr(&self) -> &[LocalAddr] {
         &self.local_addr
     }

@@ -93,7 +93,6 @@
 #![deny(rustdoc::broken_intra_doc_links)]
 use serde::{de::DeserializeOwned, Serialize};
 use std::fmt::{Debug, Display};
-use transport::{Connection, ConnectionCommon, ServerEndpoint};
 pub mod client;
 pub mod message;
 pub mod server;
@@ -160,25 +159,20 @@ pub trait Service: Send + Sync + Debug + Clone + 'static {
     type Res: RpcMessage;
 }
 
-/// A connection to a specific service on a specific remote machine
+/// A connector to a specific service
 ///
-/// This is just a trait alias for a [Connection] with the right types. It is used
-/// to make it easier to specify the bounds of a connection that matches a specific
+/// This is just a trait alias for a [`transport::Connector`] with the right types. It is used
+/// to make it easier to specify the bounds of a connector that matches a specific
 /// service.
-pub trait ServiceConnection<S: Service>: Connection<In = S::Res, Out = S::Req> {}
+pub trait Connector<S: Service>: transport::Connector<In = S::Res, Out = S::Req> {}
 
-impl<T: Connection<In = S::Res, Out = S::Req>, S: Service> ServiceConnection<S> for T {}
+impl<T: transport::Connector<In = S::Res, Out = S::Req>, S: Service> Connector<S> for T {}
 
-/// A server endpoint for a specific service
+/// A listener for a specific service
 ///
-/// This is just a trait alias for a [ServerEndpoint] with the right types. It is used
-/// to make it easier to specify the bounds of a server endpoint that matches a specific
+/// This is just a trait alias for a [`transport::Listener`] with the right types. It is used
+/// to make it easier to specify the bounds of a listener that matches a specific
 /// service.
-pub trait ServiceEndpoint<S: Service>: ServerEndpoint<In = S::Req, Out = S::Res> {}
+pub trait Listener<S: Service>: transport::Listener<In = S::Req, Out = S::Res> {}
 
-impl<T: ServerEndpoint<In = S::Req, Out = S::Res>, S: Service> ServiceEndpoint<S> for T {}
-
-/// A channel for a specific service
-pub trait ServiceChannel<S: Service>: ConnectionCommon<In = S::Req, Out = S::Res> {}
-
-impl<T: ConnectionCommon<In = S::Req, Out = S::Res>, S: Service> ServiceChannel<S> for T {}
+impl<T: transport::Listener<In = S::Req, Out = S::Res>, S: Service> Listener<S> for T {}

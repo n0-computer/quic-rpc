@@ -14,7 +14,7 @@ use std::future::Future;
 
 use crate::RpcMessage;
 
-use super::{ConnectionCommon, ConnectionErrors};
+use super::{ConnectionErrors, StreamTypes};
 type BoxedFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + Sync + 'a>>;
 
 enum SendSinkInner<T: RpcMessage> {
@@ -215,116 +215,124 @@ impl<'a, In: RpcMessage, Out: RpcMessage> Future for AcceptFuture<'a, In, Out> {
     }
 }
 
-/// A boxable connection
-pub trait BoxableConnection<In: RpcMessage, Out: RpcMessage>:
-    Debug + Send + Sync + 'static
-{
+/// A boxable connector
+pub trait BoxableConnector<In: RpcMessage, Out: RpcMessage>: Debug + Send + Sync + 'static {
     /// Clone the connection and box it
-    fn clone_box(&self) -> Box<dyn BoxableConnection<In, Out>>;
+    fn clone_box(&self) -> Box<dyn BoxableConnector<In, Out>>;
 
     /// Open a channel to the remote che
     fn open_boxed(&self) -> OpenFuture<In, Out>;
-
-    /// Box the connection
-    fn boxed(self) -> self::Connection<In, Out>
-    where
-        Self: Sized + 'static,
-    {
-        self::Connection::new(self)
-    }
 }
 
-/// A boxed connection
+/// A boxed connector
 #[derive(Debug)]
-pub struct Connection<In, Out>(Box<dyn BoxableConnection<In, Out>>);
+pub struct BoxedConnector<In, Out>(Box<dyn BoxableConnector<In, Out>>);
 
-impl<In: RpcMessage, Out: RpcMessage> Connection<In, Out> {
-    /// Wrap a boxable server endpoint into a box, transforming all the types to concrete types
-    pub fn new(x: impl BoxableConnection<In, Out>) -> Self {
+impl<In: RpcMessage, Out: RpcMessage> BoxedConnector<In, Out> {
+    /// Wrap a boxable connector into a box, transforming all the types to concrete types
+    pub fn new(x: impl BoxableConnector<In, Out>) -> Self {
         Self(Box::new(x))
     }
 }
 
-impl<In: RpcMessage, Out: RpcMessage> Clone for Connection<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> Clone for BoxedConnector<In, Out> {
     fn clone(&self) -> Self {
         Self(self.0.clone_box())
     }
 }
 
-impl<In: RpcMessage, Out: RpcMessage> ConnectionCommon for Connection<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> StreamTypes for BoxedConnector<In, Out> {
     type In = In;
     type Out = Out;
     type RecvStream = RecvStream<In>;
     type SendSink = SendSink<Out>;
 }
 
-impl<In: RpcMessage, Out: RpcMessage> ConnectionErrors for Connection<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> ConnectionErrors for BoxedConnector<In, Out> {
     type SendError = anyhow::Error;
     type RecvError = anyhow::Error;
     type OpenError = anyhow::Error;
     type AcceptError = anyhow::Error;
 }
 
-impl<In: RpcMessage, Out: RpcMessage> super::Connection for Connection<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> super::Connector for BoxedConnector<In, Out> {
     async fn open(&self) -> Result<(Self::SendSink, Self::RecvStream), Self::OpenError> {
         self.0.open_boxed().await
     }
 }
 
-/// A boxable server endpoint
-pub trait BoxableServerEndpoint<In: RpcMessage, Out: RpcMessage>:
-    Debug + Send + Sync + 'static
-{
-    /// Clone the server endpoint and box it
-    fn clone_box(&self) -> Box<dyn BoxableServerEndpoint<In, Out>>;
+/// Stream types for boxed streams
+#[derive(Debug)]
+pub struct BoxedStreamTypes<In, Out> {
+    _p: std::marker::PhantomData<(In, Out)>,
+}
+
+impl<In, Out> Clone for BoxedStreamTypes<In, Out> {
+    fn clone(&self) -> Self {
+        Self {
+            _p: std::marker::PhantomData,
+        }
+    }
+}
+
+impl<In: RpcMessage, Out: RpcMessage> ConnectionErrors for BoxedStreamTypes<In, Out> {
+    type SendError = anyhow::Error;
+    type RecvError = anyhow::Error;
+    type OpenError = anyhow::Error;
+    type AcceptError = anyhow::Error;
+}
+
+impl<In: RpcMessage, Out: RpcMessage> StreamTypes for BoxedStreamTypes<In, Out> {
+    type In = In;
+    type Out = Out;
+    type RecvStream = RecvStream<In>;
+    type SendSink = SendSink<Out>;
+}
+
+/// A boxable listener
+pub trait BoxableListener<In: RpcMessage, Out: RpcMessage>: Debug + Send + Sync + 'static {
+    /// Clone the listener and box it
+    fn clone_box(&self) -> Box<dyn BoxableListener<In, Out>>;
 
     /// Accept a channel from a remote client
     fn accept_bi_boxed(&self) -> AcceptFuture<In, Out>;
 
     /// Get the local address
     fn local_addr(&self) -> &[super::LocalAddr];
-
-    /// Box the server endpoint
-    fn boxed(self) -> ServerEndpoint<In, Out>
-    where
-        Self: Sized + 'static,
-    {
-        ServerEndpoint::new(self)
-    }
 }
 
-/// A boxed server endpoint
+/// A boxed listener
 #[derive(Debug)]
-pub struct ServerEndpoint<In: RpcMessage, Out: RpcMessage>(Box<dyn BoxableServerEndpoint<In, Out>>);
+pub struct BoxedListener<In: RpcMessage, Out: RpcMessage>(Box<dyn BoxableListener<In, Out>>);
 
-impl<In: RpcMessage, Out: RpcMessage> ServerEndpoint<In, Out> {
-    /// Wrap a boxable server endpoint into a box, transforming all the types to concrete types
-    pub fn new(x: impl BoxableServerEndpoint<In, Out>) -> Self {
+impl<In: RpcMessage, Out: RpcMessage> BoxedListener<In, Out> {
+    /// Wrap a boxable listener into a box, transforming all the types to concrete types
+    pub fn new(x: impl BoxableListener<In, Out>) -> Self {
         Self(Box::new(x))
     }
 }
 
-impl<In: RpcMessage, Out: RpcMessage> Clone for ServerEndpoint<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> Clone for BoxedListener<In, Out> {
     fn clone(&self) -> Self {
         Self(self.0.clone_box())
     }
 }
 
-impl<In: RpcMessage, Out: RpcMessage> ConnectionCommon for ServerEndpoint<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> StreamTypes for BoxedListener<In, Out> {
     type In = In;
     type Out = Out;
     type RecvStream = RecvStream<In>;
     type SendSink = SendSink<Out>;
 }
 
-impl<In: RpcMessage, Out: RpcMessage> ConnectionErrors for ServerEndpoint<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> ConnectionErrors for BoxedListener<In, Out> {
     type SendError = anyhow::Error;
     type RecvError = anyhow::Error;
     type OpenError = anyhow::Error;
     type AcceptError = anyhow::Error;
 }
 
-impl<In: RpcMessage, Out: RpcMessage> super::ServerEndpoint for ServerEndpoint<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> super::Listener for BoxedListener<In, Out> {
     fn accept(
         &self,
     ) -> impl Future<Output = Result<(Self::SendSink, Self::RecvStream), Self::AcceptError>> + Send
@@ -336,27 +344,27 @@ impl<In: RpcMessage, Out: RpcMessage> super::ServerEndpoint for ServerEndpoint<I
         self.0.local_addr()
     }
 }
-impl<In: RpcMessage, Out: RpcMessage> BoxableConnection<In, Out> for Connection<In, Out> {
-    fn clone_box(&self) -> Box<dyn BoxableConnection<In, Out>> {
+impl<In: RpcMessage, Out: RpcMessage> BoxableConnector<In, Out> for BoxedConnector<In, Out> {
+    fn clone_box(&self) -> Box<dyn BoxableConnector<In, Out>> {
         Box::new(self.clone())
     }
 
     fn open_boxed(&self) -> OpenFuture<In, Out> {
-        OpenFuture::boxed(crate::transport::Connection::open(self))
+        OpenFuture::boxed(crate::transport::Connector::open(self))
     }
 }
 
 #[cfg(feature = "quinn-transport")]
-impl<In: RpcMessage, Out: RpcMessage> BoxableConnection<In, Out>
-    for super::quinn::QuinnConnection<In, Out>
+impl<In: RpcMessage, Out: RpcMessage> BoxableConnector<In, Out>
+    for super::quinn::QuinnConnector<In, Out>
 {
-    fn clone_box(&self) -> Box<dyn BoxableConnection<In, Out>> {
+    fn clone_box(&self) -> Box<dyn BoxableConnector<In, Out>> {
         Box::new(self.clone())
     }
 
     fn open_boxed(&self) -> OpenFuture<In, Out> {
         let f = Box::pin(async move {
-            let (send, recv) = super::Connection::open(self).await?;
+            let (send, recv) = super::Connector::open(self).await?;
             // map the error types to anyhow
             let send = send.sink_map_err(anyhow::Error::from);
             let recv = recv.map_err(anyhow::Error::from);
@@ -368,16 +376,16 @@ impl<In: RpcMessage, Out: RpcMessage> BoxableConnection<In, Out>
 }
 
 #[cfg(feature = "quinn-transport")]
-impl<In: RpcMessage, Out: RpcMessage> BoxableServerEndpoint<In, Out>
-    for super::quinn::QuinnServerEndpoint<In, Out>
+impl<In: RpcMessage, Out: RpcMessage> BoxableListener<In, Out>
+    for super::quinn::QuinnListener<In, Out>
 {
-    fn clone_box(&self) -> Box<dyn BoxableServerEndpoint<In, Out>> {
+    fn clone_box(&self) -> Box<dyn BoxableListener<In, Out>> {
         Box::new(self.clone())
     }
 
     fn accept_bi_boxed(&self) -> AcceptFuture<In, Out> {
         let f = async move {
-            let (send, recv) = super::ServerEndpoint::accept(self).await?;
+            let (send, recv) = super::Listener::accept(self).await?;
             let send = send.sink_map_err(anyhow::Error::from);
             let recv = recv.map_err(anyhow::Error::from);
             anyhow::Ok((SendSink::boxed(send), RecvStream::boxed(recv)))
@@ -386,58 +394,58 @@ impl<In: RpcMessage, Out: RpcMessage> BoxableServerEndpoint<In, Out>
     }
 
     fn local_addr(&self) -> &[super::LocalAddr] {
-        super::ServerEndpoint::local_addr(self)
+        super::Listener::local_addr(self)
     }
 }
 
 #[cfg(feature = "flume-transport")]
-impl<In: RpcMessage, Out: RpcMessage> BoxableConnection<In, Out>
-    for super::flume::FlumeConnection<In, Out>
+impl<In: RpcMessage, Out: RpcMessage> BoxableConnector<In, Out>
+    for super::flume::FlumeConnector<In, Out>
 {
-    fn clone_box(&self) -> Box<dyn BoxableConnection<In, Out>> {
+    fn clone_box(&self) -> Box<dyn BoxableConnector<In, Out>> {
         Box::new(self.clone())
     }
 
     fn open_boxed(&self) -> OpenFuture<In, Out> {
-        OpenFuture::direct(super::Connection::open(self))
+        OpenFuture::direct(super::Connector::open(self))
     }
 }
 
 #[cfg(feature = "flume-transport")]
-impl<In: RpcMessage, Out: RpcMessage> BoxableServerEndpoint<In, Out>
-    for super::flume::FlumeServerEndpoint<In, Out>
+impl<In: RpcMessage, Out: RpcMessage> BoxableListener<In, Out>
+    for super::flume::FlumeListener<In, Out>
 {
-    fn clone_box(&self) -> Box<dyn BoxableServerEndpoint<In, Out>> {
+    fn clone_box(&self) -> Box<dyn BoxableListener<In, Out>> {
         Box::new(self.clone())
     }
 
     fn accept_bi_boxed(&self) -> AcceptFuture<In, Out> {
-        AcceptFuture::direct(super::ServerEndpoint::accept(self))
+        AcceptFuture::direct(super::Listener::accept(self))
     }
 
     fn local_addr(&self) -> &[super::LocalAddr] {
-        super::ServerEndpoint::local_addr(self)
+        super::Listener::local_addr(self)
     }
 }
 
-impl<In, Out, C> BoxableConnection<In, Out> for super::mapped::MappedConnection<In, Out, C>
+impl<In, Out, C> BoxableConnector<In, Out> for super::mapped::MappedConnector<In, Out, C>
 where
     In: RpcMessage,
     Out: RpcMessage,
-    C: super::Connection,
+    C: super::Connector,
     C::Out: From<Out>,
     In: TryFrom<C::In>,
     C::SendError: Into<anyhow::Error>,
     C::RecvError: Into<anyhow::Error>,
     C::OpenError: Into<anyhow::Error>,
 {
-    fn clone_box(&self) -> Box<dyn BoxableConnection<In, Out>> {
+    fn clone_box(&self) -> Box<dyn BoxableConnector<In, Out>> {
         Box::new(self.clone())
     }
 
     fn open_boxed(&self) -> OpenFuture<In, Out> {
         let f = Box::pin(async move {
-            let (send, recv) = super::Connection::open(self).await.map_err(|e| e.into())?;
+            let (send, recv) = super::Connector::open(self).await.map_err(|e| e.into())?;
             // map the error types to anyhow
             let send = send.sink_map_err(|e| e.into());
             let recv = recv.map_err(|e| e.into());
@@ -466,11 +474,11 @@ mod tests {
         use futures_lite::StreamExt;
         use futures_util::SinkExt;
 
-        use crate::transport::{Connection, ServerEndpoint};
+        use crate::transport::{Connector, Listener};
 
         let (server, client) = crate::transport::flume::connection(1);
-        let server = super::ServerEndpoint::new(server);
-        let client = super::Connection::new(client);
+        let server = super::BoxedListener::new(server);
+        let client = super::BoxedConnector::new(client);
         // spawn echo server
         tokio::spawn(async move {
             while let Ok((mut send, mut recv)) = server.accept().await {

@@ -11,18 +11,18 @@ use pin_project::pin_project;
 
 use crate::{RpcError, RpcMessage};
 
-use super::{Connection, ConnectionCommon, ConnectionErrors};
+use super::{ConnectionErrors, Connector, StreamTypes};
 
 /// A connection that maps input and output types
 #[derive(Debug)]
-pub struct MappedConnection<In, Out, C> {
+pub struct MappedConnector<In, Out, C> {
     inner: C,
     _p: std::marker::PhantomData<(In, Out)>,
 }
 
-impl<In, Out, C> MappedConnection<In, Out, C>
+impl<In, Out, C> MappedConnector<In, Out, C>
 where
-    C: Connection,
+    C: Connector,
     In: TryFrom<C::In>,
     C::Out: From<Out>,
 {
@@ -35,7 +35,7 @@ where
     }
 }
 
-impl<In, Out, C> Clone for MappedConnection<In, Out, C>
+impl<In, Out, C> Clone for MappedConnector<In, Out, C>
 where
     C: Clone,
 {
@@ -47,7 +47,7 @@ where
     }
 }
 
-impl<In, Out, C> ConnectionErrors for MappedConnection<In, Out, C>
+impl<In, Out, C> ConnectionErrors for MappedConnector<In, Out, C>
 where
     In: RpcMessage,
     Out: RpcMessage,
@@ -59,9 +59,9 @@ where
     type AcceptError = C::AcceptError;
 }
 
-impl<In, Out, C> ConnectionCommon for MappedConnection<In, Out, C>
+impl<In, Out, C> StreamTypes for MappedConnector<In, Out, C>
 where
-    C: ConnectionCommon,
+    C: StreamTypes,
     In: RpcMessage,
     Out: RpcMessage,
     In: TryFrom<C::In>,
@@ -73,9 +73,9 @@ where
     type SendSink = MappedSendSink<C::SendSink, Out, C::Out>;
 }
 
-impl<In, Out, C> Connection for MappedConnection<In, Out, C>
+impl<In, Out, C> Connector for MappedConnector<In, Out, C>
 where
-    C: Connection,
+    C: Connector,
     In: RpcMessage,
     Out: RpcMessage,
     In: TryFrom<C::In>,
@@ -205,21 +205,21 @@ where
 }
 
 /// Connection types for a mapped connection
-pub struct MappedConnectionTypes<In, Out, C>(PhantomData<(In, Out, C)>);
+pub struct MappedStreamTypes<In, Out, C>(PhantomData<(In, Out, C)>);
 
-impl<In, Out, C> Debug for MappedConnectionTypes<In, Out, C> {
+impl<In, Out, C> Debug for MappedStreamTypes<In, Out, C> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("MappedConnectionTypes").finish()
     }
 }
 
-impl<In, Out, C> Clone for MappedConnectionTypes<In, Out, C> {
+impl<In, Out, C> Clone for MappedStreamTypes<In, Out, C> {
     fn clone(&self) -> Self {
         Self(PhantomData)
     }
 }
 
-impl<In, Out, C> ConnectionErrors for MappedConnectionTypes<In, Out, C>
+impl<In, Out, C> ConnectionErrors for MappedStreamTypes<In, Out, C>
 where
     In: RpcMessage,
     Out: RpcMessage,
@@ -231,9 +231,9 @@ where
     type AcceptError = C::AcceptError;
 }
 
-impl<In, Out, C> ConnectionCommon for MappedConnectionTypes<In, Out, C>
+impl<In, Out, C> StreamTypes for MappedStreamTypes<In, Out, C>
 where
-    C: ConnectionCommon,
+    C: StreamTypes,
     In: RpcMessage,
     Out: RpcMessage,
     In: TryFrom<C::In>,
@@ -250,8 +250,8 @@ where
 mod tests {
 
     use crate::{
-        server::{BoxedServiceChannel, RpcChannel},
-        transport::boxed::BoxableServerEndpoint,
+        server::{BoxedChannelTypes, RpcChannel},
+        transport::Listener,
         RpcClient, RpcServer,
     };
     use serde::{Deserialize, Serialize};
@@ -292,11 +292,11 @@ mod tests {
     async fn smoke() -> TestResult<()> {
         async fn handle_sub_request(
             _req: String,
-            _chan: RpcChannel<SubService, BoxedServiceChannel<SubService>>,
+            _chan: RpcChannel<SubService, BoxedChannelTypes<SubService>>,
         ) -> anyhow::Result<()> {
             Ok(())
         }
-        // create a server endpoint / connection pair. Type will be inferred
+        // create a listener / connector pair. Type will be inferred
         let (s, c) = crate::transport::flume::connection(32);
         // wrap the server in a RpcServer, this is where the service type is specified
         let server = RpcServer::<FullService, _>::new(s.clone());

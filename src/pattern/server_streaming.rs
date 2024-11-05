@@ -7,8 +7,8 @@ use crate::{
     client::{BoxStreamSync, DeferDrop},
     message::{InteractionPattern, Msg},
     server::{race2, RpcChannel, RpcServerError},
-    transport::{Connection, ConnectionCommon, ConnectionErrors},
-    RpcClient, Service, ServiceConnection,
+    transport::{ConnectionErrors, Connector, StreamTypes},
+    RpcClient, Service,
 };
 
 use std::{
@@ -41,13 +41,13 @@ pub enum Error<C: ConnectionErrors> {
     Send(C::SendError),
 }
 
-impl<S: Connection> fmt::Display for Error<S> {
+impl<S: Connector> fmt::Display for Error<S> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Debug::fmt(self, f)
     }
 }
 
-impl<S: Connection> error::Error for Error<S> {}
+impl<S: Connector> error::Error for Error<S> {}
 
 /// Client error when handling responses from a server streaming request
 #[derive(Debug)]
@@ -68,7 +68,7 @@ impl<S: ConnectionErrors> error::Error for ItemError<S> {}
 
 impl<S, C> RpcClient<S, C>
 where
-    C: ServiceConnection<S>,
+    C: crate::Connector<S>,
     S: Service,
 {
     /// Bidi call to the server, request opens a stream, response is a stream
@@ -95,7 +95,7 @@ where
 impl<S, C> RpcChannel<S, C>
 where
     S: Service,
-    C: ConnectionCommon<In = S::Req, Out = S::Res>,
+    C: StreamTypes<In = S::Req, Out = S::Res>,
 {
     /// handle the message M using the given function on the target object
     ///

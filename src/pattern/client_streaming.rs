@@ -7,8 +7,8 @@ use crate::{
     client::UpdateSink,
     message::{InteractionPattern, Msg},
     server::{race2, RpcChannel, RpcServerError, UpdateStream},
-    transport::{ConnectionCommon, ConnectionErrors},
-    RpcClient, Service, ServiceConnection,
+    transport::{ConnectionErrors, StreamTypes},
+    Connector, RpcClient, Service,
 };
 
 use std::{
@@ -78,7 +78,7 @@ impl<C: ConnectionErrors> error::Error for ItemError<C> {}
 impl<S, C> RpcClient<S, C>
 where
     S: Service,
-    C: ServiceConnection<S>,
+    C: Connector<S>,
 {
     /// Call to the server that allows the client to stream, single response
     pub async fn client_streaming<M>(
@@ -114,7 +114,7 @@ where
 impl<S, C> RpcChannel<S, C>
 where
     S: Service,
-    C: ConnectionCommon<In = S::Req, Out = S::Res>,
+    C: StreamTypes<In = S::Req, Out = S::Res>,
 {
     /// handle the message M using the given function on the target object
     ///

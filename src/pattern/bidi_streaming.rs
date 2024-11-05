@@ -7,7 +7,7 @@ use crate::{
     client::{BoxStreamSync, UpdateSink},
     message::{InteractionPattern, Msg},
     server::{race2, RpcChannel, RpcServerError, UpdateStream},
-    transport::{Connection, ConnectionCommon, ConnectionErrors},
+    transport::{ConnectionErrors, Connector, StreamTypes},
     RpcClient, Service,
 };
 
@@ -76,7 +76,7 @@ impl<C: ConnectionErrors> error::Error for ItemError<C> {}
 impl<S, C> RpcClient<S, C>
 where
     S: Service,
-    C: Connection<In = S::Res, Out = S::Req>,
+    C: Connector<In = S::Res, Out = S::Req>,
 {
     /// Bidi call to the server, request opens a stream, response is a stream
     pub async fn bidi<M>(
@@ -106,7 +106,7 @@ where
 
 impl<C, S> RpcChannel<S, C>
 where
-    C: ConnectionCommon<In = S::Req, Out = S::Res>,
+    C: StreamTypes<In = S::Req, Out = S::Res>,
     S: Service,
 {
     /// handle the message M using the given function on the target object
