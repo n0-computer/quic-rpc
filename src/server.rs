@@ -24,7 +24,7 @@ use std::{
 use tokio::sync::oneshot;
 
 /// Type alias for a boxed connection to a specific service
-pub type BoxedServerStreamTypes<S> = crate::transport::boxed::BoxedStreamTypes<
+pub type BoxedListenerTypes<S> = crate::transport::boxed::BoxedStreamTypes<
     <S as crate::Service>::Req,
     <S as crate::Service>::Res,
 >;
@@ -97,10 +97,8 @@ impl<S: Service, C: Listener<S>> RpcServer<S, C> {
 /// `S` is the service type.
 /// `C` is the service endpoint from which the channel was created.
 #[derive(Debug)]
-pub struct RpcChannel<
-    S: Service,
-    C: StreamTypes<In = S::Req, Out = S::Res> = BoxedServerStreamTypes<S>,
-> {
+pub struct RpcChannel<S: Service, C: StreamTypes<In = S::Req, Out = S::Res> = BoxedListenerTypes<S>>
+{
     /// Sink to send responses to the client.
     pub send: C::SendSink,
     /// Stream to receive requests from the client.
@@ -124,7 +122,7 @@ where
     }
 
     /// Convert this channel into a boxed channel.
-    pub fn boxed(self) -> RpcChannel<S, BoxedServerStreamTypes<S>>
+    pub fn boxed(self) -> RpcChannel<S, BoxedListenerTypes<S>>
     where
         C::SendError: Into<anyhow::Error> + Send + Sync + 'static,
         C::RecvError: Into<anyhow::Error> + Send + Sync + 'static,

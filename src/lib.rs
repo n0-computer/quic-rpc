@@ -181,6 +181,6 @@ impl<T: transport::Listener<In = S::Req, Out = S::Res>, S: Service> Listener<S> 
 ///
 /// On the server side, we receive requests and send responses.
 /// On the client side, we send requests and receive responses.
-pub trait ServerStreamTypes<S: Service>: transport::StreamTypes<In = S::Req, Out = S::Res> {}
+pub trait ListenerTypes<S: Service>: transport::StreamTypes<In = S::Req, Out = S::Res> {}
 
-impl<T: transport::StreamTypes<In = S::Req, Out = S::Res>, S: Service> ServerStreamTypes<S> for T {}
+impl<T: transport::StreamTypes<In = S::Req, Out = S::Res>, S: Service> ListenerTypes<S> for T {}
