@@ -40,12 +40,12 @@ pub struct CombinedListener<A, B> {
 }
 
 impl<A: Listener, B: Listener<In = A::In, Out = A::Out>> CombinedListener<A, B> {
-    /// Create a combined server endpoint from two other server endpoints
+    /// Create a combined listener from two other listeners
     ///
     /// When listening for incoming connections with
-    /// [crate::Listener::accept], all configured channels will be listened on,
+    /// [`Listener::accept`], all configured channels will be listened on,
     /// and the first to receive a connection will be used. If no channels are configured,
-    /// accept_bi will not throw an error but wait forever.
+    /// accept will not throw an error but just wait forever.
     pub fn new(a: Option<A>, b: Option<B>) -> Self {
         let mut local_addr = Vec::with_capacity(2);
         if let Some(a) = &a {
@@ -273,12 +273,9 @@ impl<A: Listener, B: Listener<In = A::In, Out = A::Out>> Listener for CombinedLi
 #[cfg(test)]
 #[cfg(feature = "flume-transport")]
 mod tests {
-    use crate::{
-        transport::{
-            combined::{self, OpenError},
-            flume,
-        },
-        Connector,
+    use crate::transport::{
+        combined::{self, OpenError},
+        flume, Connector,
     };
 
     #[tokio::test]

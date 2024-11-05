@@ -14,12 +14,12 @@
 //! [`Listener::accept`].
 //!
 //! In both cases, the result is a tuple of a send side and a receive side. These
-//! types are defined by implementing the [`ConnectionCommon`] trait.
+//! types are defined by implementing the [`StreamTypes`] trait.
 //!
 //! Errors for both sides are defined by implementing the [`ConnectionErrors`] trait.
 use futures_lite::{Future, Stream};
 use futures_sink::Sink;
-use mapped::MappedConnection;
+use mapped::MappedConnector;
 
 use crate::{RpcError, RpcMessage};
 use std::{
@@ -73,7 +73,7 @@ pub trait StreamTypes: ConnectionErrors {
 
 /// A connection to a specific remote machine
 ///
-/// A connection can be used to open bidirectional typed channels using [`Connection::open`].
+/// A connection can be used to open bidirectional typed channels using [`Connector::open`].
 pub trait Connector: StreamTypes {
     /// Open a channel to the remote che
     fn open(
@@ -81,18 +81,18 @@ pub trait Connector: StreamTypes {
     ) -> impl Future<Output = Result<(Self::SendSink, Self::RecvStream), Self::OpenError>> + Send;
 
     /// Map the input and output types of this connection
-    fn map<In1, Out1>(self) -> MappedConnection<In1, Out1, Self>
+    fn map<In1, Out1>(self) -> MappedConnector<In1, Out1, Self>
     where
         In1: TryFrom<Self::In>,
         Self::Out: From<Out1>,
     {
-        MappedConnection::new(self)
+        MappedConnector::new(self)
     }
 }
 
-/// A server endpoint that listens for connections
+/// A listener that listens for connections
 ///
-/// A server endpoint can be used to accept bidirectional typed channels from any of the
+/// A listener can be used to accept bidirectional typed channels from any of the
 /// currently opened connections to clients, using [`Listener::accept`].
 pub trait Listener: StreamTypes {
     /// Accept a new typed bidirectional channel on any of the connections we

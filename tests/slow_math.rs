@@ -15,7 +15,7 @@ use quic_rpc::{
         ServerStreaming, ServerStreamingMsg,
     },
     server::RpcServerError,
-    RpcServer, Service, ServiceEndpoint,
+    Listener, RpcServer, Service,
 };
 
 #[derive(Debug, Clone)]
@@ -107,7 +107,7 @@ impl ComputeService {
         }
     }
 
-    pub async fn server<C: ServiceEndpoint<ComputeService>>(
+    pub async fn server<C: Listener<ComputeService>>(
         server: RpcServer<ComputeService, C>,
     ) -> result::Result<(), RpcServerError<C>> {
         let s = server;

@@ -97,7 +97,7 @@ impl<T: RpcMessage> Stream for RecvStream<T> {
 
 impl error::Error for RecvError {}
 
-/// A flume based server endpoint.
+/// A flume based listener.
 ///
 /// Created using [connection].
 pub struct FlumeListener<In: RpcMessage, Out: RpcMessage> {
@@ -246,7 +246,7 @@ impl<In: RpcMessage, Out: RpcMessage> Connector for FlumeConnector<In, Out> {
     }
 }
 
-/// A flume based connection to a server endpoint.
+/// A flume based connector.
 ///
 /// Created using [connection].
 pub struct FlumeConnector<In: RpcMessage, Out: RpcMessage> {
@@ -334,7 +334,7 @@ impl Display for CreateChannelError {
 
 impl std::error::Error for CreateChannelError {}
 
-/// Create a flume server endpoint and a connected flume client channel.
+/// Create a flume listener and a connected flume connector.
 ///
 /// `buffer` the size of the buffer for each channel. Keep this at a low value to get backpressure
 pub fn connection<Req: RpcMessage, Res: RpcMessage>(
@@ -344,7 +344,7 @@ pub fn connection<Req: RpcMessage, Res: RpcMessage>(
     (FlumeListener { stream }, FlumeConnector { sink })
 }
 
-/// Create a flume server endpoint and a connected flume client channel for a specific service.
+/// Create a flume listener and a connected flume connector for a specific service.
 #[allow(clippy::type_complexity)]
 pub fn service_connection<S: crate::Service>(
     buffer: usize,

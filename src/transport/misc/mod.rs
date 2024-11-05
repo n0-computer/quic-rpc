@@ -10,10 +10,10 @@ use std::convert::Infallible;
 
 use super::StreamTypes;
 
-/// A dummy server endpoint that does nothing
+/// A dummy listener that does nothing
 ///
 /// This can be useful as a default if you want to configure
-/// an optional server endpoint.
+/// an optional listener.
 #[derive(Debug, Default)]
 pub struct DummyListener<In, Out> {
     _p: std::marker::PhantomData<(In, Out)>,

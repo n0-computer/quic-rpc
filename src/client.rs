@@ -2,8 +2,8 @@
 //!
 //! The main entry point is [RpcClient].
 use crate::{
-    transport::{boxed::BoxableConnector, mapped::MappedConnection, StreamTypes},
-    Service, ServiceConnection,
+    transport::{boxed::BoxableConnector, mapped::MappedConnector, StreamTypes},
+    Connector, Service,
 };
 use futures_lite::Stream;
 use futures_sink::Sink;
@@ -19,23 +19,23 @@ use std::{
 /// Type alias for a boxed connection to a specific service
 ///
 /// This is a convenience type alias for a boxed connection to a specific service.
-pub type BoxedServiceConnection<S> =
-    crate::transport::boxed::Connector<<S as crate::Service>::Res, <S as crate::Service>::Req>;
+pub type BoxedConnector<S> =
+    crate::transport::boxed::BoxedConnector<<S as crate::Service>::Res, <S as crate::Service>::Req>;
 
 /// Sync version of `future::stream::BoxStream`.
 pub type BoxStreamSync<'a, T> = Pin<Box<dyn Stream<Item = T> + Send + Sync + 'a>>;
 
 /// A client for a specific service
 ///
-/// This is a wrapper around a [ServiceConnection] that serves as the entry point
+/// This is a wrapper around a [`Connector`] that serves as the entry point
 /// for the client DSL.
 ///
 /// Type parameters:
 ///
 /// `S` is the service type that determines what interactions this client supports.
-/// `C` is the substream source.
+/// `C` is the connector that determines the transport.
 #[derive(Debug)]
-pub struct RpcClient<S, C = BoxedServiceConnection<S>> {
+pub struct RpcClient<S, C = BoxedConnector<S>> {
     pub(crate) source: C,
     pub(crate) _p: PhantomData<S>,
 }
@@ -96,10 +96,10 @@ where
 impl<S, C> RpcClient<S, C>
 where
     S: Service,
-    C: ServiceConnection<S>,
+    C: Connector<S>,
 {
     /// Create a new rpc client for a specific [Service] given a compatible
-    /// [ServiceConnection].
+    /// [Connector].
     ///
     /// This is where a generic typed connection is converted into a client for a specific service.
     ///
@@ -115,7 +115,7 @@ where
 impl<S, C> RpcClient<S, C>
 where
     S: Service,
-    C: ServiceConnection<S>,
+    C: Connector<S>,
 {
     /// Get the underlying connection
     pub fn into_inner(self) -> C {
@@ -131,7 +131,7 @@ where
     /// Where SNext is the new service to map to and S is the current inner service.
     ///
     /// This method can be chained infintely.
-    pub fn map<SNext>(self) -> RpcClient<SNext, MappedConnection<SNext::Res, SNext::Req, C>>
+    pub fn map<SNext>(self) -> RpcClient<SNext, MappedConnector<SNext::Res, SNext::Req, C>>
     where
         SNext: Service,
         S::Req: From<SNext::Req>,
@@ -141,7 +141,7 @@ where
     }
 
     /// box
-    pub fn boxed(self) -> RpcClient<S, BoxedServiceConnection<S>>
+    pub fn boxed(self) -> RpcClient<S, BoxedConnector<S>>
     where
         C: BoxableConnector<S::Res, S::Req>,
     {
@@ -152,7 +152,7 @@ where
 impl<S, C> AsRef<C> for RpcClient<S, C>
 where
     S: Service,
-    C: ServiceConnection<S>,
+    C: Connector<S>,
 {
     fn as_ref(&self) -> &C {
         &self.source

@@ -10,9 +10,7 @@
 use anyhow::Result;
 use futures_lite::StreamExt;
 use futures_util::SinkExt;
-use quic_rpc::{
-    client::BoxedServiceConnection, transport::flume, RpcClient, RpcServer, ServiceEndpoint,
-};
+use quic_rpc::{client::BoxedConnector, transport::flume, Listener, RpcClient, RpcServer};
 use tracing::warn;
 
 use app::AppService;
@@ -28,12 +26,12 @@ async fn main() -> Result<()> {
     tokio::task::spawn(run_server(server_conn, handler));
 
     // run a client demo
-    client_demo(BoxedServiceConnection::<AppService>::new(client_conn)).await?;
+    client_demo(BoxedConnector::<AppService>::new(client_conn)).await?;
 
     Ok(())
 }
 
-async fn run_server<C: ServiceEndpoint<AppService>>(server_conn: C, handler: app::Handler) {
+async fn run_server<C: Listener<AppService>>(server_conn: C, handler: app::Handler) {
     let server = RpcServer::<AppService, _>::new(server_conn);
     loop {
         let Ok(accepting) = server.accept().await else {
@@ -52,7 +50,7 @@ async fn run_server<C: ServiceEndpoint<AppService>>(server_conn: C, handler: app
         }
     }
 }
-pub async fn client_demo(conn: BoxedServiceConnection<AppService>) -> Result<()> {
+pub async fn client_demo(conn: BoxedConnector<AppService>) -> Result<()> {
     let rpc_client = RpcClient::<AppService>::new(conn);
     let client = app::Client::new(rpc_client.clone());
 
@@ -104,7 +102,7 @@ mod app {
     use super::iroh;
     use anyhow::Result;
     use derive_more::{From, TryInto};
-    use quic_rpc::{message::RpcMsg, server::RpcChannel, RpcClient, Service, ServiceEndpoint};
+    use quic_rpc::{message::RpcMsg, server::RpcChannel, Listener, RpcClient, Service};
     use serde::{Deserialize, Serialize};
 
     #[derive(Debug, Serialize, Deserialize, From, TryInto)]
@@ -152,7 +150,7 @@ mod app {
     }
 
     impl Handler {
-        pub async fn handle_rpc_request<E: ServiceEndpoint<AppService>>(
+        pub async fn handle_rpc_request<E: Listener<AppService>>(
             self,
             req: Request,
             chan: RpcChannel<AppService, E>,

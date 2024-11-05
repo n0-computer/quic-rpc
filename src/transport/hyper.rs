@@ -162,7 +162,7 @@ impl Default for ChannelConfig {
     }
 }
 
-/// A server endpoint using a hyper server
+/// A listener using a hyper server
 ///
 /// Each request made by the any client connection this channel will yield a `(recv, send)`
 /// pair which allows receiving the request and sending the response.  Both these are

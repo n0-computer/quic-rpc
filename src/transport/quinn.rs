@@ -33,13 +33,13 @@ struct ListenerInner {
 
 impl Drop for ListenerInner {
     fn drop(&mut self) {
-        tracing::debug!("Dropping server endpoint");
+        tracing::debug!("Dropping listener");
         if let Some(endpoint) = self.endpoint.take() {
-            endpoint.close(0u32.into(), b"server endpoint dropped");
+            endpoint.close(0u32.into(), b"Listener dropped");
 
             if let Ok(handle) = tokio::runtime::Handle::try_current() {
                 // spawn a task to wait for the endpoint to notify peers that it is closing
-                let span = debug_span!("closing server endpoint");
+                let span = debug_span!("closing listener");
                 handle.spawn(
                     async move {
                         endpoint.wait_idle().await;
@@ -54,7 +54,7 @@ impl Drop for ListenerInner {
     }
 }
 
-/// A server endpoint using a quinn connection
+/// A listener using a quinn connection
 #[derive(Debug)]
 pub struct QuinnListener<In: RpcMessage, Out: RpcMessage> {
     inner: Arc<ListenerInner>,

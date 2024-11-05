@@ -8,7 +8,7 @@ use crate::{
     message::{InteractionPattern, Msg},
     server::{race2, RpcChannel, RpcServerError},
     transport::{ConnectionErrors, Connector, StreamTypes},
-    RpcClient, Service, ServiceConnection,
+    RpcClient, Service,
 };
 
 use std::{
@@ -68,7 +68,7 @@ impl<S: ConnectionErrors> error::Error for ItemError<S> {}
 
 impl<S, C> RpcClient<S, C>
 where
-    C: ServiceConnection<S>,
+    C: crate::Connector<S>,
     S: Service,
 {
     /// Bidi call to the server, request opens a stream, response is a stream

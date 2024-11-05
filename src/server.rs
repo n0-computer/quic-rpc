@@ -5,10 +5,10 @@ use crate::{
     transport::{
         self,
         boxed::BoxableListener,
-        mapped::{ErrorOrMapError, MappedConnectionTypes, MappedRecvStream, MappedSendSink},
+        mapped::{ErrorOrMapError, MappedRecvStream, MappedSendSink, MappedStreamTypes},
         ConnectionErrors, StreamTypes,
     },
-    RpcMessage, Service, ServiceEndpoint,
+    Listener, RpcMessage, Service,
 };
 use futures_lite::{Future, Stream, StreamExt};
 use futures_util::{SinkExt, TryStreamExt};
@@ -24,23 +24,23 @@ use std::{
 use tokio::sync::oneshot;
 
 /// Type alias for a boxed connection to a specific service
-pub type BoxedServiceChannel<S> =
-    crate::transport::boxed::Connector<<S as crate::Service>::Req, <S as crate::Service>::Res>;
+pub type BoxedConnector<S> =
+    crate::transport::boxed::BoxedConnector<<S as crate::Service>::Req, <S as crate::Service>::Res>;
 
 /// Type alias for a service endpoint
-pub type BoxedServiceEndpoint<S> =
-    crate::transport::boxed::Listener<<S as crate::Service>::Req, <S as crate::Service>::Res>;
+pub type BoxedListener<S> =
+    crate::transport::boxed::BoxedListener<<S as crate::Service>::Req, <S as crate::Service>::Res>;
 
 /// A server for a specific service.
 ///
-/// This is a wrapper around a [ServiceEndpoint] that serves as the entry point for the server DSL.
+/// This is a wrapper around a [`Listener`] that serves as the entry point for the server DSL.
 ///
 /// Type parameters:
 ///
 /// `S` is the service type.
 /// `C` is the channel type.
 #[derive(Debug)]
-pub struct RpcServer<S, C = BoxedServiceEndpoint<S>> {
+pub struct RpcServer<S, C = BoxedListener<S>> {
     /// The channel on which new requests arrive.
     ///
     /// Each new request is a receiver and channel pair on which messages for this request
@@ -58,9 +58,9 @@ impl<S, C: Clone> Clone for RpcServer<S, C> {
     }
 }
 
-impl<S: Service, C: ServiceEndpoint<S>> RpcServer<S, C> {
+impl<S: Service, C: Listener<S>> RpcServer<S, C> {
     /// Create a new rpc server for a specific service for a [Service] given a compatible
-    /// [ServiceEndpoint].
+    /// [Listener].
     ///
     /// This is where a generic typed endpoint is converted into a server for a specific service.
     pub fn new(source: C) -> Self {
@@ -74,7 +74,7 @@ impl<S: Service, C: ServiceEndpoint<S>> RpcServer<S, C> {
     ///
     /// The boxed transport is the default for the `C` type parameter, so by boxing we can avoid
     /// having to specify the type parameter.
-    pub fn boxed(self) -> RpcServer<S, BoxedServiceEndpoint<S>>
+    pub fn boxed(self) -> RpcServer<S, BoxedListener<S>>
     where
         C: BoxableListener<S::Req, S::Res>,
     {
@@ -95,10 +95,7 @@ impl<S: Service, C: ServiceEndpoint<S>> RpcServer<S, C> {
 /// `S` is the service type.
 /// `C` is the service endpoint from which the channel was created.
 #[derive(Debug)]
-pub struct RpcChannel<
-    S: Service,
-    C: StreamTypes<In = S::Req, Out = S::Res> = BoxedServiceChannel<S>,
-> {
+pub struct RpcChannel<S: Service, C: StreamTypes<In = S::Req, Out = S::Res> = BoxedConnector<S>> {
     /// Sink to send responses to the client.
     pub send: C::SendSink,
     /// Stream to receive requests from the client.
@@ -122,7 +119,7 @@ where
     }
 
     /// Convert this channel into a boxed channel.
-    pub fn boxed(self) -> RpcChannel<S, BoxedServiceChannel<S>>
+    pub fn boxed(self) -> RpcChannel<S, BoxedConnector<S>>
     where
         C::SendError: Into<anyhow::Error> + Send + Sync + 'static,
         C::RecvError: Into<anyhow::Error> + Send + Sync + 'static,
@@ -142,7 +139,7 @@ where
     /// Where SNext is the new service to map to and S is the current inner service.
     ///
     /// This method can be chained infintely.
-    pub fn map<SNext>(self) -> RpcChannel<SNext, MappedConnectionTypes<SNext::Req, SNext::Res, C>>
+    pub fn map<SNext>(self) -> RpcChannel<SNext, MappedStreamTypes<SNext::Req, SNext::Res, C>>
     where
         SNext: Service,
         SNext::Req: TryFrom<S::Req>,
@@ -156,13 +153,13 @@ where
 }
 
 /// The result of accepting a new connection.
-pub struct Accepting<S: Service, C: ServiceEndpoint<S>> {
+pub struct Accepting<S: Service, C: Listener<S>> {
     send: C::SendSink,
     recv: C::RecvStream,
     _p: PhantomData<S>,
 }
 
-impl<S: Service, C: ServiceEndpoint<S>> Accepting<S, C> {
+impl<S: Service, C: Listener<S>> Accepting<S, C> {
     /// Read the first message from the client.
     ///
     /// The return value is a tuple of `(request, channel)`.  Here `request` is the
@@ -186,7 +183,7 @@ impl<S: Service, C: ServiceEndpoint<S>> Accepting<S, C> {
     }
 }
 
-impl<S: Service, C: ServiceEndpoint<S>> RpcServer<S, C> {
+impl<S: Service, C: Listener<S>> RpcServer<S, C> {
     /// Accepts a new channel from a client. The result is an [Accepting] object that
     /// can be used to read the first request.
     pub async fn accept(&self) -> result::Result<Accepting<S, C>, RpcServerError<C>> {
@@ -204,7 +201,7 @@ impl<S: Service, C: ServiceEndpoint<S>> RpcServer<S, C> {
     }
 }
 
-impl<S: Service, C: ServiceEndpoint<S>> AsRef<C> for RpcServer<S, C> {
+impl<S: Service, C: Listener<S>> AsRef<C> for RpcServer<S, C> {
     fn as_ref(&self) -> &C {
         &self.source
     }
@@ -291,7 +288,7 @@ pub enum RpcServerError<C: ConnectionErrors> {
 }
 
 impl<In: RpcMessage, Out: RpcMessage, C: ConnectionErrors>
-    RpcServerError<MappedConnectionTypes<In, Out, C>>
+    RpcServerError<MappedStreamTypes<In, Out, C>>
 {
     /// For a mapped connection, map the error back to the original error type
     pub fn map_back(self) -> RpcServerError<C> {
@@ -383,7 +380,7 @@ pub async fn run_server_loop<S, C, T, F, Fut>(
 ) -> Result<(), RpcServerError<C>>
 where
     S: Service,
-    C: ServiceEndpoint<S>,
+    C: Listener<S>,
     T: Clone + Send + 'static,
     F: FnMut(RpcChannel<S, C>, S::Req, T) -> Fut + Send + 'static,
     Fut: Future<Output = Result<(), RpcServerError<C>>> + Send + 'static,

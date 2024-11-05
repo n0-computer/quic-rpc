@@ -224,54 +224,54 @@ pub trait BoxableConnector<In: RpcMessage, Out: RpcMessage>: Debug + Send + Sync
     fn open_boxed(&self) -> OpenFuture<In, Out>;
 
     /// Box the connection
-    fn boxed(self) -> self::Connector<In, Out>
+    fn boxed(self) -> self::BoxedConnector<In, Out>
     where
         Self: Sized + 'static,
     {
-        self::Connector::new(self)
+        self::BoxedConnector::new(self)
     }
 }
 
 /// A boxed connection
 #[derive(Debug)]
-pub struct Connector<In, Out>(Box<dyn BoxableConnector<In, Out>>);
+pub struct BoxedConnector<In, Out>(Box<dyn BoxableConnector<In, Out>>);
 
-impl<In: RpcMessage, Out: RpcMessage> Connector<In, Out> {
-    /// Wrap a boxable server endpoint into a box, transforming all the types to concrete types
+impl<In: RpcMessage, Out: RpcMessage> BoxedConnector<In, Out> {
+    /// Wrap a boxable connector into a box, transforming all the types to concrete types
     pub fn new(x: impl BoxableConnector<In, Out>) -> Self {
         Self(Box::new(x))
     }
 }
 
-impl<In: RpcMessage, Out: RpcMessage> Clone for Connector<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> Clone for BoxedConnector<In, Out> {
     fn clone(&self) -> Self {
         Self(self.0.clone_box())
     }
 }
 
-impl<In: RpcMessage, Out: RpcMessage> StreamTypes for Connector<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> StreamTypes for BoxedConnector<In, Out> {
     type In = In;
     type Out = Out;
     type RecvStream = RecvStream<In>;
     type SendSink = SendSink<Out>;
 }
 
-impl<In: RpcMessage, Out: RpcMessage> ConnectionErrors for Connector<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> ConnectionErrors for BoxedConnector<In, Out> {
     type SendError = anyhow::Error;
     type RecvError = anyhow::Error;
     type OpenError = anyhow::Error;
     type AcceptError = anyhow::Error;
 }
 
-impl<In: RpcMessage, Out: RpcMessage> super::Connector for Connector<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> super::Connector for BoxedConnector<In, Out> {
     async fn open(&self) -> Result<(Self::SendSink, Self::RecvStream), Self::OpenError> {
         self.0.open_boxed().await
     }
 }
 
-/// A boxable server endpoint
+/// A boxable listener
 pub trait BoxableListener<In: RpcMessage, Out: RpcMessage>: Debug + Send + Sync + 'static {
-    /// Clone the server endpoint and box it
+    /// Clone the listener and box it
     fn clone_box(&self) -> Box<dyn BoxableListener<In, Out>>;
 
     /// Accept a channel from a remote client
@@ -280,47 +280,47 @@ pub trait BoxableListener<In: RpcMessage, Out: RpcMessage>: Debug + Send + Sync 
     /// Get the local address
     fn local_addr(&self) -> &[super::LocalAddr];
 
-    /// Box the server endpoint
-    fn boxed(self) -> Listener<In, Out>
+    /// Box the listener
+    fn boxed(self) -> BoxedListener<In, Out>
     where
         Self: Sized + 'static,
     {
-        Listener::new(self)
+        BoxedListener::new(self)
     }
 }
 
-/// A boxed server endpoint
+/// A boxed listener
 #[derive(Debug)]
-pub struct Listener<In: RpcMessage, Out: RpcMessage>(Box<dyn BoxableListener<In, Out>>);
+pub struct BoxedListener<In: RpcMessage, Out: RpcMessage>(Box<dyn BoxableListener<In, Out>>);
 
-impl<In: RpcMessage, Out: RpcMessage> Listener<In, Out> {
-    /// Wrap a boxable server endpoint into a box, transforming all the types to concrete types
+impl<In: RpcMessage, Out: RpcMessage> BoxedListener<In, Out> {
+    /// Wrap a boxable listener into a box, transforming all the types to concrete types
     pub fn new(x: impl BoxableListener<In, Out>) -> Self {
         Self(Box::new(x))
     }
 }
 
-impl<In: RpcMessage, Out: RpcMessage> Clone for Listener<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> Clone for BoxedListener<In, Out> {
     fn clone(&self) -> Self {
         Self(self.0.clone_box())
     }
 }
 
-impl<In: RpcMessage, Out: RpcMessage> StreamTypes for Listener<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> StreamTypes for BoxedListener<In, Out> {
     type In = In;
     type Out = Out;
     type RecvStream = RecvStream<In>;
     type SendSink = SendSink<Out>;
 }
 
-impl<In: RpcMessage, Out: RpcMessage> ConnectionErrors for Listener<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> ConnectionErrors for BoxedListener<In, Out> {
     type SendError = anyhow::Error;
     type RecvError = anyhow::Error;
     type OpenError = anyhow::Error;
     type AcceptError = anyhow::Error;
 }
 
-impl<In: RpcMessage, Out: RpcMessage> super::Listener for Listener<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> super::Listener for BoxedListener<In, Out> {
     fn accept(
         &self,
     ) -> impl Future<Output = Result<(Self::SendSink, Self::RecvStream), Self::AcceptError>> + Send
@@ -332,7 +332,7 @@ impl<In: RpcMessage, Out: RpcMessage> super::Listener for Listener<In, Out> {
         self.0.local_addr()
     }
 }
-impl<In: RpcMessage, Out: RpcMessage> BoxableConnector<In, Out> for Connector<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> BoxableConnector<In, Out> for BoxedConnector<In, Out> {
     fn clone_box(&self) -> Box<dyn BoxableConnector<In, Out>> {
         Box::new(self.clone())
     }
@@ -416,7 +416,7 @@ impl<In: RpcMessage, Out: RpcMessage> BoxableListener<In, Out>
     }
 }
 
-impl<In, Out, C> BoxableConnector<In, Out> for super::mapped::MappedConnection<In, Out, C>
+impl<In, Out, C> BoxableConnector<In, Out> for super::mapped::MappedConnector<In, Out, C>
 where
     In: RpcMessage,
     Out: RpcMessage,
@@ -465,8 +465,8 @@ mod tests {
         use crate::transport::{Connector, Listener};
 
         let (server, client) = crate::transport::flume::connection(1);
-        let server = super::Listener::new(server);
-        let client = super::Connector::new(client);
+        let server = super::BoxedListener::new(server);
+        let client = super::BoxedConnector::new(client);
         // spawn echo server
         tokio::spawn(async move {
             while let Ok((mut send, mut recv)) = server.accept().await {

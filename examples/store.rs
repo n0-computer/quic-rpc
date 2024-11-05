@@ -5,7 +5,7 @@ use futures_lite::{Stream, StreamExt};
 use futures_util::SinkExt;
 use quic_rpc::{
     server::RpcServerError,
-    transport::{flume, Connector, Listener},
+    transport::{flume, Connector},
     *,
 };
 use serde::{Deserialize, Serialize};
@@ -162,7 +162,7 @@ impl Store {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    async fn server_future<C: ServiceEndpoint<StoreService>>(
+    async fn server_future<C: Listener<StoreService>>(
         server: RpcServer<StoreService, C>,
     ) -> result::Result<(), RpcServerError<C>> {
         let s = server;
@@ -231,6 +231,7 @@ async fn main() -> anyhow::Result<()> {
 }
 
 async fn _main_unsugared() -> anyhow::Result<()> {
+    use transport::Listener;
     #[derive(Clone, Debug)]
     struct Service;
     impl crate::Service for Service {

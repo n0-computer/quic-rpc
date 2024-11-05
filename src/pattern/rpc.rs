@@ -7,7 +7,7 @@ use crate::{
     message::{InteractionPattern, Msg},
     server::{race2, RpcChannel, RpcServerError},
     transport::{ConnectionErrors, StreamTypes},
-    RpcClient, Service, ServiceConnection,
+    Connector, RpcClient, Service,
 };
 
 use std::{
@@ -65,7 +65,7 @@ impl<C: ConnectionErrors> error::Error for Error<C> {}
 impl<S, C> RpcClient<S, C>
 where
     S: Service,
-    C: ServiceConnection<S>,
+    C: Connector<S>,
 {
     /// RPC call to the server, single request, single response
     pub async fn rpc<M>(&self, msg: M) -> result::Result<M::Response, Error<C>>
