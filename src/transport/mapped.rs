@@ -250,7 +250,7 @@ where
 mod tests {
 
     use crate::{
-        server::{BoxedListenerTypes, RpcChannel},
+        server::{BoxedChannelTypes, RpcChannel},
         transport::Listener,
         RpcClient, RpcServer,
     };
@@ -292,7 +292,7 @@ mod tests {
     async fn smoke() -> TestResult<()> {
         async fn handle_sub_request(
             _req: String,
-            _chan: RpcChannel<SubService, BoxedListenerTypes<SubService>>,
+            _chan: RpcChannel<SubService, BoxedChannelTypes<SubService>>,
         ) -> anyhow::Result<()> {
             Ok(())
         }

@@ -23,8 +23,16 @@ use std::{
 };
 use tokio::sync::oneshot;
 
-/// Type alias for a boxed connection to a specific service
-pub type BoxedListenerTypes<S> = crate::transport::boxed::BoxedStreamTypes<
+/// Stream types on the server side
+///
+/// On the server side, we receive requests and send responses.
+/// On the client side, we send requests and receive responses.
+pub trait ChannelTypes<S: Service>: transport::StreamTypes<In = S::Req, Out = S::Res> {}
+
+impl<T: transport::StreamTypes<In = S::Req, Out = S::Res>, S: Service> ChannelTypes<S> for T {}
+
+/// Type alias for when you want to require a boxed channel
+pub type BoxedChannelTypes<S> = crate::transport::boxed::BoxedStreamTypes<
     <S as crate::Service>::Req,
     <S as crate::Service>::Res,
 >;
@@ -97,8 +105,7 @@ impl<S: Service, C: Listener<S>> RpcServer<S, C> {
 /// `S` is the service type.
 /// `C` is the service endpoint from which the channel was created.
 #[derive(Debug)]
-pub struct RpcChannel<S: Service, C: StreamTypes<In = S::Req, Out = S::Res> = BoxedListenerTypes<S>>
-{
+pub struct RpcChannel<S: Service, C: ChannelTypes<S> = BoxedChannelTypes<S>> {
     /// Sink to send responses to the client.
     pub send: C::SendSink,
     /// Stream to receive requests from the client.
@@ -122,7 +129,7 @@ where
     }
 
     /// Convert this channel into a boxed channel.
-    pub fn boxed(self) -> RpcChannel<S, BoxedListenerTypes<S>>
+    pub fn boxed(self) -> RpcChannel<S, BoxedChannelTypes<S>>
     where
         C::SendError: Into<anyhow::Error> + Send + Sync + 'static,
         C::RecvError: Into<anyhow::Error> + Send + Sync + 'static,

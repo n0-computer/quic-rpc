@@ -176,11 +176,3 @@ impl<T: transport::Connector<In = S::Res, Out = S::Req>, S: Service> Connector<S
 pub trait Listener<S: Service>: transport::Listener<In = S::Req, Out = S::Res> {}
 
 impl<T: transport::Listener<In = S::Req, Out = S::Res>, S: Service> Listener<S> for T {}
-
-/// Stream types on the server side
-///
-/// On the server side, we receive requests and send responses.
-/// On the client side, we send requests and receive responses.
-pub trait ListenerTypes<S: Service>: transport::StreamTypes<In = S::Req, Out = S::Res> {}
-
-impl<T: transport::StreamTypes<In = S::Req, Out = S::Res>, S: Service> ListenerTypes<S> for T {}

@@ -1,4 +1,4 @@
-//! Transports for quic-rpc
+//! Built in transports for quic-rpc
 //!
 //! There are two sides to a transport, a server side where connections are
 //! accepted and a client side where connections are initiated.
