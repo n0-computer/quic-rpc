@@ -179,6 +179,6 @@ pub trait ServiceEndpoint<S: Service>: ServerEndpoint<In = S::Req, Out = S::Res>
 impl<T: ServerEndpoint<In = S::Req, Out = S::Res>, S: Service> ServiceEndpoint<S> for T {}
 
 /// A channel for a specific service
-pub trait ServiceChannel<S: Service>: ConnectionCommon<In = S::Res, Out = S::Req> {}
+pub trait ServiceChannel<S: Service>: ConnectionCommon<In = S::Req, Out = S::Res> {}
 
-impl<T: ConnectionCommon<In = S::Res, Out = S::Req>, S: Service> ServiceChannel<S> for T {}
+impl<T: ConnectionCommon<In = S::Req, Out = S::Res>, S: Service> ServiceChannel<S> for T {}
