@@ -11,7 +11,7 @@ use pin_project::pin_project;
 
 use crate::{RpcError, RpcMessage};
 
-use super::{Connection, ConnectionCommon, ConnectionErrors};
+use super::{ConnectionErrors, Connector, StreamTypes};
 
 /// A connection that maps input and output types
 #[derive(Debug)]
@@ -22,7 +22,7 @@ pub struct MappedConnection<In, Out, C> {
 
 impl<In, Out, C> MappedConnection<In, Out, C>
 where
-    C: Connection,
+    C: Connector,
     In: TryFrom<C::In>,
     C::Out: From<Out>,
 {
@@ -59,9 +59,9 @@ where
     type AcceptError = C::AcceptError;
 }
 
-impl<In, Out, C> ConnectionCommon for MappedConnection<In, Out, C>
+impl<In, Out, C> StreamTypes for MappedConnection<In, Out, C>
 where
-    C: ConnectionCommon,
+    C: StreamTypes,
     In: RpcMessage,
     Out: RpcMessage,
     In: TryFrom<C::In>,
@@ -73,9 +73,9 @@ where
     type SendSink = MappedSendSink<C::SendSink, Out, C::Out>;
 }
 
-impl<In, Out, C> Connection for MappedConnection<In, Out, C>
+impl<In, Out, C> Connector for MappedConnection<In, Out, C>
 where
-    C: Connection,
+    C: Connector,
     In: RpcMessage,
     Out: RpcMessage,
     In: TryFrom<C::In>,
@@ -231,9 +231,9 @@ where
     type AcceptError = C::AcceptError;
 }
 
-impl<In, Out, C> ConnectionCommon for MappedConnectionTypes<In, Out, C>
+impl<In, Out, C> StreamTypes for MappedConnectionTypes<In, Out, C>
 where
-    C: ConnectionCommon,
+    C: StreamTypes,
     In: RpcMessage,
     Out: RpcMessage,
     In: TryFrom<C::In>,
@@ -251,7 +251,7 @@ mod tests {
 
     use crate::{
         server::{BoxedServiceChannel, RpcChannel},
-        transport::boxed::BoxableServerEndpoint,
+        transport::boxed::BoxableListener,
         RpcClient, RpcServer,
     };
     use serde::{Deserialize, Serialize};

@@ -4,9 +4,9 @@
 use crate::{
     transport::{
         self,
-        boxed::BoxableServerEndpoint,
+        boxed::BoxableListener,
         mapped::{ErrorOrMapError, MappedConnectionTypes, MappedRecvStream, MappedSendSink},
-        ConnectionCommon, ConnectionErrors,
+        ConnectionErrors, StreamTypes,
     },
     RpcMessage, Service, ServiceEndpoint,
 };
@@ -25,11 +25,11 @@ use tokio::sync::oneshot;
 
 /// Type alias for a boxed connection to a specific service
 pub type BoxedServiceChannel<S> =
-    crate::transport::boxed::Connection<<S as crate::Service>::Req, <S as crate::Service>::Res>;
+    crate::transport::boxed::Connector<<S as crate::Service>::Req, <S as crate::Service>::Res>;
 
 /// Type alias for a service endpoint
 pub type BoxedServiceEndpoint<S> =
-    crate::transport::boxed::ServerEndpoint<<S as crate::Service>::Req, <S as crate::Service>::Res>;
+    crate::transport::boxed::Listener<<S as crate::Service>::Req, <S as crate::Service>::Res>;
 
 /// A server for a specific service.
 ///
@@ -76,7 +76,7 @@ impl<S: Service, C: ServiceEndpoint<S>> RpcServer<S, C> {
     /// having to specify the type parameter.
     pub fn boxed(self) -> RpcServer<S, BoxedServiceEndpoint<S>>
     where
-        C: BoxableServerEndpoint<S::Req, S::Res>,
+        C: BoxableListener<S::Req, S::Res>,
     {
         RpcServer::new(self.source.boxed())
     }
@@ -97,7 +97,7 @@ impl<S: Service, C: ServiceEndpoint<S>> RpcServer<S, C> {
 #[derive(Debug)]
 pub struct RpcChannel<
     S: Service,
-    C: ConnectionCommon<In = S::Req, Out = S::Res> = BoxedServiceChannel<S>,
+    C: StreamTypes<In = S::Req, Out = S::Res> = BoxedServiceChannel<S>,
 > {
     /// Sink to send responses to the client.
     pub send: C::SendSink,
@@ -110,7 +110,7 @@ pub struct RpcChannel<
 impl<S, C> RpcChannel<S, C>
 where
     S: Service,
-    C: ConnectionCommon<In = S::Req, Out = S::Res>,
+    C: StreamTypes<In = S::Req, Out = S::Res>,
 {
     /// Create a new RPC channel.
     pub fn new(send: C::SendSink, recv: C::RecvStream) -> Self {
@@ -222,11 +222,11 @@ pub struct UpdateStream<C, T>(
     PhantomData<T>,
 )
 where
-    C: ConnectionCommon;
+    C: StreamTypes;
 
 impl<C, T> UpdateStream<C, T>
 where
-    C: ConnectionCommon,
+    C: StreamTypes,
     T: TryFrom<C::In>,
 {
     pub(crate) fn new(recv: C::RecvStream) -> (Self, UnwrapToPending<RpcServerError<C>>) {
@@ -238,7 +238,7 @@ where
 
 impl<C, T> Stream for UpdateStream<C, T>
 where
-    C: ConnectionCommon,
+    C: StreamTypes,
     T: TryFrom<C::In>,
 {
     type Item = T;

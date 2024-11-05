@@ -1,7 +1,7 @@
 use async_stream::stream;
 use futures::stream::{Stream, StreamExt};
 use quic_rpc::server::run_server_loop;
-use quic_rpc::transport::quinn::QuinnServerEndpoint;
+use quic_rpc::transport::quinn::QuinnListener;
 use quinn::{Endpoint, ServerConfig};
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -62,7 +62,7 @@ async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt::init();
     let server_addr: SocketAddr = "127.0.0.1:12345".parse()?;
     let (server, _server_certs) = make_server_endpoint(server_addr)?;
-    let channel = QuinnServerEndpoint::new(server)?;
+    let channel = QuinnListener::new(server)?;
     let target = Compute;
     run_server_loop(
         ComputeService,

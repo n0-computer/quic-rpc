@@ -5,7 +5,7 @@ use futures_lite::{Stream, StreamExt};
 use futures_util::SinkExt;
 use quic_rpc::{
     server::RpcServerError,
-    transport::{flume, Connection, ServerEndpoint},
+    transport::{flume, Connector, Listener},
     *,
 };
 use serde::{Deserialize, Serialize};

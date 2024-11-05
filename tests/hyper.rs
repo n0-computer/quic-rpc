@@ -7,7 +7,7 @@ use flume::Receiver;
 use quic_rpc::{
     declare_rpc,
     server::RpcServerError,
-    transport::hyper::{self, HyperConnection, HyperServerEndpoint, RecvError},
+    transport::hyper::{self, HyperConnector, HyperListener, RecvError},
     RpcClient, RpcServer, Service,
 };
 use serde::{Deserialize, Serialize};
@@ -18,7 +18,7 @@ use math::*;
 mod util;
 
 fn run_server(addr: &SocketAddr) -> JoinHandle<anyhow::Result<()>> {
-    let channel = HyperServerEndpoint::serve(addr).unwrap();
+    let channel = HyperListener::serve(addr).unwrap();
     let server = RpcServer::new(channel);
     tokio::spawn(async move {
         loop {
@@ -38,7 +38,7 @@ enum TestResponse {
     NoDeser(NoDeser),
 }
 
-type SC = HyperServerEndpoint<TestRequest, TestResponse>;
+type SC = HyperListener<TestRequest, TestResponse>;
 
 /// request that can be too big
 #[derive(Debug, Serialize, Deserialize)]
@@ -134,7 +134,7 @@ async fn hyper_channel_bench() -> anyhow::Result<()> {
     let addr: SocketAddr = "127.0.0.1:3000".parse()?;
     let uri: Uri = "http://127.0.0.1:3000".parse()?;
     let server_handle = run_server(&addr);
-    let client = HyperConnection::new(uri);
+    let client = HyperConnector::new(uri);
     let client = RpcClient::new(client);
     bench(client, 50000).await?;
     println!("terminating server");
@@ -148,7 +148,7 @@ async fn hyper_channel_smoke() -> anyhow::Result<()> {
     let addr: SocketAddr = "127.0.0.1:3001".parse()?;
     let uri: Uri = "http://127.0.0.1:3001".parse()?;
     let server_handle = run_server(&addr);
-    let client = HyperConnection::new(uri);
+    let client = HyperConnector::new(uri);
     smoke_test(client).await?;
     server_handle.abort();
     let _ = server_handle.await;
@@ -171,7 +171,7 @@ async fn hyper_channel_errors() -> anyhow::Result<()> {
         JoinHandle<anyhow::Result<()>>,
         Receiver<result::Result<(), RpcServerError<SC>>>,
     ) {
-        let channel = HyperServerEndpoint::serve(addr).unwrap();
+        let channel = HyperListener::serve(addr).unwrap();
         let server = RpcServer::new(channel);
         let (res_tx, res_rx) = flume::unbounded();
         let handle = tokio::spawn(async move {
@@ -214,7 +214,7 @@ async fn hyper_channel_errors() -> anyhow::Result<()> {
     let addr: SocketAddr = "127.0.0.1:3002".parse()?;
     let uri: Uri = "http://127.0.0.1:3002".parse()?;
     let (server_handle, server_results) = run_test_server(&addr);
-    let client = HyperConnection::new(uri);
+    let client = HyperConnector::new(uri);
     let client = RpcClient::new(client);
 
     macro_rules! assert_matches {

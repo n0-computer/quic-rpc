@@ -2,7 +2,7 @@
 //!
 //! The main entry point is [RpcClient].
 use crate::{
-    transport::{boxed::BoxableConnection, mapped::MappedConnection, ConnectionCommon},
+    transport::{boxed::BoxableConnector, mapped::MappedConnection, StreamTypes},
     Service, ServiceConnection,
 };
 use futures_lite::Stream;
@@ -20,7 +20,7 @@ use std::{
 ///
 /// This is a convenience type alias for a boxed connection to a specific service.
 pub type BoxedServiceConnection<S> =
-    crate::transport::boxed::Connection<<S as crate::Service>::Res, <S as crate::Service>::Req>;
+    crate::transport::boxed::Connector<<S as crate::Service>::Res, <S as crate::Service>::Req>;
 
 /// Sync version of `future::stream::BoxStream`.
 pub type BoxStreamSync<'a, T> = Pin<Box<dyn Stream<Item = T> + Send + Sync + 'a>>;
@@ -55,11 +55,11 @@ impl<S, C: Clone> Clone for RpcClient<S, C> {
 #[derive(Debug)]
 pub struct UpdateSink<C, T>(#[pin] pub C::SendSink, PhantomData<T>)
 where
-    C: ConnectionCommon;
+    C: StreamTypes;
 
 impl<C, T> UpdateSink<C, T>
 where
-    C: ConnectionCommon,
+    C: StreamTypes,
     T: Into<C::Out>,
 {
     /// Create a new update sink
@@ -70,7 +70,7 @@ where
 
 impl<C, T> Sink<T> for UpdateSink<C, T>
 where
-    C: ConnectionCommon,
+    C: StreamTypes,
     T: Into<C::Out>,
 {
     type Error = C::SendError;
@@ -143,7 +143,7 @@ where
     /// box
     pub fn boxed(self) -> RpcClient<S, BoxedServiceConnection<S>>
     where
-        C: BoxableConnection<S::Res, S::Req>,
+        C: BoxableConnector<S::Res, S::Req>,
     {
         RpcClient::new(self.source.boxed())
     }

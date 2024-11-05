@@ -6,7 +6,7 @@ use futures_util::{FutureExt, SinkExt};
 use crate::{
     message::{InteractionPattern, Msg},
     server::{race2, RpcChannel, RpcServerError},
-    transport::{ConnectionCommon, ConnectionErrors},
+    transport::{ConnectionErrors, StreamTypes},
     RpcClient, Service, ServiceConnection,
 };
 
@@ -89,7 +89,7 @@ where
 impl<S, C> RpcChannel<S, C>
 where
     S: Service,
-    C: ConnectionCommon<In = S::Req, Out = S::Res>,
+    C: StreamTypes<In = S::Req, Out = S::Res>,
 {
     /// handle the message of type `M` using the given function on the target object
     ///

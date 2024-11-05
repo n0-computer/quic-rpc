@@ -15,7 +15,7 @@ use quic_rpc::{
         ServerStreaming, ServerStreamingMsg,
     },
     server::{RpcChannel, RpcServerError},
-    transport::ConnectionCommon,
+    transport::StreamTypes,
     RpcClient, RpcServer, Service, ServiceConnection, ServiceEndpoint,
 };
 use serde::{Deserialize, Serialize};
@@ -179,7 +179,7 @@ impl ComputeService {
         chan: RpcChannel<ComputeService, E>,
     ) -> Result<(), RpcServerError<E>>
     where
-        E: ConnectionCommon<In = ComputeRequest, Out = ComputeResponse>,
+        E: StreamTypes<In = ComputeRequest, Out = ComputeResponse>,
     {
         use ComputeRequest::*;
         #[rustfmt::skip]
