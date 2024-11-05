@@ -177,7 +177,10 @@ pub trait Listener<S: Service>: transport::Listener<In = S::Req, Out = S::Res> {
 
 impl<T: transport::Listener<In = S::Req, Out = S::Res>, S: Service> Listener<S> for T {}
 
-/// A channel for a specific service
+/// Stream types on the server side
+///
+/// On the server side, we receive requests and send responses.
+/// On the client side, we send requests and receive responses.
 pub trait ServerStreamTypes<S: Service>: transport::StreamTypes<In = S::Req, Out = S::Res> {}
 
 impl<T: transport::StreamTypes<In = S::Req, Out = S::Res>, S: Service> ServerStreamTypes<S> for T {}
