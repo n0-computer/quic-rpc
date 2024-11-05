@@ -93,7 +93,7 @@
 #![deny(rustdoc::broken_intra_doc_links)]
 use serde::{de::DeserializeOwned, Serialize};
 use std::fmt::{Debug, Display};
-use transport::{Connection, ServerEndpoint};
+use transport::{Connection, ConnectionCommon, ServerEndpoint};
 pub mod client;
 pub mod message;
 pub mod server;
@@ -177,3 +177,8 @@ impl<T: Connection<In = S::Res, Out = S::Req>, S: Service> ServiceConnection<S> 
 pub trait ServiceEndpoint<S: Service>: ServerEndpoint<In = S::Req, Out = S::Res> {}
 
 impl<T: ServerEndpoint<In = S::Req, Out = S::Res>, S: Service> ServiceEndpoint<S> for T {}
+
+/// A channel for a specific service
+pub trait ServiceChannel<S: Service>: ConnectionCommon<In = S::Res, Out = S::Req> {}
+
+impl<T: ConnectionCommon<In = S::Res, Out = S::Req>, S: Service> ServiceChannel<S> for T {}
