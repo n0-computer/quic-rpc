@@ -99,7 +99,7 @@ impl error::Error for RecvError {}
 
 /// A flume based listener.
 ///
-/// Created using [connection].
+/// Created using [channel].
 pub struct FlumeListener<In: RpcMessage, Out: RpcMessage> {
     #[allow(clippy::type_complexity)]
     stream: flume::Receiver<(SendSink<Out>, RecvStream<In>)>,
@@ -248,7 +248,7 @@ impl<In: RpcMessage, Out: RpcMessage> Connector for FlumeConnector<In, Out> {
 
 /// A flume based connector.
 ///
-/// Created using [connection].
+/// Created using [channel].
 pub struct FlumeConnector<In: RpcMessage, Out: RpcMessage> {
     #[allow(clippy::type_complexity)]
     sink: flume::Sender<(SendSink<In>, RecvStream<Out>)>,
@@ -337,20 +337,9 @@ impl std::error::Error for CreateChannelError {}
 /// Create a flume listener and a connected flume connector.
 ///
 /// `buffer` the size of the buffer for each channel. Keep this at a low value to get backpressure
-pub fn connection<Req: RpcMessage, Res: RpcMessage>(
+pub fn channel<Req: RpcMessage, Res: RpcMessage>(
     buffer: usize,
 ) -> (FlumeListener<Req, Res>, FlumeConnector<Res, Req>) {
     let (sink, stream) = flume::bounded(buffer);
     (FlumeListener { stream }, FlumeConnector { sink })
-}
-
-/// Create a flume listener and a connected flume connector for a specific service.
-#[allow(clippy::type_complexity)]
-pub fn service_connection<S: crate::Service>(
-    buffer: usize,
-) -> (
-    FlumeListener<S::Req, S::Res>,
-    FlumeConnector<S::Res, S::Req>,
-) {
-    connection(buffer)
 }

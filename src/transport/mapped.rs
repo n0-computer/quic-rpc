@@ -297,7 +297,7 @@ mod tests {
             Ok(())
         }
         // create a listener / connector pair. Type will be inferred
-        let (s, c) = crate::transport::flume::connection(32);
+        let (s, c) = crate::transport::flume::channel(32);
         // wrap the server in a RpcServer, this is where the service type is specified
         let server = RpcServer::<FullService, _>::new(s.clone());
         // when using a boxed transport, we can omit the transport type and use the default

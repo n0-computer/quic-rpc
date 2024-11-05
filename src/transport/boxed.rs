@@ -476,7 +476,7 @@ mod tests {
 
         use crate::transport::{Connector, Listener};
 
-        let (server, client) = crate::transport::flume::connection(1);
+        let (server, client) = crate::transport::flume::channel(1);
         let server = super::BoxedListener::new(server);
         let client = super::BoxedConnector::new(client);
         // spawn echo server
