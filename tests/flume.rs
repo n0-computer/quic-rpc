@@ -11,7 +11,7 @@ use quic_rpc::{
 #[tokio::test]
 async fn flume_channel_bench() -> anyhow::Result<()> {
     tracing_subscriber::fmt::try_init().ok();
-    let (server, client) = flume::service_connection::<ComputeService>(1);
+    let (server, client) = flume::channel(1);
 
     let server = RpcServer::<ComputeService, _>::new(server);
     let server_handle = tokio::task::spawn(ComputeService::server(server));
@@ -60,7 +60,7 @@ async fn flume_channel_mapped_bench() -> anyhow::Result<()> {
         type Req = InnerRequest;
         type Res = InnerResponse;
     }
-    let (server, client) = flume::service_connection::<OuterService>(1);
+    let (server, client) = flume::channel(1);
 
     let server = RpcServer::<OuterService, _>::new(server);
     let server_handle: tokio::task::JoinHandle<Result<(), RpcServerError<_>>> =
@@ -73,8 +73,8 @@ async fn flume_channel_mapped_bench() -> anyhow::Result<()> {
                     let req: OuterRequest = req;
                     match req {
                         OuterRequest::Inner(InnerRequest::Compute(req)) => {
-                            let chan: RpcChannel<InnerService, _, OuterService> = chan.map();
-                            let chan: RpcChannel<ComputeService, _, OuterService> = chan.map();
+                            let chan: RpcChannel<InnerService, _> = chan.map();
+                            let chan: RpcChannel<ComputeService, _> = chan.map();
                             ComputeService::handle_rpc_request(service, req, chan).await
                         }
                     }
@@ -83,8 +83,8 @@ async fn flume_channel_mapped_bench() -> anyhow::Result<()> {
         });
 
     let client = RpcClient::<OuterService, _>::new(client);
-    let client: RpcClient<InnerService, _, OuterService> = client.map();
-    let client: RpcClient<ComputeService, _, OuterService> = client.map();
+    let client: RpcClient<InnerService, _> = client.map();
+    let client: RpcClient<ComputeService, _> = client.map();
     bench(client, 1000000).await?;
     // dropping the client will cause the server to terminate
     match server_handle.await? {
@@ -98,7 +98,7 @@ async fn flume_channel_mapped_bench() -> anyhow::Result<()> {
 #[tokio::test]
 async fn flume_channel_smoke() -> anyhow::Result<()> {
     tracing_subscriber::fmt::try_init().ok();
-    let (server, client) = flume::service_connection::<ComputeService>(1);
+    let (server, client) = flume::channel(1);
 
     let server = RpcServer::<ComputeService, _>::new(server);
     let server_handle = tokio::task::spawn(ComputeService::server(server));

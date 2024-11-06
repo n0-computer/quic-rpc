@@ -49,7 +49,7 @@
 //! }
 //!
 //! // create a transport channel, here a memory channel for testing
-//! let (server, client) = quic_rpc::transport::flume::service_connection::<PingService>(1);
+//! let (server, client) = quic_rpc::transport::flume::channel(1);
 //!
 //! // client side
 //! // create the rpc client given the channel and the service type
@@ -93,7 +93,6 @@
 #![deny(rustdoc::broken_intra_doc_links)]
 use serde::{de::DeserializeOwned, Serialize};
 use std::fmt::{Debug, Display};
-use transport::{Connection, ServerEndpoint};
 pub mod client;
 pub mod message;
 pub mod server;
@@ -102,7 +101,6 @@ pub use client::RpcClient;
 pub use server::RpcServer;
 #[cfg(feature = "macros")]
 mod macros;
-mod map;
 
 pub mod pattern;
 
@@ -127,9 +125,13 @@ impl<T> RpcMessage for T where
 ///
 /// We don't require them to implement [std::error::Error] so we can use
 /// anyhow::Error as an error type.
-pub trait RpcError: Debug + Display + Send + Sync + Unpin + 'static {}
+///
+/// Instead we require them to implement `Into<anyhow::Error>`, which is available
+/// both for any type that implements [std::error::Error] and anyhow itself.
+pub trait RpcError: Debug + Display + Into<anyhow::Error> + Send + Sync + Unpin + 'static {}
 
-impl<T> RpcError for T where T: Debug + Display + Send + Sync + Unpin + 'static {}
+impl<T> RpcError for T where T: Debug + Display + Into<anyhow::Error> + Send + Sync + Unpin + 'static
+{}
 
 /// A service
 ///
@@ -157,21 +159,20 @@ pub trait Service: Send + Sync + Debug + Clone + 'static {
     type Res: RpcMessage;
 }
 
-/// A connection to a specific service on a specific remote machine
+/// A connector to a specific service
 ///
-/// This is just a trait alias for a [Connection] with the right types.
-///
-/// This can be used to create a [RpcClient] that can be used to send requests.
-pub trait ServiceConnection<S: Service>: Connection<S::Res, S::Req> {}
+/// This is just a trait alias for a [`transport::Connector`] with the right types. It is used
+/// to make it easier to specify the bounds of a connector that matches a specific
+/// service.
+pub trait Connector<S: Service>: transport::Connector<In = S::Res, Out = S::Req> {}
 
-impl<T: Connection<S::Res, S::Req>, S: Service> ServiceConnection<S> for T {}
+impl<T: transport::Connector<In = S::Res, Out = S::Req>, S: Service> Connector<S> for T {}
 
-/// A server endpoint for a specific service
+/// A listener for a specific service
 ///
-/// This is just a trait alias for a [ServerEndpoint] with the right types.
-///
-/// This can be used to create a [RpcServer] that can be used to handle
-/// requests.
-pub trait ServiceEndpoint<S: Service>: ServerEndpoint<S::Req, S::Res> {}
+/// This is just a trait alias for a [`transport::Listener`] with the right types. It is used
+/// to make it easier to specify the bounds of a listener that matches a specific
+/// service.
+pub trait Listener<S: Service>: transport::Listener<In = S::Req, Out = S::Res> {}
 
-impl<T: ServerEndpoint<S::Req, S::Res>, S: Service> ServiceEndpoint<S> for T {}
+impl<T: transport::Listener<In = S::Req, Out = S::Res>, S: Service> Listener<S> for T {}

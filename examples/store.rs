@@ -5,7 +5,7 @@ use futures_lite::{Stream, StreamExt};
 use futures_util::SinkExt;
 use quic_rpc::{
     server::RpcServerError,
-    transport::{flume, Connection, ServerEndpoint},
+    transport::{flume, Connector},
     *,
 };
 use serde::{Deserialize, Serialize};
@@ -162,7 +162,7 @@ impl Store {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    async fn server_future<C: ServiceEndpoint<StoreService>>(
+    async fn server_future<C: Listener<StoreService>>(
         server: RpcServer<StoreService, C>,
     ) -> result::Result<(), RpcServerError<C>> {
         let s = server;
@@ -184,7 +184,7 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
-    let (server, client) = flume::service_connection::<StoreService>(1);
+    let (server, client) = flume::channel(1);
     let client = RpcClient::<StoreService, _>::new(client);
     let server = RpcServer::<StoreService, _>::new(server);
     let server_handle = tokio::task::spawn(server_future(server));
@@ -231,13 +231,14 @@ async fn main() -> anyhow::Result<()> {
 }
 
 async fn _main_unsugared() -> anyhow::Result<()> {
+    use transport::Listener;
     #[derive(Clone, Debug)]
     struct Service;
     impl crate::Service for Service {
         type Req = u64;
         type Res = String;
     }
-    let (server, client) = flume::service_connection::<Service>(1);
+    let (server, client) = flume::channel::<u64, String>(1);
     let to_string_service = tokio::spawn(async move {
         let (mut send, mut recv) = server.accept().await?;
         while let Some(item) = recv.next().await {

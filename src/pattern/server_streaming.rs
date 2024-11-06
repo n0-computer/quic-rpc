@@ -7,15 +7,14 @@ use crate::{
     client::{BoxStreamSync, DeferDrop},
     message::{InteractionPattern, Msg},
     server::{race2, RpcChannel, RpcServerError},
-    transport::ConnectionErrors,
-    RpcClient, Service, ServiceConnection, ServiceEndpoint,
+    transport::{ConnectionErrors, Connector, StreamTypes},
+    RpcClient, Service,
 };
 
 use std::{
     error,
     fmt::{self, Debug},
     result,
-    sync::Arc,
 };
 
 /// Server streaming interaction pattern
@@ -42,13 +41,13 @@ pub enum Error<C: ConnectionErrors> {
     Send(C::SendError),
 }
 
-impl<S: ConnectionErrors> fmt::Display for Error<S> {
+impl<S: Connector> fmt::Display for Error<S> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Debug::fmt(self, f)
     }
 }
 
-impl<S: ConnectionErrors> error::Error for Error<S> {}
+impl<S: Connector> error::Error for Error<S> {}
 
 /// Client error when handling responses from a server streaming request
 #[derive(Debug)]
@@ -67,10 +66,9 @@ impl<S: ConnectionErrors> fmt::Display for ItemError<S> {
 
 impl<S: ConnectionErrors> error::Error for ItemError<S> {}
 
-impl<S, C, SC> RpcClient<S, C, SC>
+impl<S, C> RpcClient<S, C>
 where
-    SC: Service,
-    C: ServiceConnection<SC>,
+    C: crate::Connector<S>,
     S: Service,
 {
     /// Bidi call to the server, request opens a stream, response is a stream
@@ -81,17 +79,11 @@ where
     where
         M: ServerStreamingMsg<S>,
     {
-        let msg = self.map.req_into_outer(msg.into());
+        let msg = msg.into();
         let (mut send, recv) = self.source.open().await.map_err(Error::Open)?;
         send.send(msg).map_err(Error::<C>::Send).await?;
-        let map = Arc::clone(&self.map);
         let recv = recv.map(move |x| match x {
-            Ok(x) => {
-                let x = map
-                    .res_try_into_inner(x)
-                    .map_err(|_| ItemError::DowncastError)?;
-                M::Response::try_from(x).map_err(|_| ItemError::DowncastError)
-            }
+            Ok(msg) => M::Response::try_from(msg).map_err(|_| ItemError::DowncastError),
             Err(e) => Err(ItemError::RecvError(e)),
         });
         // keep send alive so the request on the server side does not get cancelled
@@ -100,11 +92,10 @@ where
     }
 }
 
-impl<S, C, SC> RpcChannel<S, C, SC>
+impl<S, C> RpcChannel<S, C>
 where
     S: Service,
-    SC: Service,
-    C: ServiceEndpoint<SC>,
+    C: StreamTypes<In = S::Req, Out = S::Res>,
 {
     /// handle the message M using the given function on the target object
     ///
@@ -135,7 +126,7 @@ where
             tokio::pin!(responses);
             while let Some(response) = responses.next().await {
                 // turn into a S::Res so we can send it
-                let response = self.map.res_into_outer(response.into());
+                let response = response.into();
                 // send it and return the error if any
                 send.send(response)
                     .await

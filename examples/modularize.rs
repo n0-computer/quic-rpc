@@ -10,7 +10,7 @@
 use anyhow::Result;
 use futures_lite::StreamExt;
 use futures_util::SinkExt;
-use quic_rpc::{transport::flume, RpcClient, RpcServer, ServiceConnection, ServiceEndpoint};
+use quic_rpc::{client::BoxedConnector, transport::flume, Listener, RpcClient, RpcServer};
 use tracing::warn;
 
 use app::AppService;
@@ -19,19 +19,19 @@ use app::AppService;
 async fn main() -> Result<()> {
     // Spawn an inmemory connection.
     // Could use quic equally (all code in this example is generic over the transport)
-    let (server_conn, client_conn) = flume::service_connection::<AppService>(1);
+    let (server_conn, client_conn) = flume::channel(1);
 
     // spawn the server
     let handler = app::Handler::default();
     tokio::task::spawn(run_server(server_conn, handler));
 
     // run a client demo
-    client_demo(client_conn).await?;
+    client_demo(BoxedConnector::<AppService>::new(client_conn)).await?;
 
     Ok(())
 }
 
-async fn run_server<C: ServiceEndpoint<AppService>>(server_conn: C, handler: app::Handler) {
+async fn run_server<C: Listener<AppService>>(server_conn: C, handler: app::Handler) {
     let server = RpcServer::<AppService, _>::new(server_conn);
     loop {
         let Ok(accepting) = server.accept().await else {
@@ -50,8 +50,8 @@ async fn run_server<C: ServiceEndpoint<AppService>>(server_conn: C, handler: app
         }
     }
 }
-pub async fn client_demo<C: ServiceConnection<AppService>>(conn: C) -> Result<()> {
-    let rpc_client = RpcClient::new(conn);
+pub async fn client_demo(conn: BoxedConnector<AppService>) -> Result<()> {
+    let rpc_client = RpcClient::<AppService>::new(conn);
     let client = app::Client::new(rpc_client.clone());
 
     // call a method from the top-level app client
@@ -99,14 +99,11 @@ mod app {
     //!
     //! It could also easily compose services from other crates or internal modules.
 
+    use super::iroh;
     use anyhow::Result;
     use derive_more::{From, TryInto};
-    use quic_rpc::{
-        message::RpcMsg, server::RpcChannel, RpcClient, Service, ServiceConnection, ServiceEndpoint,
-    };
+    use quic_rpc::{message::RpcMsg, server::RpcChannel, Listener, RpcClient, Service};
     use serde::{Deserialize, Serialize};
-
-    use super::iroh;
 
     #[derive(Debug, Serialize, Deserialize, From, TryInto)]
     pub enum Request {
@@ -153,13 +150,17 @@ mod app {
     }
 
     impl Handler {
-        pub async fn handle_rpc_request<E: ServiceEndpoint<AppService>>(
+        pub async fn handle_rpc_request<E: Listener<AppService>>(
             self,
             req: Request,
-            chan: RpcChannel<AppService, E, AppService>,
+            chan: RpcChannel<AppService, E>,
         ) -> Result<()> {
             match req {
-                Request::Iroh(req) => self.iroh.handle_rpc_request(req, chan.map()).await?,
+                Request::Iroh(req) => {
+                    self.iroh
+                        .handle_rpc_request(req, chan.map().boxed())
+                        .await?
+                }
                 Request::AppVersion(req) => chan.rpc(req, self, Self::on_version).await?,
             };
             Ok(())
@@ -171,20 +172,16 @@ mod app {
     }
 
     #[derive(Debug, Clone)]
-    pub struct Client<S: Service, C: ServiceConnection<S>> {
-        pub iroh: iroh::Client<S, C>,
-        client: RpcClient<AppService, C, S>,
+    pub struct Client {
+        pub iroh: iroh::Client,
+        client: RpcClient<AppService>,
     }
 
-    impl<S, C> Client<S, C>
-    where
-        S: Service,
-        C: ServiceConnection<S>,
-    {
-        pub fn new(client: RpcClient<AppService, C, S>) -> Self {
+    impl Client {
+        pub fn new(client: RpcClient<AppService>) -> Self {
             Self {
-                iroh: iroh::Client::new(client.clone().map()),
-                client,
+                client: client.clone(),
+                iroh: iroh::Client::new(client.map().boxed()),
             }
         }
 
@@ -202,7 +199,7 @@ mod iroh {
 
     use anyhow::Result;
     use derive_more::{From, TryInto};
-    use quic_rpc::{server::RpcChannel, RpcClient, Service, ServiceConnection, ServiceEndpoint};
+    use quic_rpc::{server::RpcChannel, RpcClient, Service};
     use serde::{Deserialize, Serialize};
 
     use super::{calc, clock};
@@ -233,38 +230,38 @@ mod iroh {
     }
 
     impl Handler {
-        pub async fn handle_rpc_request<S, E>(
+        pub async fn handle_rpc_request(
             self,
             req: Request,
-            chan: RpcChannel<IrohService, E, S>,
-        ) -> Result<()>
-        where
-            S: Service,
-            E: ServiceEndpoint<S>,
-        {
+            chan: RpcChannel<IrohService>,
+        ) -> Result<()> {
             match req {
-                Request::Calc(req) => self.calc.handle_rpc_request(req, chan.map()).await?,
-                Request::Clock(req) => self.clock.handle_rpc_request(req, chan.map()).await?,
+                Request::Calc(req) => {
+                    self.calc
+                        .handle_rpc_request(req, chan.map().boxed())
+                        .await?
+                }
+                Request::Clock(req) => {
+                    self.clock
+                        .handle_rpc_request(req, chan.map().boxed())
+                        .await?
+                }
             }
             Ok(())
         }
     }
 
     #[derive(Debug, Clone)]
-    pub struct Client<S, C> {
-        pub calc: calc::Client<S, C>,
-        pub clock: clock::Client<S, C>,
+    pub struct Client {
+        pub calc: calc::Client,
+        pub clock: clock::Client,
     }
 
-    impl<S, C> Client<S, C>
-    where
-        S: Service,
-        C: ServiceConnection<S>,
-    {
-        pub fn new(client: RpcClient<IrohService, C, S>) -> Self {
+    impl Client {
+        pub fn new(client: RpcClient<IrohService>) -> Self {
             Self {
-                calc: calc::Client::new(client.clone().map()),
-                clock: clock::Client::new(client.clone().map()),
+                calc: calc::Client::new(client.clone().map().boxed()),
+                clock: clock::Client::new(client.clone().map().boxed()),
             }
         }
     }
@@ -280,7 +277,7 @@ mod calc {
     use quic_rpc::{
         message::{ClientStreaming, ClientStreamingMsg, Msg, RpcMsg},
         server::RpcChannel,
-        RpcClient, Service, ServiceConnection, ServiceEndpoint,
+        RpcClient, Service,
     };
     use serde::{Deserialize, Serialize};
     use std::fmt::Debug;
@@ -337,15 +334,11 @@ mod calc {
     pub struct Handler;
 
     impl Handler {
-        pub async fn handle_rpc_request<S, E>(
+        pub async fn handle_rpc_request(
             self,
             req: Request,
-            chan: RpcChannel<CalcService, E, S>,
-        ) -> Result<()>
-        where
-            S: Service,
-            E: ServiceEndpoint<S>,
-        {
+            chan: RpcChannel<CalcService>,
+        ) -> Result<()> {
             match req {
                 Request::Add(req) => chan.rpc(req, self, Self::on_add).await?,
                 Request::Sum(req) => chan.client_streaming(req, self, Self::on_sum).await?,
@@ -373,16 +366,12 @@ mod calc {
     }
 
     #[derive(Debug, Clone)]
-    pub struct Client<S, C> {
-        client: RpcClient<CalcService, C, S>,
+    pub struct Client {
+        client: RpcClient<CalcService>,
     }
 
-    impl<S, C> Client<S, C>
-    where
-        C: ServiceConnection<S>,
-        S: Service,
-    {
-        pub fn new(client: RpcClient<CalcService, C, S>) -> Self {
+    impl Client {
+        pub fn new(client: RpcClient<CalcService>) -> Self {
             Self { client }
         }
         pub async fn add(&self, a: i64, b: i64) -> anyhow::Result<i64> {
@@ -403,7 +392,7 @@ mod clock {
     use quic_rpc::{
         message::{Msg, ServerStreaming, ServerStreamingMsg},
         server::RpcChannel,
-        RpcClient, Service, ServiceConnection, ServiceEndpoint,
+        RpcClient, Service,
     };
     use serde::{Deserialize, Serialize};
     use std::{
@@ -475,15 +464,11 @@ mod clock {
             h
         }
 
-        pub async fn handle_rpc_request<S, E>(
+        pub async fn handle_rpc_request(
             self,
             req: Request,
-            chan: RpcChannel<ClockService, E, S>,
-        ) -> Result<()>
-        where
-            S: Service,
-            E: ServiceEndpoint<S>,
-        {
+            chan: RpcChannel<ClockService>,
+        ) -> Result<()> {
             match req {
                 Request::Tick(req) => chan.server_streaming(req, self, Self::on_tick).await?,
             }
@@ -517,16 +502,12 @@ mod clock {
     }
 
     #[derive(Debug, Clone)]
-    pub struct Client<S, C> {
-        client: RpcClient<ClockService, C, S>,
+    pub struct Client {
+        client: RpcClient<ClockService>,
     }
 
-    impl<S, C> Client<S, C>
-    where
-        C: ServiceConnection<S>,
-        S: Service,
-    {
-        pub fn new(client: RpcClient<ClockService, C, S>) -> Self {
+    impl Client {
+        pub fn new(client: RpcClient<ClockService>) -> Self {
             Self { client }
         }
         pub async fn tick(&self) -> Result<BoxStream<Result<usize>>> {
