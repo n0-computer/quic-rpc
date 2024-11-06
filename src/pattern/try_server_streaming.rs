@@ -8,15 +8,14 @@ use crate::{
     client::{BoxStreamSync, DeferDrop},
     message::{InteractionPattern, Msg},
     server::{race2, RpcChannel, RpcServerError},
-    transport::ConnectionErrors,
-    RpcClient, Service, ServiceConnection, ServiceEndpoint,
+    transport::{self, ConnectionErrors, StreamTypes},
+    Connector, RpcClient, Service,
 };
 
 use std::{
     error,
     fmt::{self, Debug},
     result,
-    sync::Arc,
 };
 
 /// A guard message to indicate that the stream has been created.
@@ -54,7 +53,7 @@ where
 /// care about the exact nature of the error, but if you want to handle
 /// application errors differently, you can match on this enum.
 #[derive(Debug)]
-pub enum Error<C: ConnectionErrors, E: Debug> {
+pub enum Error<C: transport::Connector, E: Debug> {
     /// Unable to open a substream at all
     Open(C::OpenError),
     /// Unable to send the request to the server
@@ -69,13 +68,13 @@ pub enum Error<C: ConnectionErrors, E: Debug> {
     Application(E),
 }
 
-impl<S: ConnectionErrors, E: Debug> fmt::Display for Error<S, E> {
+impl<S: transport::Connector, E: Debug> fmt::Display for Error<S, E> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Debug::fmt(self, f)
     }
 }
 
-impl<S: ConnectionErrors, E: Debug> error::Error for Error<S, E> {}
+impl<S: transport::Connector, E: Debug> error::Error for Error<S, E> {}
 
 /// Client error when handling responses from a server streaming request.
 ///
@@ -98,10 +97,9 @@ impl<S: ConnectionErrors, E: Debug> fmt::Display for ItemError<S, E> {
 
 impl<S: ConnectionErrors, E: Debug> error::Error for ItemError<S, E> {}
 
-impl<SC, C, S> RpcChannel<S, C, SC>
+impl<S, C> RpcChannel<S, C>
 where
-    SC: Service,
-    C: ServiceEndpoint<SC>,
+    C: StreamTypes<In = S::Req, Out = S::Res>,
     S: Service,
 {
     /// handle the message M using the given function on the target object
@@ -138,7 +136,7 @@ where
             let responses = match f(target, req).await {
                 Ok(responses) => {
                     // turn into a S::Res so we can send it
-                    let response = self.map.res_into_outer(Ok(StreamCreated).into());
+                    let response = Ok(StreamCreated).into();
                     // send it and return the error if any
                     send.send(response)
                         .await
@@ -147,7 +145,7 @@ where
                 }
                 Err(cause) => {
                     // turn into a S::Res so we can send it
-                    let response = self.map.res_into_outer(Err(cause).into());
+                    let response = Err(cause).into();
                     // send it and return the error if any
                     send.send(response)
                         .await
@@ -158,7 +156,7 @@ where
             tokio::pin!(responses);
             while let Some(response) = responses.next().await {
                 // turn into a S::Res so we can send it
-                let response = self.map.res_into_outer(response.into());
+                let response = response.into();
                 // send it and return the error if any
                 send.send(response)
                     .await
@@ -170,10 +168,9 @@ where
     }
 }
 
-impl<S, C, SC> RpcClient<S, C, SC>
+impl<S, C> RpcClient<S, C>
 where
-    SC: Service,
-    C: ServiceConnection<SC>,
+    C: Connector<S>,
     S: Service,
 {
     /// Bidi call to the server, request opens a stream, response is a stream
@@ -189,23 +186,18 @@ where
         Result<M::Item, M::ItemError>: Into<S::Res> + TryFrom<S::Res>,
         Result<StreamCreated, M::CreateError>: Into<S::Res> + TryFrom<S::Res>,
     {
-        let msg = self.map.req_into_outer(msg.into());
+        let msg = msg.into();
         let (mut send, mut recv) = self.source.open().await.map_err(Error::Open)?;
         send.send(msg).map_err(Error::Send).await?;
-        let map = Arc::clone(&self.map);
         let Some(initial) = recv.next().await else {
             return Err(Error::EarlyClose);
         };
         let initial = initial.map_err(Error::Recv)?; // initial response
-        let initial = map
-            .res_try_into_inner(initial)
-            .map_err(|_| Error::Downcast)?;
         let initial = <std::result::Result<StreamCreated, M::CreateError>>::try_from(initial)
             .map_err(|_| Error::Downcast)?;
         let _ = initial.map_err(Error::Application)?;
         let recv = recv.map(move |x| {
             let x = x.map_err(ItemError::Recv)?;
-            let x = map.res_try_into_inner(x).map_err(|_| ItemError::Downcast)?;
             let x = <std::result::Result<M::Item, M::ItemError>>::try_from(x)
                 .map_err(|_| ItemError::Downcast)?;
             let x = x.map_err(ItemError::Application)?;

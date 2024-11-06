@@ -714,6 +714,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "nested_enum_utils"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8f256ef99e7ac37428ef98c89bef9d84b590172de4bbfbe81b68a4cd3abadb32"
+dependencies = [
+ "proc-macro-crate",
+ "proc-macro2",
+ "quote",
+ "syn 1.0.109",
+]
+
+[[package]]
 name = "nu-ansi-term"
 version = "0.46.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -871,6 +883,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "proc-macro-crate"
+version = "3.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8ecf48c7ca261d60b74ab1a7b20da18bede46776b2e55535cb958eb595c5fa7b"
+dependencies = [
+ "toml_edit",
+]
+
+[[package]]
 name = "proc-macro2"
 version = "1.0.86"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -881,7 +902,7 @@ dependencies = [
 
 [[package]]
 name = "quic-rpc"
-version = "0.14.0"
+version = "0.15.0"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -898,12 +919,14 @@ dependencies = [
  "hex",
  "hyper",
  "iroh-quinn",
+ "nested_enum_utils",
  "pin-project",
  "proc-macro2",
  "rcgen",
  "serde",
  "slab",
  "tempfile",
+ "testresult",
  "thousands",
  "tokio",
  "tokio-serde",
@@ -914,7 +937,7 @@ dependencies = [
 
 [[package]]
 name = "quic-rpc-derive"
-version = "0.14.0"
+version = "0.15.0"
 dependencies = [
  "derive_more",
  "proc-macro2",
@@ -1381,6 +1404,12 @@ checksum = "06794f8f6c5c898b3275aebefa6b8a1cb24cd2c6c79397ab15774837a0bc5755"
 dependencies = [
  "winapi-util",
 ]
+
+[[package]]
+name = "testresult"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "614b328ff036a4ef882c61570f72918f7e9c5bee1da33f8e7f91e01daee7e56c"
 
 [[package]]
 name = "thiserror"

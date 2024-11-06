@@ -15,7 +15,8 @@ use quic_rpc::{
         ServerStreaming, ServerStreamingMsg,
     },
     server::{RpcChannel, RpcServerError},
-    RpcClient, RpcServer, Service, ServiceConnection, ServiceEndpoint,
+    transport::StreamTypes,
+    Connector, Listener, RpcClient, RpcServer, Service,
 };
 use serde::{Deserialize, Serialize};
 use std::{
@@ -160,7 +161,7 @@ impl ComputeService {
         }
     }
 
-    pub async fn server<C: ServiceEndpoint<ComputeService>>(
+    pub async fn server<C: Listener<ComputeService>>(
         server: RpcServer<ComputeService, C>,
     ) -> result::Result<(), RpcServerError<C>> {
         let s = server;
@@ -172,14 +173,13 @@ impl ComputeService {
         }
     }
 
-    pub async fn handle_rpc_request<S, E>(
+    pub async fn handle_rpc_request<E>(
         service: ComputeService,
         req: ComputeRequest,
-        chan: RpcChannel<ComputeService, E, S>,
+        chan: RpcChannel<ComputeService, E>,
     ) -> Result<(), RpcServerError<E>>
     where
-        S: Service,
-        E: ServiceEndpoint<S>,
+        E: StreamTypes<In = ComputeRequest, Out = ComputeResponse>,
     {
         use ComputeRequest::*;
         #[rustfmt::skip]
@@ -195,7 +195,7 @@ impl ComputeService {
     }
 
     /// Runs the service until `count` requests have been received.
-    pub async fn server_bounded<C: ServiceEndpoint<ComputeService>>(
+    pub async fn server_bounded<C: Listener<ComputeService>>(
         server: RpcServer<ComputeService, C>,
         count: usize,
     ) -> result::Result<RpcServer<ComputeService, C>, RpcServerError<C>> {
@@ -226,7 +226,7 @@ impl ComputeService {
         Ok(s)
     }
 
-    pub async fn server_par<C: ServiceEndpoint<ComputeService>>(
+    pub async fn server_par<C: Listener<ComputeService>>(
         server: RpcServer<ComputeService, C>,
         parallelism: usize,
     ) -> result::Result<(), RpcServerError<C>> {
@@ -267,7 +267,7 @@ impl ComputeService {
     }
 }
 
-pub async fn smoke_test<C: ServiceConnection<ComputeService>>(client: C) -> anyhow::Result<()> {
+pub async fn smoke_test<C: Connector<ComputeService>>(client: C) -> anyhow::Result<()> {
     let client = RpcClient::<ComputeService, C>::new(client);
     // a rpc call
     tracing::debug!("calling rpc S(1234)");
@@ -316,11 +316,10 @@ fn clear_line() {
     print!("\r{}\r", " ".repeat(80));
 }
 
-pub async fn bench<S, C>(client: RpcClient<ComputeService, C, S>, n: u64) -> anyhow::Result<()>
+pub async fn bench<C>(client: RpcClient<ComputeService, C>, n: u64) -> anyhow::Result<()>
 where
     C::SendError: std::error::Error,
-    S: Service,
-    C: ServiceConnection<S>,
+    C: Connector<ComputeService>,
 {
     // individual RPCs
     {

@@ -1,6 +1,6 @@
 [package]
 name = "quic-rpc-derive"
-version = "0.14.0"
+version = "0.15.0"
 edition = "2021"
 authors = ["Rüdiger Klaehn <rklaehn@protonmail.com>"]
 keywords = ["api", "protocol", "network", "rpc", "macro"]
@@ -16,7 +16,7 @@ proc-macro = true
 syn = { version = "1.0", features = ["full"] }
 quote = "1.0"
 proc-macro2 = "1.0"
-quic-rpc = { version = "0.14", path = ".." }
+quic-rpc = { version = "0.15", path = ".." }
 
 [dev-dependencies]
 derive_more = "1.0.0-beta.6"

@@ -6,8 +6,8 @@ use futures_util::{FutureExt, SinkExt};
 use crate::{
     message::{InteractionPattern, Msg},
     server::{race2, RpcChannel, RpcServerError},
-    transport::ConnectionErrors,
-    RpcClient, Service, ServiceConnection, ServiceEndpoint,
+    transport::{ConnectionErrors, StreamTypes},
+    Connector, RpcClient, Service,
 };
 
 use std::{
@@ -62,18 +62,17 @@ impl<C: ConnectionErrors> fmt::Display for Error<C> {
 
 impl<C: ConnectionErrors> error::Error for Error<C> {}
 
-impl<S, C, SC> RpcClient<S, C, SC>
+impl<S, C> RpcClient<S, C>
 where
     S: Service,
-    SC: Service,
-    C: ServiceConnection<SC>,
+    C: Connector<S>,
 {
     /// RPC call to the server, single request, single response
     pub async fn rpc<M>(&self, msg: M) -> result::Result<M::Response, Error<C>>
     where
         M: RpcMsg<S>,
     {
-        let msg = self.map.req_into_outer(msg.into());
+        let msg = msg.into();
         let (mut send, mut recv) = self.source.open().await.map_err(Error::Open)?;
         send.send(msg).await.map_err(Error::<C>::Send)?;
         let res = recv
@@ -83,19 +82,14 @@ where
             .map_err(Error::<C>::RecvError)?;
         // keep send alive until we have the answer
         drop(send);
-        let res = self
-            .map
-            .res_try_into_inner(res)
-            .map_err(|_| Error::DowncastError)?;
         M::Response::try_from(res).map_err(|_| Error::DowncastError)
     }
 }
 
-impl<S, C, SC> RpcChannel<S, C, SC>
+impl<S, C> RpcChannel<S, C>
 where
     S: Service,
-    SC: Service,
-    C: ServiceEndpoint<SC>,
+    C: StreamTypes<In = S::Req, Out = S::Res>,
 {
     /// handle the message of type `M` using the given function on the target object
     ///
@@ -124,7 +118,7 @@ where
             // get the response
             let res = f(target, req).await;
             // turn into a S::Res so we can send it
-            let res = self.map.res_into_outer(res.into());
+            let res = res.into();
             // send it and return the error if any
             send.send(res).await.map_err(RpcServerError::SendError)
         })

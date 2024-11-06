@@ -114,7 +114,7 @@ pub fn make_endpoints(port: u16) -> anyhow::Result<Endpoints> {
 
 fn run_server(server: quinn::Endpoint) -> JoinHandle<anyhow::Result<()>> {
     tokio::task::spawn(async move {
-        let connection = transport::quinn::QuinnServerEndpoint::new(server)?;
+        let connection = transport::quinn::QuinnListener::new(server)?;
         let server = RpcServer::new(connection);
         ComputeService::server(server).await?;
         anyhow::Ok(())
@@ -133,7 +133,7 @@ async fn quinn_channel_bench() -> anyhow::Result<()> {
     tracing::debug!("Starting server");
     let server_handle = run_server(server);
     tracing::debug!("Starting client");
-    let client = transport::quinn::QuinnConnection::new(client, server_addr, "localhost".into());
+    let client = transport::quinn::QuinnConnector::new(client, server_addr, "localhost".into());
     let client = RpcClient::new(client);
     tracing::debug!("Starting benchmark");
     bench(client, 50000).await?;
@@ -151,7 +151,7 @@ async fn quinn_channel_smoke() -> anyhow::Result<()> {
     } = make_endpoints(12346)?;
     let server_handle = run_server(server);
     let client_connection =
-        transport::quinn::QuinnConnection::new(client, server_addr, "localhost".into());
+        transport::quinn::QuinnConnector::new(client, server_addr, "localhost".into());
     smoke_test(client_connection).await?;
     server_handle.abort();
     Ok(())
@@ -172,7 +172,7 @@ async fn server_away_and_back() -> anyhow::Result<()> {
     // create the RPC client
     let client = make_client_endpoint("0.0.0.0:0".parse()?, &[&server_cert])?;
     let client_connection =
-        transport::quinn::QuinnConnection::new(client, server_addr, "localhost".into());
+        transport::quinn::QuinnConnector::new(client, server_addr, "localhost".into());
     let client = RpcClient::new(client_connection);
 
     // send a request. No server available so it should fail
@@ -180,7 +180,7 @@ async fn server_away_and_back() -> anyhow::Result<()> {
 
     // create the RPC Server
     let server = Endpoint::server(server_config.clone(), server_addr)?;
-    let connection = transport::quinn::QuinnServerEndpoint::new(server)?;
+    let connection = transport::quinn::QuinnListener::new(server)?;
     let server = RpcServer::new(connection);
     let server_handle = tokio::task::spawn(ComputeService::server_bounded(server, 1));
 
@@ -195,7 +195,7 @@ async fn server_away_and_back() -> anyhow::Result<()> {
 
     // make the server run again
     let server = Endpoint::server(server_config, server_addr)?;
-    let connection = transport::quinn::QuinnServerEndpoint::new(server)?;
+    let connection = transport::quinn::QuinnListener::new(server)?;
     let server = RpcServer::new(connection);
     let server_handle = tokio::task::spawn(ComputeService::server_bounded(server, 5));
 

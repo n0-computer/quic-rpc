@@ -1,8 +1,8 @@
 use anyhow::Context;
-use quic_rpc::{server::RpcServerError, transport::Connection, RpcMessage};
+use quic_rpc::{server::RpcServerError, transport::Connector};
 
 #[allow(unused)]
-pub async fn check_termination_anyhow<In: RpcMessage, Out: RpcMessage, C: Connection<In, Out>>(
+pub async fn check_termination_anyhow<C: Connector>(
     server_handle: tokio::task::JoinHandle<anyhow::Result<()>>,
 ) -> anyhow::Result<()> {
     // dropping the client will cause the server to terminate
