@@ -398,6 +398,50 @@ impl<In: RpcMessage, Out: RpcMessage> BoxableListener<In, Out>
     }
 }
 
+#[cfg(feature = "iroh-net-transport")]
+impl<In: RpcMessage, Out: RpcMessage> BoxableConnector<In, Out>
+    for super::iroh_net::IrohNetConnector<In, Out>
+{
+    fn clone_box(&self) -> Box<dyn BoxableConnector<In, Out>> {
+        Box::new(self.clone())
+    }
+
+    fn open_boxed(&self) -> OpenFuture<In, Out> {
+        let f = Box::pin(async move {
+            let (send, recv) = super::Connector::open(self).await?;
+            // map the error types to anyhow
+            let send = send.sink_map_err(anyhow::Error::from);
+            let recv = recv.map_err(anyhow::Error::from);
+            // return the boxed streams
+            anyhow::Ok((SendSink::boxed(send), RecvStream::boxed(recv)))
+        });
+        OpenFuture::boxed(f)
+    }
+}
+
+#[cfg(feature = "iroh-net-transport")]
+impl<In: RpcMessage, Out: RpcMessage> BoxableListener<In, Out>
+    for super::iroh_net::IrohNetListener<In, Out>
+{
+    fn clone_box(&self) -> Box<dyn BoxableListener<In, Out>> {
+        Box::new(self.clone())
+    }
+
+    fn accept_bi_boxed(&self) -> AcceptFuture<In, Out> {
+        let f = async move {
+            let (send, recv) = super::Listener::accept(self).await?;
+            let send = send.sink_map_err(anyhow::Error::from);
+            let recv = recv.map_err(anyhow::Error::from);
+            anyhow::Ok((SendSink::boxed(send), RecvStream::boxed(recv)))
+        };
+        AcceptFuture::boxed(f)
+    }
+
+    fn local_addr(&self) -> &[super::LocalAddr] {
+        super::Listener::local_addr(self)
+    }
+}
+
 #[cfg(feature = "flume-transport")]
 impl<In: RpcMessage, Out: RpcMessage> BoxableConnector<In, Out>
     for super::flume::FlumeConnector<In, Out>
