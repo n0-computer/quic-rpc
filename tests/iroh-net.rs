@@ -46,7 +46,7 @@ impl Endpoints {
 
 fn run_server(server: iroh_net::Endpoint) -> JoinHandle<anyhow::Result<()>> {
     tokio::task::spawn(async move {
-        let connection = transport::iroh_net::IrohNetServerEndpoint::new(server)?;
+        let connection = transport::iroh_net::IrohNetListener::new(server)?;
         let server = RpcServer::new(connection);
         ComputeService::server(server).await?;
         anyhow::Ok(())
@@ -67,7 +67,7 @@ async fn iroh_net_channel_bench() -> anyhow::Result<()> {
     let server_handle = run_server(server);
     tracing::debug!("Starting client");
 
-    let client = RpcClient::new(transport::iroh_net::IrohNetConnection::new(
+    let client = RpcClient::new(transport::iroh_net::IrohNetConnector::new(
         client,
         server_node_addr,
         ALPN.into(),
@@ -88,7 +88,7 @@ async fn iroh_net_channel_smoke() -> anyhow::Result<()> {
     } = Endpoints::new().await?;
     let server_handle = run_server(server);
     let client_connection =
-        transport::iroh_net::IrohNetConnection::new(client, server_node_addr, ALPN.into());
+        transport::iroh_net::IrohNetConnector::new(client, server_node_addr, ALPN.into());
     smoke_test(client_connection).await?;
     server_handle.abort();
     Ok(())
@@ -110,21 +110,21 @@ async fn server_away_and_back() -> anyhow::Result<()> {
 
     // create the RPC client
     let client_connection =
-        transport::iroh_net::IrohNetConnection::<ComputeResponse, ComputeRequest>::new(
+        transport::iroh_net::IrohNetConnector::<ComputeResponse, ComputeRequest>::new(
             client,
             server_node_id,
             ALPN.into(),
         );
     let client = RpcClient::<
         ComputeService,
-        transport::iroh_net::IrohNetConnection<ComputeResponse, ComputeRequest>,
+        transport::iroh_net::IrohNetConnector<ComputeResponse, ComputeRequest>,
     >::new(client_connection);
 
     // send a request. No server available so it should fail
     client.rpc(Sqr(4)).await.unwrap_err();
 
     // create the RPC Server
-    let connection = transport::iroh_net::IrohNetServerEndpoint::new(
+    let connection = transport::iroh_net::IrohNetListener::new(
         make_endpoint(server_secret_key.clone(), ALPN).await?,
     )?;
     let server = RpcServer::new(connection);
@@ -140,9 +140,8 @@ async fn server_away_and_back() -> anyhow::Result<()> {
     tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
 
     // make the server run again
-    let connection = transport::iroh_net::IrohNetServerEndpoint::new(
-        make_endpoint(server_secret_key, ALPN).await?,
-    )?;
+    let connection =
+        transport::iroh_net::IrohNetListener::new(make_endpoint(server_secret_key, ALPN).await?)?;
     let server = RpcServer::new(connection);
     let server_handle = tokio::task::spawn(ComputeService::server_bounded(server, 5));
 

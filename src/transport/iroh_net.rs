@@ -1,7 +1,7 @@
 //! iroh-net transport implementation based on [iroh-net](https://crates.io/crates/iroh-net)
 
 use crate::{
-    transport::{Connection, ConnectionErrors, LocalAddr, ServerEndpoint},
+    transport::{ConnectionErrors, Connector, Listener, LocalAddr},
     RpcMessage,
 };
 
@@ -29,35 +29,32 @@ use tracing::{debug_span, Instrument};
 
 use super::{
     util::{FramedBincodeRead, FramedBincodeWrite},
-    ConnectionCommon,
+    StreamTypes,
 };
 
 const MAX_FRAME_LENGTH: usize = 1024 * 1024 * 16;
 
 #[derive(Debug)]
-struct ServerEndpointInner {
+struct ListenerInner {
     endpoint: Option<iroh_net::Endpoint>,
     task: Option<tokio::task::JoinHandle<()>>,
     local_addr: Vec<LocalAddr>,
     receiver: flume::Receiver<SocketInner>,
 }
 
-impl Drop for ServerEndpointInner {
+impl Drop for ListenerInner {
     fn drop(&mut self) {
         tracing::debug!("Dropping server endpoint");
         if let Some(endpoint) = self.endpoint.take() {
             if let Ok(handle) = tokio::runtime::Handle::try_current() {
                 // spawn a task to wait for the endpoint to notify peers that it is closing
-                let span = debug_span!("closing server endpoint");
+                let span = debug_span!("closing listener");
                 handle.spawn(
                     async move {
                         // iroh-net endpoint's close is async, and internally it waits the
                         // underlying quinn endpoint to be idle.
-                        if let Err(e) = endpoint
-                            .close(0u32.into(), b"server endpoint dropped")
-                            .await
-                        {
-                            tracing::warn!(?e, "error closing server endpoint");
+                        if let Err(e) = endpoint.close(0u32.into(), b"Listener dropped").await {
+                            tracing::warn!(?e, "error closing listener");
                         }
                     }
                     .instrument(span),
@@ -82,12 +79,12 @@ pub enum AccessControl {
 
 /// A server endpoint using a quinn connection
 #[derive(Debug)]
-pub struct IrohNetServerEndpoint<In: RpcMessage, Out: RpcMessage> {
-    inner: Arc<ServerEndpointInner>,
-    _phantom: PhantomData<(In, Out)>,
+pub struct IrohNetListener<In: RpcMessage, Out: RpcMessage> {
+    inner: Arc<ListenerInner>,
+    _p: PhantomData<(In, Out)>,
 }
 
-impl<In: RpcMessage, Out: RpcMessage> IrohNetServerEndpoint<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> IrohNetListener<In, Out> {
     /// handles RPC requests from a connection
     ///
     /// to cleanly shut down the handler, drop the receiver side of the sender.
@@ -97,11 +94,11 @@ impl<In: RpcMessage, Out: RpcMessage> IrohNetServerEndpoint<In, Out> {
             let bidi_stream = match connection.accept_bi().await {
                 Ok(bidi_stream) => bidi_stream,
                 Err(quinn::ConnectionError::ApplicationClosed(e)) => {
-                    tracing::debug!("Peer closed the connection {:?}", e);
+                    tracing::debug!(?e, "Peer closed the connection");
                     break;
                 }
                 Err(e) => {
-                    tracing::debug!("Error accepting stream: {}", e);
+                    tracing::debug!(?e, "Error accepting stream");
                     break;
                 }
             };
@@ -129,7 +126,7 @@ impl<In: RpcMessage, Out: RpcMessage> IrohNetServerEndpoint<In, Out> {
             let connection = match connecting.await {
                 Ok(connection) => connection,
                 Err(e) => {
-                    tracing::warn!("Error accepting connection: {}", e);
+                    tracing::warn!(?e, "Error accepting connection");
                     continue;
                 }
             };
@@ -204,7 +201,7 @@ impl<In: RpcMessage, Out: RpcMessage> IrohNetServerEndpoint<In, Out> {
         ));
 
         Ok(Self {
-            inner: Arc::new(ServerEndpointInner {
+            inner: Arc::new(ListenerInner {
                 endpoint: Some(endpoint),
                 task: Some(task),
                 local_addr: once(LocalAddr::Socket(ipv4_socket_addr))
@@ -212,7 +209,7 @@ impl<In: RpcMessage, Out: RpcMessage> IrohNetServerEndpoint<In, Out> {
                     .collect(),
                 receiver,
             }),
-            _phantom: PhantomData,
+            _p: PhantomData,
         })
     }
 
@@ -232,13 +229,13 @@ impl<In: RpcMessage, Out: RpcMessage> IrohNetServerEndpoint<In, Out> {
             }
         });
         Self {
-            inner: Arc::new(ServerEndpointInner {
+            inner: Arc::new(ListenerInner {
                 endpoint: None,
                 task: Some(task),
                 local_addr: vec![LocalAddr::Socket(local_addr)],
                 receiver,
             }),
-            _phantom: PhantomData,
+            _p: PhantomData,
         }
     }
 
@@ -251,40 +248,41 @@ impl<In: RpcMessage, Out: RpcMessage> IrohNetServerEndpoint<In, Out> {
         local_addr: SocketAddr,
     ) -> Self {
         Self {
-            inner: Arc::new(ServerEndpointInner {
+            inner: Arc::new(ListenerInner {
                 endpoint: None,
                 task: None,
                 local_addr: vec![LocalAddr::Socket(local_addr)],
                 receiver,
             }),
-            _phantom: PhantomData,
+            _p: PhantomData,
         }
     }
 }
 
-impl<In: RpcMessage, Out: RpcMessage> Clone for IrohNetServerEndpoint<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> Clone for IrohNetListener<In, Out> {
     fn clone(&self) -> Self {
         Self {
             inner: self.inner.clone(),
-            _phantom: PhantomData,
+            _p: PhantomData,
         }
     }
 }
 
-impl<In: RpcMessage, Out: RpcMessage> ConnectionErrors for IrohNetServerEndpoint<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> ConnectionErrors for IrohNetListener<In, Out> {
     type SendError = io::Error;
-
     type RecvError = io::Error;
-
     type OpenError = quinn::ConnectionError;
+    type AcceptError = quinn::ConnectionError;
 }
 
-impl<In: RpcMessage, Out: RpcMessage> ConnectionCommon<In, Out> for IrohNetServerEndpoint<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> StreamTypes for IrohNetListener<In, Out> {
+    type In = In;
+    type Out = Out;
     type SendSink = SendSink<Out>;
     type RecvStream = RecvStream<In>;
 }
 
-impl<In: RpcMessage, Out: RpcMessage> ServerEndpoint<In, Out> for IrohNetServerEndpoint<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> Listener for IrohNetListener<In, Out> {
     async fn accept(&self) -> Result<(Self::SendSink, Self::RecvStream), AcceptBiError> {
         let (send, recv) = self
             .inner
@@ -292,6 +290,7 @@ impl<In: RpcMessage, Out: RpcMessage> ServerEndpoint<In, Out> for IrohNetServerE
             .recv_async()
             .await
             .map_err(|_| quinn::ConnectionError::LocallyClosed)?;
+
         Ok((SendSink::new(send), RecvStream::new(recv)))
     }
 
@@ -344,12 +343,12 @@ impl Drop for ClientConnectionInner {
 }
 
 /// A connection using an iroh-net connection
-pub struct IrohNetConnection<In: RpcMessage, Out: RpcMessage> {
+pub struct IrohNetConnector<In: RpcMessage, Out: RpcMessage> {
     inner: Arc<ClientConnectionInner>,
-    _phantom: PhantomData<(In, Out)>,
+    _p: PhantomData<(In, Out)>,
 }
 
-impl<In: RpcMessage, Out: RpcMessage> IrohNetConnection<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> IrohNetConnector<In, Out> {
     async fn single_connection_handler(
         connection: quinn::Connection,
         requests_rx: flume::Receiver<oneshot::Sender<anyhow::Result<SocketInner>>>,
@@ -476,7 +475,7 @@ impl<In: RpcMessage, Out: RpcMessage> IrohNetConnection<In, Out> {
                             }
                         }
                         Err(e) => {
-                            tracing::warn!("error opening bidi substream: {}", e);
+                            tracing::warn!(?e, "error opening bidi substream");
                             tracing::warn!("recreating connection");
                             // NOTE: the connection might be stale, so we recreate the
                             // connection and set the request as pending instead of
@@ -510,7 +509,7 @@ impl<In: RpcMessage, Out: RpcMessage> IrohNetConnection<In, Out> {
                 task: Some(task),
                 connections_tx: sender,
             }),
-            _phantom: PhantomData,
+            _p: PhantomData,
         }
     }
 
@@ -533,15 +532,13 @@ impl<In: RpcMessage, Out: RpcMessage> IrohNetConnection<In, Out> {
                 task: Some(task),
                 connections_tx: sender,
             }),
-            _phantom: PhantomData,
+            _p: PhantomData,
         }
     }
 }
 
-#[pin_project]
 struct ReconnectHandler {
     endpoint: iroh_net::Endpoint,
-    #[pin]
     state: ConnectionState,
     node_addr: NodeAddr,
     alpn: Vec<u8>,
@@ -672,7 +669,7 @@ impl<'a, T> Stream for Receiver<'a, T> {
     }
 }
 
-impl<In: RpcMessage, Out: RpcMessage> fmt::Debug for IrohNetConnection<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> fmt::Debug for IrohNetConnector<In, Out> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ClientChannel")
             .field("inner", &self.inner)
@@ -680,29 +677,30 @@ impl<In: RpcMessage, Out: RpcMessage> fmt::Debug for IrohNetConnection<In, Out> 
     }
 }
 
-impl<In: RpcMessage, Out: RpcMessage> Clone for IrohNetConnection<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> Clone for IrohNetConnector<In, Out> {
     fn clone(&self) -> Self {
         Self {
             inner: self.inner.clone(),
-            _phantom: PhantomData,
+            _p: PhantomData,
         }
     }
 }
 
-impl<In: RpcMessage, Out: RpcMessage> ConnectionErrors for IrohNetConnection<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> ConnectionErrors for IrohNetConnector<In, Out> {
     type SendError = io::Error;
-
     type RecvError = io::Error;
-
     type OpenError = anyhow::Error;
+    type AcceptError = anyhow::Error;
 }
 
-impl<In: RpcMessage, Out: RpcMessage> ConnectionCommon<In, Out> for IrohNetConnection<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> StreamTypes for IrohNetConnector<In, Out> {
+    type In = In;
+    type Out = Out;
     type SendSink = SendSink<Out>;
     type RecvStream = RecvStream<In>;
 }
 
-impl<In: RpcMessage, Out: RpcMessage> Connection<In, Out> for IrohNetConnection<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> Connector for IrohNetConnector<In, Out> {
     async fn open(&self) -> Result<(Self::SendSink, Self::RecvStream), Self::OpenError> {
         let (sender, receiver) = oneshot::channel();
         self.inner

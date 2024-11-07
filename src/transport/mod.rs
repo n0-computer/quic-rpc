@@ -34,10 +34,10 @@ pub mod combined;
 pub mod flume;
 #[cfg(feature = "hyper-transport")]
 pub mod hyper;
-pub mod mapped;
-pub mod misc;
 #[cfg(feature = "iroh-net-transport")]
 pub mod iroh_net;
+pub mod mapped;
+pub mod misc;
 #[cfg(feature = "quinn-transport")]
 pub mod quinn;
 
