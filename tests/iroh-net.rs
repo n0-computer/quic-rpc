@@ -103,7 +103,7 @@ async fn server_away_and_back() -> anyhow::Result<()> {
     tracing_subscriber::fmt::try_init().ok();
     tracing::info!("Creating endpoints");
 
-    let client = make_endpoint(SecretKey::generate(), ALPN).await?;
+    let client_endpoint = make_endpoint(SecretKey::generate(), ALPN).await?;
 
     let server_secret_key = SecretKey::generate();
     let server_node_id = server_secret_key.public();
@@ -111,7 +111,7 @@ async fn server_away_and_back() -> anyhow::Result<()> {
     // create the RPC client
     let client_connection =
         transport::iroh_net::IrohNetConnector::<ComputeResponse, ComputeRequest>::new(
-            client,
+            client_endpoint.clone(),
             server_node_id,
             ALPN.into(),
         );
@@ -123,12 +123,16 @@ async fn server_away_and_back() -> anyhow::Result<()> {
     // send a request. No server available so it should fail
     client.rpc(Sqr(4)).await.unwrap_err();
 
+    let server_endpoint = make_endpoint(server_secret_key.clone(), ALPN).await?;
+
     // create the RPC Server
-    let connection = transport::iroh_net::IrohNetListener::new(
-        make_endpoint(server_secret_key.clone(), ALPN).await?,
-    )?;
+    let connection = transport::iroh_net::IrohNetListener::new(server_endpoint.clone())?;
     let server = RpcServer::new(connection);
     let server_handle = tokio::task::spawn(ComputeService::server_bounded(server, 1));
+
+    // Passing the server node address directly to client endpoint to not depend
+    // on a discovery service
+    client_endpoint.add_node_addr(server_endpoint.node_addr().await?)?;
 
     // send the first request and wait for the response to ensure everything works as expected
     let SqrResponse(response) = client.rpc(Sqr(4)).await?;

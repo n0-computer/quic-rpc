@@ -18,13 +18,14 @@ use std::{
     task::{Context, Poll},
 };
 
-use futures_lite::{Stream, StreamExt};
+use flume::TryRecvError;
+use futures_lite::Stream;
 use futures_sink::Sink;
-use futures_util::FutureExt;
 use iroh_net::{NodeAddr, NodeId};
 use pin_project::pin_project;
+use quinn::Connection;
 use serde::{de::DeserializeOwned, Serialize};
-use tokio::sync::oneshot;
+use tokio::{sync::oneshot, task::yield_now};
 use tracing::{debug_span, Instrument};
 
 use super::{
@@ -283,7 +284,7 @@ impl<In: RpcMessage, Out: RpcMessage> StreamTypes for IrohNetListener<In, Out> {
 }
 
 impl<In: RpcMessage, Out: RpcMessage> Listener for IrohNetListener<In, Out> {
-    async fn accept(&self) -> Result<(Self::SendSink, Self::RecvStream), AcceptBiError> {
+    async fn accept(&self) -> Result<(Self::SendSink, Self::RecvStream), AcceptError> {
         let (send, recv) = self
             .inner
             .receiver
@@ -308,7 +309,7 @@ struct ClientConnectionInner {
     /// The task that handles creating new connections
     task: Option<tokio::task::JoinHandle<()>>,
     /// The channel to send new received connections
-    connections_tx: flume::Sender<oneshot::Sender<anyhow::Result<SocketInner>>>,
+    requests_tx: flume::Sender<oneshot::Sender<anyhow::Result<SocketInner>>>,
 }
 
 impl Drop for ClientConnectionInner {
@@ -393,7 +394,7 @@ impl<In: RpcMessage, Out: RpcMessage> IrohNetConnector<In, Out> {
         endpoint: iroh_net::Endpoint,
         node_addr: NodeAddr,
         alpn: Vec<u8>,
-        requests: flume::Receiver<oneshot::Sender<anyhow::Result<SocketInner>>>,
+        requests_rx: flume::Receiver<oneshot::Sender<anyhow::Result<SocketInner>>>,
     ) {
         let mut reconnect = pin!(ReconnectHandler {
             endpoint,
@@ -402,69 +403,61 @@ impl<In: RpcMessage, Out: RpcMessage> IrohNetConnector<In, Out> {
             alpn,
         });
 
-        let mut receiver = Receiver::new(&requests);
-
         let mut pending_request: Option<oneshot::Sender<anyhow::Result<SocketInner>>> = None;
-        let mut connection = None;
-
-        enum Racer {
-            Reconnect(anyhow::Result<quinn::Connection>),
-            Channel(Option<oneshot::Sender<anyhow::Result<SocketInner>>>),
-        }
+        let mut connection: Option<Connection> = None;
 
         loop {
-            let mut conn_result = None;
-            let mut chan_result = None;
-            if !reconnect.connected() && pending_request.is_none() {
-                match futures_lite::future::race(
-                    reconnect.as_mut().map(Racer::Reconnect),
-                    receiver.next().map(Racer::Channel),
-                )
-                .await
-                {
-                    Racer::Reconnect(connection_result) => conn_result = Some(connection_result),
-                    Racer::Channel(channel_result) => {
-                        chan_result = Some(channel_result);
-                    }
-                }
-            } else if !reconnect.connected() {
-                // only need a new connection
-                conn_result = Some(reconnect.as_mut().await);
-            } else if pending_request.is_none() {
-                // there is a connection, just need a request
-                chan_result = Some(receiver.next().await);
-            }
-
-            if let Some(conn_result) = conn_result {
-                tracing::trace!("tick: connection result");
-                match conn_result {
-                    Ok(new_connection) => {
-                        connection = Some(new_connection);
-                    }
-                    Err(e) => {
-                        if let Some(request) = pending_request.take() {
-                            if request.send(Err(e)).is_err() {
-                                tracing::debug!("requester dropped");
-                            }
-                        }
-                    }
-                }
-            }
-
-            if let Some(req) = chan_result {
-                tracing::trace!("tick: bidi request");
-                match req {
-                    Some(request) => pending_request = Some(request),
-                    None => {
+            // First we check if there is already a request ready in the channel
+            if pending_request.is_none() {
+                pending_request = match requests_rx.try_recv() {
+                    Ok(req) => Some(req),
+                    Err(TryRecvError::Empty) => None,
+                    Err(TryRecvError::Disconnected) => {
                         tracing::debug!("client dropped");
                         if let Some(connection) = connection {
                             connection.close(0u32.into(), b"requester dropped");
                         }
                         break;
                     }
-                }
+                };
             }
 
+            // If not connected, we attempt to establish a connection
+            if !reconnect.connected() {
+                tracing::trace!("tick: connection result");
+                match reconnect.as_mut().await {
+                    Ok(new_connection) => {
+                        connection = Some(new_connection);
+                    }
+                    Err(e) => {
+                        // If there was a pending request, we error it out as we're not connected
+                        if let Some(request_ack_tx) = pending_request.take() {
+                            if request_ack_tx.send(Err(e)).is_err() {
+                                tracing::debug!("requester dropped");
+                            }
+                        }
+
+                        // Yielding back to the runtime, otherwise this can run on a busy loop
+                        // due to the always ready nature of things, messing up with single thread
+                        // runtime flavor of tokio
+                        yield_now().await;
+                    }
+                }
+                // If we didn't have a ready request in the channel, we wait for one
+            } else if pending_request.is_none() {
+                let Ok(req) = requests_rx.recv_async().await else {
+                    tracing::debug!("client dropped");
+                    if let Some(connection) = connection {
+                        connection.close(0u32.into(), b"requester dropped");
+                    }
+                    break;
+                };
+
+                tracing::trace!("tick: bidi request");
+                pending_request = Some(req);
+            }
+
+            // If we have a connection and a pending request, we good, just process it
             if let Some(connection) = connection.as_mut() {
                 if let Some(request) = pending_request.take() {
                     match connection.open_bi().await {
@@ -493,21 +486,21 @@ impl<In: RpcMessage, Out: RpcMessage> IrohNetConnector<In, Out> {
         endpoint: iroh_net::Endpoint,
         addr: NodeAddr,
         alpn: Vec<u8>,
-        requests: flume::Receiver<oneshot::Sender<anyhow::Result<SocketInner>>>,
+        requests_rx: flume::Receiver<oneshot::Sender<anyhow::Result<SocketInner>>>,
     ) {
-        Self::reconnect_handler_inner(endpoint, addr, alpn, requests).await;
+        Self::reconnect_handler_inner(endpoint, addr, alpn, requests_rx).await;
         tracing::info!("Reconnect handler finished");
     }
 
     /// Create a new channel
     pub fn from_connection(connection: quinn::Connection) -> Self {
-        let (sender, receiver) = flume::bounded(16);
-        let task = tokio::spawn(Self::single_connection_handler(connection, receiver));
+        let (requests_tx, requests_rx) = flume::bounded(16);
+        let task = tokio::spawn(Self::single_connection_handler(connection, requests_rx));
         Self {
             inner: Arc::new(ClientConnectionInner {
                 endpoint: None,
                 task: Some(task),
-                connections_tx: sender,
+                requests_tx,
             }),
             _p: PhantomData,
         }
@@ -519,18 +512,18 @@ impl<In: RpcMessage, Out: RpcMessage> IrohNetConnector<In, Out> {
         node_addr: impl Into<NodeAddr>,
         alpn: Vec<u8>,
     ) -> Self {
-        let (sender, receiver) = flume::bounded(16);
+        let (requests_tx, requests_rx) = flume::bounded(16);
         let task = tokio::spawn(Self::reconnect_handler(
             endpoint.clone(),
             node_addr.into(),
             alpn,
-            receiver,
+            requests_rx,
         ));
         Self {
             inner: Arc::new(ClientConnectionInner {
                 endpoint: Some(endpoint),
                 task: Some(task),
-                connections_tx: sender,
+                requests_tx,
             }),
             _p: PhantomData,
         }
@@ -617,58 +610,6 @@ impl Future for ReconnectHandler {
     }
 }
 
-/// Wrapper over [`flume::Receiver`] that can be used with [`tokio::select`].
-///
-/// NOTE: from https://github.com/zesterer/flume/issues/104:
-/// > If RecvFut is dropped without being polled, the item is never received.
-enum Receiver<'a, T>
-where
-    Self: 'a,
-{
-    PreReceive(&'a flume::Receiver<T>),
-    Receiving(&'a flume::Receiver<T>, flume::r#async::RecvFut<'a, T>),
-    Poisoned,
-}
-
-impl<'a, T> Receiver<'a, T> {
-    fn new(recv: &'a flume::Receiver<T>) -> Self {
-        Receiver::PreReceive(recv)
-    }
-
-    fn poison(&mut self) -> Self {
-        std::mem::replace(self, Self::Poisoned)
-    }
-}
-
-impl<'a, T> Stream for Receiver<'a, T> {
-    type Item = T;
-
-    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        match self.poison() {
-            Receiver::PreReceive(recv) => {
-                let fut = recv.recv_async();
-                *self = Receiver::Receiving(recv, fut);
-                self.poll_next(cx)
-            }
-            Receiver::Receiving(recv, mut fut) => match Pin::new(&mut fut).poll(cx) {
-                Poll::Ready(Ok(t)) => {
-                    *self = Receiver::PreReceive(recv);
-                    Poll::Ready(Some(t))
-                }
-                Poll::Ready(Err(flume::RecvError::Disconnected)) => {
-                    *self = Receiver::PreReceive(recv);
-                    Poll::Ready(None)
-                }
-                Poll::Pending => {
-                    *self = Receiver::Receiving(recv, fut);
-                    Poll::Pending
-                }
-            },
-            Receiver::Poisoned => unreachable!("poisoned receiver state"),
-        }
-    }
-}
-
 impl<In: RpcMessage, Out: RpcMessage> fmt::Debug for IrohNetConnector<In, Out> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ClientChannel")
@@ -702,15 +643,18 @@ impl<In: RpcMessage, Out: RpcMessage> StreamTypes for IrohNetConnector<In, Out> 
 
 impl<In: RpcMessage, Out: RpcMessage> Connector for IrohNetConnector<In, Out> {
     async fn open(&self) -> Result<(Self::SendSink, Self::RecvStream), Self::OpenError> {
-        let (sender, receiver) = oneshot::channel();
+        let (request_ack_tx, request_ack_rx) = oneshot::channel();
+
         self.inner
-            .connections_tx
-            .send_async(sender)
+            .requests_tx
+            .send_async(request_ack_tx)
             .await
             .map_err(|_| quinn::ConnectionError::LocallyClosed)?;
-        let (send, recv) = receiver
+
+        let (send, recv) = request_ack_rx
             .await
             .map_err(|_| quinn::ConnectionError::LocallyClosed)??;
+
         Ok((SendSink::new(send), RecvStream::new(recv)))
     }
 }
@@ -803,4 +747,4 @@ impl<In: DeserializeOwned> Stream for RecvStream<In> {
 pub type OpenBiError = anyhow::Error;
 
 /// Error for accept. Currently just a quinn::ConnectionError
-pub type AcceptBiError = quinn::ConnectionError;
+pub type AcceptError = quinn::ConnectionError;
