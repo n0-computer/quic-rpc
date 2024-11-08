@@ -130,6 +130,9 @@ async fn server_away_and_back() -> anyhow::Result<()> {
     let server = RpcServer::new(connection);
     let server_handle = tokio::task::spawn(ComputeService::server_bounded(server, 1));
 
+    // wait a bit for connection due to Windows test failing on CI
+    tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
+
     // Passing the server node address directly to client endpoint to not depend
     // on a discovery service
     client_endpoint.add_node_addr(server_endpoint.node_addr().await?)?;
@@ -143,11 +146,20 @@ async fn server_away_and_back() -> anyhow::Result<()> {
     // wait for drop to free the socket
     tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
 
+    let server_endpoint = make_endpoint(server_secret_key.clone(), ALPN).await?;
+
     // make the server run again
     let connection =
-        transport::iroh_net::IrohNetListener::new(make_endpoint(server_secret_key, ALPN).await?)?;
+        transport::iroh_net::IrohNetListener::new(server_endpoint.clone())?;
     let server = RpcServer::new(connection);
     let server_handle = tokio::task::spawn(ComputeService::server_bounded(server, 5));
+
+    // wait a bit for connection due to Windows test failing on CI
+    tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
+
+    // Passing the server node address directly to client endpoint to not depend
+    // on a discovery service
+    client_endpoint.add_node_addr(server_endpoint.node_addr().await?)?;
 
     // server is running, this should work
     let SqrResponse(response) = client.rpc(Sqr(3)).await?;
