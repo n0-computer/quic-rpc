@@ -149,8 +149,7 @@ async fn server_away_and_back() -> anyhow::Result<()> {
     let server_endpoint = make_endpoint(server_secret_key.clone(), ALPN).await?;
 
     // make the server run again
-    let connection =
-        transport::iroh_net::IrohNetListener::new(server_endpoint.clone())?;
+    let connection = transport::iroh_net::IrohNetListener::new(server_endpoint.clone())?;
     let server = RpcServer::new(connection);
     let server_handle = tokio::task::spawn(ComputeService::server_bounded(server, 5));
 
