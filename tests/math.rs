@@ -2,6 +2,7 @@
     feature = "flume-transport",
     feature = "hyper-transport",
     feature = "quinn-transport",
+    feature = "iroh-net-transport",
 ))]
 #![allow(dead_code)]
 use async_stream::stream;
