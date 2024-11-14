@@ -1,13 +1,15 @@
 //! Service definition
 //!
 //! Traits to define the behaviour of messages for services
-use crate::Service;
 use std::fmt::Debug;
 
-pub use crate::pattern::bidi_streaming::{BidiStreaming, BidiStreamingMsg};
-pub use crate::pattern::client_streaming::{ClientStreaming, ClientStreamingMsg};
-pub use crate::pattern::rpc::{Rpc, RpcMsg};
-pub use crate::pattern::server_streaming::{ServerStreaming, ServerStreamingMsg};
+pub use crate::pattern::{
+    bidi_streaming::{BidiStreaming, BidiStreamingMsg},
+    client_streaming::{ClientStreaming, ClientStreamingMsg},
+    rpc::{Rpc, RpcMsg},
+    server_streaming::{ServerStreaming, ServerStreamingMsg},
+};
+use crate::Service;
 
 /// Declares the interaction pattern for a message and a service.
 ///

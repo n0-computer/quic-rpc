@@ -6,8 +6,6 @@ use std::{
     sync::Arc, task::Poll,
 };
 
-use crate::transport::{ConnectionErrors, Connector, Listener, LocalAddr, StreamTypes};
-use crate::RpcMessage;
 use bytes::Bytes;
 use flume::{Receiver, Sender};
 use futures_lite::{Stream, StreamExt};
@@ -18,9 +16,13 @@ use hyper::{
     service::{make_service_fn, service_fn},
     Body, Client, Request, Response, Server, StatusCode, Uri,
 };
-use tokio::sync::mpsc;
-use tokio::task::JoinHandle;
+use tokio::{sync::mpsc, task::JoinHandle};
 use tracing::{debug, event, trace, Level};
+
+use crate::{
+    transport::{ConnectionErrors, Connector, Listener, LocalAddr, StreamTypes},
+    RpcMessage,
+};
 
 struct HyperConnectionInner {
     client: Box<dyn Requester>,

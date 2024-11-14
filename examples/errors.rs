@@ -1,7 +1,8 @@
+use std::result;
+
 use derive_more::{Display, From, TryInto};
 use quic_rpc::{message::RpcMsg, RpcClient, RpcServer, Service};
 use serde::{Deserialize, Serialize};
-use std::result;
 
 #[derive(Debug, Serialize, Deserialize)]
 struct WriteRequest(String, Vec<u8>);

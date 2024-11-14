@@ -1,7 +1,8 @@
 pub mod compute {
+    use std::fmt::Debug;
+
     use quic_rpc::rpc_service;
     use serde::{Deserialize, Serialize};
-    use std::fmt::Debug;
 
     /// compute the square of a number
     #[derive(Debug, Serialize, Deserialize)]

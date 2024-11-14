@@ -1,10 +1,5 @@
 //! iroh-net transport implementation based on [iroh-net](https://crates.io/crates/iroh-net)
 
-use crate::{
-    transport::{ConnectionErrors, Connector, Listener, LocalAddr},
-    RpcMessage,
-};
-
 use std::{
     collections::BTreeSet,
     fmt,
@@ -31,6 +26,10 @@ use tracing::{debug_span, Instrument};
 use super::{
     util::{FramedBincodeRead, FramedBincodeWrite},
     StreamTypes,
+};
+use crate::{
+    transport::{ConnectionErrors, Connector, Listener, LocalAddr},
+    RpcMessage,
 };
 
 const MAX_FRAME_LENGTH: usize = 1024 * 1024 * 16;

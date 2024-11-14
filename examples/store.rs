@@ -1,4 +1,6 @@
 #![allow(clippy::enum_variant_names)]
+use std::{fmt::Debug, result};
+
 use async_stream::stream;
 use derive_more::{From, TryInto};
 use futures_lite::{Stream, StreamExt};
@@ -9,7 +11,6 @@ use quic_rpc::{
     *,
 };
 use serde::{Deserialize, Serialize};
-use std::{fmt::Debug, result};
 
 type Cid = [u8; 32];
 #[derive(Debug, Serialize, Deserialize)]

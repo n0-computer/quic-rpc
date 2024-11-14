@@ -1,5 +1,11 @@
 //! RPC interaction pattern.
 
+use std::{
+    error,
+    fmt::{self, Debug},
+    result,
+};
+
 use futures_lite::{Future, StreamExt};
 use futures_util::{FutureExt, SinkExt};
 
@@ -8,12 +14,6 @@ use crate::{
     server::{race2, RpcChannel, RpcServerError},
     transport::{ConnectionErrors, StreamTypes},
     Connector, RpcClient, Service,
-};
-
-use std::{
-    error,
-    fmt::{self, Debug},
-    result,
 };
 
 /// Rpc interaction pattern

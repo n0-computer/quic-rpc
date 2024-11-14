@@ -9,9 +9,8 @@ use futures_lite::{Stream, StreamExt};
 use futures_util::SinkExt;
 use pin_project::pin_project;
 
-use crate::{RpcError, RpcMessage};
-
 use super::{ConnectionErrors, Connector, StreamTypes};
+use crate::{RpcError, RpcMessage};
 
 /// A connection that maps input and output types
 #[derive(Debug)]
@@ -249,15 +248,15 @@ where
 #[cfg(feature = "flume-transport")]
 mod tests {
 
+    use serde::{Deserialize, Serialize};
+    use testresult::TestResult;
+
+    use super::*;
     use crate::{
         server::{BoxedChannelTypes, RpcChannel},
         transport::Listener,
         RpcClient, RpcServer,
     };
-    use serde::{Deserialize, Serialize};
-    use testresult::TestResult;
-
-    use super::*;
 
     #[derive(Debug, Clone, Serialize, Deserialize, derive_more::From, derive_more::TryInto)]
     enum Request {

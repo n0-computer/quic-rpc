@@ -13,9 +13,9 @@
 //! # Example
 //! ```
 //! # async fn example() -> anyhow::Result<()> {
-//! use quic_rpc::{message::RpcMsg, Service, RpcClient, RpcServer};
-//! use serde::{Serialize, Deserialize};
 //! use derive_more::{From, TryInto};
+//! use quic_rpc::{message::RpcMsg, RpcClient, RpcServer, Service};
+//! use serde::{Deserialize, Serialize};
 //!
 //! // Define your messages
 //! #[derive(Debug, Serialize, Deserialize)]
@@ -39,13 +39,13 @@
 //! }
 //!
 //! impl Service for PingService {
-//!   type Req = PingRequest;
-//!   type Res = PingResponse;
+//!     type Req = PingRequest;
+//!     type Res = PingResponse;
 //! }
 //!
 //! // Define interaction patterns for each request type
 //! impl RpcMsg<PingService> for Ping {
-//!   type Response = Pong;
+//!     type Response = Pong;
 //! }
 //!
 //! // create a transport channel, here a memory channel for testing
@@ -53,7 +53,7 @@
 //!
 //! // client side
 //! // create the rpc client given the channel and the service type
-//! let mut client = RpcClient::<PingService,_>::new(client);
+//! let mut client = RpcClient::<PingService, _>::new(client);
 //!
 //! // call the service
 //! let res = client.rpc(Ping).await?;
@@ -64,12 +64,12 @@
 //!
 //! let handler = Handler;
 //! loop {
-//!   // accept connections
-//!   let (msg, chan) = server.accept().await?.read_first().await?;
-//!   // dispatch the message to the appropriate handler
-//!   match msg {
-//!     PingRequest::Ping(ping) => chan.rpc(ping, handler, Handler::ping).await?,
-//!   }
+//!     // accept connections
+//!     let (msg, chan) = server.accept().await?.read_first().await?;
+//!     // dispatch the message to the appropriate handler
+//!     match msg {
+//!         PingRequest::Ping(ping) => chan.rpc(ping, handler, Handler::ping).await?,
+//!     }
 //! }
 //!
 //! // the handler. For a more complex example, this would contain any state
@@ -78,21 +78,22 @@
 //! struct Handler;
 //!
 //! impl Handler {
-//!   // the handle fn for a Ping request.
+//!     // the handle fn for a Ping request.
 //!
-//!   // The return type is the response type for the service.
-//!   // Note that this must take self by value, not by reference.
-//!   async fn ping(self, _req: Ping) -> Pong {
-//!     Pong
-//!   }
+//!     // The return type is the response type for the service.
+//!     // Note that this must take self by value, not by reference.
+//!     async fn ping(self, _req: Ping) -> Pong {
+//!         Pong
+//!     }
 //! }
 //! # Ok(())
 //! # }
 //! ```
 #![deny(missing_docs)]
 #![deny(rustdoc::broken_intra_doc_links)]
-use serde::{de::DeserializeOwned, Serialize};
 use std::fmt::{Debug, Display};
+
+use serde::{de::DeserializeOwned, Serialize};
 pub mod client;
 pub mod message;
 pub mod server;
