@@ -1,5 +1,11 @@
 //! Fallible server streaming interaction pattern.
 
+use std::{
+    error,
+    fmt::{self, Debug},
+    result,
+};
+
 use futures_lite::{Future, Stream, StreamExt};
 use futures_util::{FutureExt, SinkExt, TryFutureExt};
 use serde::{Deserialize, Serialize};
@@ -10,12 +16,6 @@ use crate::{
     server::{race2, RpcChannel, RpcServerError},
     transport::{self, ConnectionErrors, StreamTypes},
     Connector, RpcClient, Service,
-};
-
-use std::{
-    error,
-    fmt::{self, Debug},
-    result,
 };
 
 /// A guard message to indicate that the stream has been created.

@@ -1,15 +1,11 @@
 #![allow(unknown_lints, non_local_definitions)]
 
-use std::net::SocketAddr;
-use std::sync::Arc;
+use std::{net::SocketAddr, sync::Arc};
 
 use anyhow::Result;
-use futures::sink::SinkExt;
-use futures::stream::StreamExt;
-use quic_rpc::transport::quinn::QuinnConnector;
-use quic_rpc::RpcClient;
-use quinn::crypto::rustls::QuicClientConfig;
-use quinn::{ClientConfig, Endpoint};
+use futures::{sink::SinkExt, stream::StreamExt};
+use quic_rpc::{transport::quinn::QuinnConnector, RpcClient};
+use quinn::{crypto::rustls::QuicClientConfig, ClientConfig, Endpoint};
 use types::compute::*;
 
 // types::create_compute_client!(ComputeClient);

@@ -1,19 +1,20 @@
 //! Client side api
 //!
 //! The main entry point is [RpcClient].
-use crate::{
-    transport::{boxed::BoxableConnector, mapped::MappedConnector, StreamTypes},
-    Connector, Service,
-};
-use futures_lite::Stream;
-use futures_sink::Sink;
-
-use pin_project::pin_project;
 use std::{
     fmt::Debug,
     marker::PhantomData,
     pin::Pin,
     task::{Context, Poll},
+};
+
+use futures_lite::Stream;
+use futures_sink::Sink;
+use pin_project::pin_project;
+
+use crate::{
+    transport::{boxed::BoxableConnector, mapped::MappedConnector, StreamTypes},
+    Connector, Service,
 };
 
 /// Type alias for a boxed connection to a specific service

@@ -1,14 +1,16 @@
 //! Transport that combines two other transports
-use super::{ConnectionErrors, Connector, Listener, LocalAddr, StreamTypes};
-use futures_lite::Stream;
-use futures_sink::Sink;
-use pin_project::pin_project;
 use std::{
     error, fmt,
     fmt::Debug,
     pin::Pin,
     task::{Context, Poll},
 };
+
+use futures_lite::Stream;
+use futures_sink::Sink;
+use pin_project::pin_project;
+
+use super::{ConnectionErrors, Connector, Listener, LocalAddr, StreamTypes};
 
 /// A connection that combines two other connections
 #[derive(Debug, Clone)]

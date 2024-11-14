@@ -8,12 +8,11 @@
 //! unchanged.
 
 use anyhow::Result;
+use app::AppService;
 use futures_lite::StreamExt;
 use futures_util::SinkExt;
 use quic_rpc::{client::BoxedConnector, transport::flume, Listener, RpcClient, RpcServer};
 use tracing::warn;
-
-use app::AppService;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -99,11 +98,12 @@ mod app {
     //!
     //! It could also easily compose services from other crates or internal modules.
 
-    use super::iroh;
     use anyhow::Result;
     use derive_more::{From, TryInto};
     use quic_rpc::{message::RpcMsg, server::RpcChannel, Listener, RpcClient, Service};
     use serde::{Deserialize, Serialize};
+
+    use super::iroh;
 
     #[derive(Debug, Serialize, Deserialize, From, TryInto)]
     pub enum Request {
@@ -271,6 +271,8 @@ mod calc {
     //! This is a library providing a service, and a client. E.g. iroh-bytes or iroh-hypermerge.
     //! It does not use any `super` imports, it is completely decoupled.
 
+    use std::fmt::Debug;
+
     use anyhow::{bail, Result};
     use derive_more::{From, TryInto};
     use futures_lite::{Stream, StreamExt};
@@ -280,7 +282,6 @@ mod calc {
         RpcClient, Service,
     };
     use serde::{Deserialize, Serialize};
-    use std::fmt::Debug;
 
     #[derive(Debug, Serialize, Deserialize)]
     pub struct AddRequest(pub i64, pub i64);
@@ -385,6 +386,12 @@ mod clock {
     //! This is a library providing a service, and a client. E.g. iroh-bytes or iroh-hypermerge.
     //! It does not use any `super` imports, it is completely decoupled.
 
+    use std::{
+        fmt::Debug,
+        sync::{Arc, RwLock},
+        time::Duration,
+    };
+
     use anyhow::Result;
     use derive_more::{From, TryInto};
     use futures_lite::{stream::Boxed as BoxStream, Stream, StreamExt};
@@ -395,11 +402,6 @@ mod clock {
         RpcClient, Service,
     };
     use serde::{Deserialize, Serialize};
-    use std::{
-        fmt::Debug,
-        sync::{Arc, RwLock},
-        time::Duration,
-    };
     use tokio::sync::Notify;
 
     #[derive(Debug, Serialize, Deserialize)]
