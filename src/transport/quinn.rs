@@ -653,7 +653,7 @@ impl<In: RpcMessage, Out: RpcMessage> Connector for QuinnConnector<In, Out> {
     }
 }
 
-/// A sink that wraps a quinn SendStream with length delimiting and bincode
+/// A sink that wraps a quinn SendStream with length delimiting and postcard
 ///
 /// If you want to send bytes directly, use [SendSink::into_inner] to get the
 /// underlying [quinn::SendStream].
@@ -710,7 +710,7 @@ impl<Out: Serialize> Sink<Out> for SendSink<Out> {
     }
 }
 
-/// A stream that wraps a quinn RecvStream with length delimiting and bincode
+/// A stream that wraps a quinn RecvStream with length delimiting and postcard
 ///
 /// If you want to receive bytes directly, use [RecvStream::into_inner] to get
 /// the underlying [quinn::RecvStream].
