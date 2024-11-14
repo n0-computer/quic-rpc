@@ -15,19 +15,13 @@ use tokio::task::JoinHandle;
 
 mod math;
 use math::*;
+use tokio_util::task::AbortOnDropHandle;
 mod util;
 
-fn run_server(addr: &SocketAddr) -> JoinHandle<anyhow::Result<()>> {
+fn run_server(addr: &SocketAddr) -> AbortOnDropHandle<()> {
     let channel = HyperListener::serve(addr).unwrap();
     let server = RpcServer::new(channel);
-    tokio::spawn(async move {
-        loop {
-            let server = server.clone();
-            ComputeService::server(server).await?;
-        }
-        #[allow(unreachable_code)]
-        anyhow::Ok(())
-    })
+    ComputeService::server(server)
 }
 
 #[derive(Debug, Serialize, Deserialize, From, TryInto)]
@@ -133,13 +127,11 @@ impl TestService {
 async fn hyper_channel_bench() -> anyhow::Result<()> {
     let addr: SocketAddr = "127.0.0.1:3000".parse()?;
     let uri: Uri = "http://127.0.0.1:3000".parse()?;
-    let server_handle = run_server(&addr);
+    let _server_handle = run_server(&addr);
     let client = HyperConnector::new(uri);
     let client = RpcClient::new(client);
     bench(client, 50000).await?;
     println!("terminating server");
-    server_handle.abort();
-    let _ = server_handle.await;
     Ok(())
 }
 
@@ -147,11 +139,9 @@ async fn hyper_channel_bench() -> anyhow::Result<()> {
 async fn hyper_channel_smoke() -> anyhow::Result<()> {
     let addr: SocketAddr = "127.0.0.1:3001".parse()?;
     let uri: Uri = "http://127.0.0.1:3001".parse()?;
-    let server_handle = run_server(&addr);
+    let _server_handle = run_server(&addr);
     let client = HyperConnector::new(uri);
     smoke_test(client).await?;
-    server_handle.abort();
-    let _ = server_handle.await;
     Ok(())
 }
 
@@ -302,6 +292,5 @@ async fn hyper_channel_errors() -> anyhow::Result<()> {
 
     println!("terminating server");
     server_handle.abort();
-    let _ = server_handle.await;
     Ok(())
 }

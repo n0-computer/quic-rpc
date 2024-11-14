@@ -15,6 +15,7 @@ use futures_lite::{Future, Stream, StreamExt};
 use futures_util::{SinkExt, TryStreamExt};
 use pin_project::pin_project;
 use tokio::{sync::oneshot, task::JoinSet};
+use tokio_util::task::AbortOnDropHandle;
 use tracing::{error, warn};
 
 use crate::{
@@ -262,6 +263,18 @@ impl<S: Service, C: Listener<S>> RpcServer<S, C> {
                 }
             }
         }
+    }
+
+    /// Spawn an accept loop and return a handle to the task.
+    pub fn spawn_accept_loop<Fun, Fut, E>(self, handler: Fun) -> AbortOnDropHandle<()>
+    where
+        S: Service,
+        C: Listener<S>,
+        Fun: Fn(S::Req, RpcChannel<S, C>) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = Result<(), E>> + Send + 'static,
+        E: Into<anyhow::Error> + 'static,
+    {
+        AbortOnDropHandle::new(tokio::spawn(self.accept_loop(handler)))
     }
 }
 

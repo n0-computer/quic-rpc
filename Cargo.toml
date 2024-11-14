@@ -27,7 +27,7 @@ quinn = { package = "iroh-quinn", version = "0.12", optional = true }
 serde = { version = "1.0.183", features = ["derive"] }
 tokio = { version = "1", default-features = false, features = ["macros", "sync"] }
 tokio-serde = { version = "0.8", features = ["bincode"], optional = true }
-tokio-util = { version = "0.7", features = ["codec"], optional = true }
+tokio-util = { version = "0.7", features = ["rt"] }
 tracing = "0.1"
 hex = "0.4.3"
 futures = { version = "0.3.30", optional = true }
@@ -52,12 +52,13 @@ proc-macro2 = "1.0.66"
 futures-buffered = "0.2.4"
 testresult = "0.4.1"
 nested_enum_utils = "0.1.0"
+tokio-util = { version = "0.7", features = ["rt"] }
 
 [features]
-hyper-transport = ["dep:flume", "dep:hyper", "dep:bincode", "dep:bytes", "dep:tokio-serde", "dep:tokio-util"]
-quinn-transport = ["dep:flume", "dep:quinn", "dep:bincode", "dep:tokio-serde", "dep:tokio-util"]
+hyper-transport = ["dep:flume", "dep:hyper", "dep:bincode", "dep:bytes", "dep:tokio-serde", "tokio-util/codec"]
+quinn-transport = ["dep:flume", "dep:quinn", "dep:bincode", "dep:tokio-serde", "tokio-util/codec"]
 flume-transport = ["dep:flume"]
-iroh-net-transport = ["dep:iroh-net", "dep:flume", "dep:quinn", "dep:bincode", "dep:tokio-serde", "dep:tokio-util"]
+iroh-net-transport = ["dep:iroh-net", "dep:flume", "dep:quinn", "dep:bincode", "dep:tokio-serde", "tokio-util/codec"]
 macros = []
 default = ["flume-transport"]
 

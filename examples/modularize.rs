@@ -12,7 +12,6 @@ use app::AppService;
 use futures_lite::StreamExt;
 use futures_util::SinkExt;
 use quic_rpc::{client::BoxedConnector, transport::flume, Listener, RpcClient, RpcServer};
-use tracing::warn;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -32,23 +31,11 @@ async fn main() -> Result<()> {
 
 async fn run_server<C: Listener<AppService>>(server_conn: C, handler: app::Handler) {
     let server = RpcServer::<AppService, _>::new(server_conn);
-    loop {
-        let Ok(accepting) = server.accept().await else {
-            continue;
-        };
-        match accepting.read_first().await {
-            Err(err) => warn!(?err, "server accept failed"),
-            Ok((req, chan)) => {
-                let handler = handler.clone();
-                tokio::task::spawn(async move {
-                    if let Err(err) = handler.handle_rpc_request(req, chan).await {
-                        warn!(?err, "internal rpc error");
-                    }
-                });
-            }
-        }
-    }
+    server
+        .accept_loop(move |req, chan| handler.clone().handle_rpc_request(req, chan))
+        .await
 }
+
 pub async fn client_demo(conn: BoxedConnector<AppService>) -> Result<()> {
     let rpc_client = RpcClient::<AppService>::new(conn);
     let client = app::Client::new(rpc_client.clone());
