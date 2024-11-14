@@ -1,7 +1,8 @@
 mod store_rpc {
+    use std::fmt::Debug;
+
     use quic_rpc::rpc_service;
     use serde::{Deserialize, Serialize};
-    use std::fmt::Debug;
 
     pub type Cid = [u8; 32];
 
@@ -51,9 +52,7 @@ mod store_rpc {
 use async_stream::stream;
 use futures_lite::{Stream, StreamExt};
 use futures_util::SinkExt;
-use quic_rpc::client::RpcClient;
-use quic_rpc::server::run_server_loop;
-use quic_rpc::transport::flume;
+use quic_rpc::{client::RpcClient, server::run_server_loop, transport::flume};
 use store_rpc::*;
 
 #[derive(Clone)]

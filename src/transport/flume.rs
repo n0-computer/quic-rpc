@@ -1,17 +1,17 @@
 //! Memory transport implementation using [flume]
 //!
 //! [flume]: https://docs.rs/flume/
+use core::fmt;
+use std::{error, fmt::Display, marker::PhantomData, pin::Pin, result, task::Poll};
+
 use futures_lite::{Future, Stream};
 use futures_sink::Sink;
 
+use super::StreamTypes;
 use crate::{
     transport::{ConnectionErrors, Connector, Listener, LocalAddr},
     RpcMessage,
 };
-use core::fmt;
-use std::{error, fmt::Display, marker::PhantomData, pin::Pin, result, task::Poll};
-
-use super::StreamTypes;
 
 /// Error when receiving from a channel
 ///

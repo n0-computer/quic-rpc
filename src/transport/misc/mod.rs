@@ -1,14 +1,14 @@
 //! Miscellaneous transport utilities
+use std::convert::Infallible;
+
 use futures_lite::stream;
 use futures_sink::Sink;
 
+use super::StreamTypes;
 use crate::{
     transport::{ConnectionErrors, Listener},
     RpcMessage,
 };
-use std::convert::Infallible;
-
-use super::StreamTypes;
 
 /// A dummy listener that does nothing
 ///

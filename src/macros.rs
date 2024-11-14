@@ -111,7 +111,6 @@
 ///    server_handle.await??;
 ///    Ok(())
 /// }
-///
 /// ```
 ///
 /// The generation of the macros in `CreateDispatch` and `CreateClient`

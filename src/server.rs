@@ -1,6 +1,20 @@
 //! Server side api
 //!
 //! The main entry point is [RpcServer]
+use std::{
+    error,
+    fmt::{self, Debug},
+    marker::PhantomData,
+    pin::Pin,
+    result,
+    task::{self, Poll},
+};
+
+use futures_lite::{Future, Stream, StreamExt};
+use futures_util::{SinkExt, TryStreamExt};
+use pin_project::pin_project;
+use tokio::sync::oneshot;
+
 use crate::{
     transport::{
         self,
@@ -10,18 +24,6 @@ use crate::{
     },
     Listener, RpcMessage, Service,
 };
-use futures_lite::{Future, Stream, StreamExt};
-use futures_util::{SinkExt, TryStreamExt};
-use pin_project::pin_project;
-use std::{
-    error,
-    fmt::{self, Debug},
-    marker::PhantomData,
-    pin::Pin,
-    result,
-    task::{self, Poll},
-};
-use tokio::sync::oneshot;
 
 /// Stream types on the server side
 ///

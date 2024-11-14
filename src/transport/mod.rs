@@ -17,16 +17,17 @@
 //! types are defined by implementing the [`StreamTypes`] trait.
 //!
 //! Errors for both sides are defined by implementing the [`ConnectionErrors`] trait.
+use std::{
+    fmt::{self, Debug, Display},
+    net::SocketAddr,
+};
+
 use boxed::{BoxableConnector, BoxableListener, BoxedConnector, BoxedListener};
 use futures_lite::{Future, Stream};
 use futures_sink::Sink;
 use mapped::MappedConnector;
 
 use crate::{RpcError, RpcMessage};
-use std::{
-    fmt::{self, Debug, Display},
-    net::SocketAddr,
-};
 
 pub mod boxed;
 pub mod combined;

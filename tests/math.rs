@@ -5,6 +5,11 @@
     feature = "iroh-net-transport",
 ))]
 #![allow(dead_code)]
+use std::{
+    io::{self, Write},
+    result,
+};
+
 use async_stream::stream;
 use derive_more::{From, TryInto};
 use futures_buffered::BufferedStreamExt;
@@ -20,10 +25,6 @@ use quic_rpc::{
     Connector, Listener, RpcClient, RpcServer, Service,
 };
 use serde::{Deserialize, Serialize};
-use std::{
-    io::{self, Write},
-    result,
-};
 use thousands::Separable;
 
 /// compute the square of a number

@@ -2,6 +2,7 @@
 
 use std::{
     fmt::Debug,
+    future::Future,
     pin::Pin,
     task::{Context, Poll},
 };
@@ -10,11 +11,9 @@ use futures_lite::FutureExt;
 use futures_sink::Sink;
 use futures_util::{future::BoxFuture, SinkExt, Stream, StreamExt, TryStreamExt};
 use pin_project::pin_project;
-use std::future::Future;
-
-use crate::RpcMessage;
 
 use super::{ConnectionErrors, StreamTypes};
+use crate::RpcMessage;
 type BoxedFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + Sync + 'a>>;
 
 enum SendSinkInner<T: RpcMessage> {

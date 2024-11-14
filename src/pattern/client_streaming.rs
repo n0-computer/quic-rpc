@@ -1,5 +1,11 @@
 //! Client streaming interaction pattern.
 
+use std::{
+    error,
+    fmt::{self, Debug},
+    result,
+};
+
 use futures_lite::{future::Boxed, Future, StreamExt};
 use futures_util::{FutureExt, SinkExt, TryFutureExt};
 
@@ -9,12 +15,6 @@ use crate::{
     server::{race2, RpcChannel, RpcServerError, UpdateStream},
     transport::{ConnectionErrors, StreamTypes},
     Connector, RpcClient, Service,
-};
-
-use std::{
-    error,
-    fmt::{self, Debug},
-    result,
 };
 
 /// Client streaming interaction pattern
