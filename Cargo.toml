@@ -36,6 +36,7 @@ anyhow = "1.0.73"
 # Indirect dependencies, is needed to make the minimal crates versions work
 educe = "0.4.20" # tokio-serde
 slab = "0.4.9" # iroh-quinn
+tokio-serde-postcard = "0.1.0"
 
 [dev-dependencies]
 anyhow = "1.0.73"
