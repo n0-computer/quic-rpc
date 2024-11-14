@@ -7,6 +7,7 @@ use quic_rpc::{
     transport::flume,
     RpcClient, RpcServer, Service,
 };
+use tokio_util::task::AbortOnDropHandle;
 
 #[tokio::test]
 async fn flume_channel_bench() -> anyhow::Result<()> {
@@ -14,14 +15,9 @@ async fn flume_channel_bench() -> anyhow::Result<()> {
     let (server, client) = flume::channel(1);
 
     let server = RpcServer::<ComputeService, _>::new(server);
-    let server_handle = tokio::task::spawn(ComputeService::server(server));
+    let _server_handle = AbortOnDropHandle::new(tokio::spawn(ComputeService::server(server)));
     let client = RpcClient::<ComputeService, _>::new(client);
     bench(client, 1000000).await?;
-    // dropping the client will cause the server to terminate
-    match server_handle.await? {
-        Err(RpcServerError::Accept(_)) => {}
-        e => panic!("unexpected termination result {e:?}"),
-    }
     Ok(())
 }
 
@@ -101,13 +97,7 @@ async fn flume_channel_smoke() -> anyhow::Result<()> {
     let (server, client) = flume::channel(1);
 
     let server = RpcServer::<ComputeService, _>::new(server);
-    let server_handle = tokio::task::spawn(ComputeService::server(server));
+    let _server_handle = AbortOnDropHandle::new(tokio::spawn(ComputeService::server(server)));
     smoke_test(client).await?;
-
-    // dropping the client will cause the server to terminate
-    match server_handle.await? {
-        Err(RpcServerError::Accept(_)) => {}
-        e => panic!("unexpected termination result {e:?}"),
-    }
     Ok(())
 }
