@@ -7,13 +7,15 @@ use std::{
     marker::PhantomData,
     pin::Pin,
     result,
+    sync::Arc,
     task::{self, Poll},
 };
 
 use futures_lite::{Future, Stream, StreamExt};
 use futures_util::{SinkExt, TryStreamExt};
 use pin_project::pin_project;
-use tokio::sync::oneshot;
+use tokio::{sync::oneshot, task::JoinSet};
+use tracing::{error, warn};
 
 use crate::{
     transport::{
@@ -210,6 +212,56 @@ impl<S: Service, C: Listener<S>> RpcServer<S, C> {
     /// Get the underlying service endpoint
     pub fn into_inner(self) -> C {
         self.source
+    }
+
+    /// Run an accept loop for this server.
+    ///
+    /// Each request will be handled in a separate task.
+    ///
+    /// It is the caller's responsibility to poll the returned future to drive the server.
+    pub async fn accept_loop<Fun, Fut, E>(self, handler: Fun)
+    where
+        S: Service,
+        C: Listener<S>,
+        Fun: Fn(S::Req, RpcChannel<S, C>) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = Result<(), E>> + Send + 'static,
+        E: Into<anyhow::Error> + 'static,
+    {
+        let handler = Arc::new(handler);
+        let mut tasks = JoinSet::new();
+        loop {
+            tokio::select! {
+                Some(res) = tasks.join_next(), if !tasks.is_empty() => {
+                    if let Err(e) = res {
+                        if e.is_panic() {
+                            error!("Panic handling RPC request: {e}");
+                        }
+                    }
+                }
+                req = self.accept() => {
+                    let req = match req {
+                        Ok(req) => req,
+                        Err(e) => {
+                            warn!("Error accepting RPC request: {e}");
+                            continue;
+                        }
+                    };
+                    let handler = handler.clone();
+                    tasks.spawn(async move {
+                        let (req, chan) = match req.read_first().await {
+                            Ok((req, chan)) => (req, chan),
+                            Err(e) => {
+                                warn!("Error reading first message: {e}");
+                                return;
+                            }
+                        };
+                        if let Err(cause) = handler(req, chan).await {
+                            warn!("Error handling RPC request: {}", cause.into());
+                        }
+                    });
+                }
+            }
+        }
     }
 }
 
