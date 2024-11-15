@@ -1841,7 +1841,7 @@ dependencies = [
  "portmapper",
  "postcard",
  "rand",
- "rcgen",
+ "rcgen 0.12.1",
  "reqwest",
  "ring",
  "rtnetlink",
@@ -2951,7 +2951,7 @@ dependencies = [
  "nested_enum_utils",
  "pin-project",
  "proc-macro2",
- "rcgen",
+ "rcgen 0.13.1",
  "serde",
  "slab",
  "tempfile",
@@ -3098,6 +3098,19 @@ checksum = "48406db8ac1f3cbc7dcdb56ec355343817958a356ff430259bb07baf7607e1e1"
 dependencies = [
  "pem",
  "ring",
+ "time",
+ "yasna",
+]
+
+[[package]]
+name = "rcgen"
+version = "0.13.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "54077e1872c46788540de1ea3d7f4ccb1983d12f9aa909b234468676c1a36779"
+dependencies = [
+ "pem",
+ "ring",
+ "rustls-pki-types",
  "time",
  "yasna",
 ]
@@ -3593,7 +3606,7 @@ dependencies = [
  "futures",
  "iroh-quinn",
  "quic-rpc",
- "rcgen",
+ "rcgen 0.13.1",
  "rustls",
  "serde",
  "tokio",

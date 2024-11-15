@@ -80,15 +80,14 @@ fn make_server_endpoint(bind_addr: SocketAddr) -> anyhow::Result<(Endpoint, Vec<
 
 fn configure_server() -> anyhow::Result<(ServerConfig, Vec<u8>)> {
     let cert = rcgen::generate_simple_self_signed(vec!["localhost".into()])?;
-    let cert_der = cert.serialize_der()?;
-    let priv_key = cert.serialize_private_key_der();
-    let priv_key = rustls::pki_types::PrivatePkcs8KeyDer::from(priv_key);
-    let cert_chain = vec![rustls::pki_types::CertificateDer::from(cert_der.clone())];
+    let cert_der = cert.cert.der();
+    let priv_key = rustls::pki_types::PrivatePkcs8KeyDer::from(cert.key_pair.serialize_der());
+    let cert_chain = vec![cert_der.clone()];
 
     let mut server_config = ServerConfig::with_single_cert(cert_chain, priv_key.into())?;
     Arc::get_mut(&mut server_config.transport)
         .unwrap()
         .max_concurrent_uni_streams(0_u8.into());
 
-    Ok((server_config, cert_der))
+    Ok((server_config, cert_der.to_vec()))
 }

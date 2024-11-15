@@ -44,7 +44,7 @@ async-stream = "0.3.3"
 serde = { version = "1", features = ["derive"] }
 tokio = { version = "1", features = ["full"] }
 quinn = { package = "iroh-quinn", version = "0.12", features = ["ring"] }
-rcgen = "0.12"
+rcgen = "0.13"
 thousands = "0.2.0"
 tracing-subscriber = "0.3.16"
 tempfile = "3.5.0"
