@@ -2989,7 +2989,6 @@ dependencies = [
  "thousands",
  "tokio",
  "tokio-serde",
- "tokio-serde-postcard",
  "tokio-util",
  "tracing",
  "tracing-subscriber",
@@ -4161,18 +4160,6 @@ dependencies = [
  "futures-core",
  "futures-sink",
  "pin-project",
-]
-
-[[package]]
-name = "tokio-serde-postcard"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a9bc47334cd92ae09ac4ae741108a3a7437c3d2c75c38c957b93dbc066984329"
-dependencies = [
- "bytes",
- "postcard",
- "serde",
- "tokio-serde",
 ]
 
 [[package]]

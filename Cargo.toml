@@ -26,8 +26,7 @@ quinn = { package = "iroh-quinn", version = "0.12", optional = true }
 serde = { version = "1.0.183", features = ["derive"] }
 tokio = { version = "1", default-features = false, features = ["macros", "sync"] }
 tokio-serde = { version = "0.8", features = [], optional = true }
-tokio-serde-postcard = { version = "0.1.0", optional = true }
-postcard = { version = "1", optional = true }
+postcard = { version = "1", features = ["use-std"], optional = true }
 tokio-util = { version = "0.7", features = ["codec"], optional = true }
 tracing = "0.1"
 hex = "0.4.3"
@@ -56,9 +55,9 @@ nested_enum_utils = "0.1.0"
 
 [features]
 hyper-transport = ["dep:flume", "dep:hyper", "dep:postcard", "dep:bytes", "dep:tokio-serde", "dep:tokio-util"]
-quinn-transport = ["dep:flume", "dep:quinn", "dep:tokio-serde", "dep:tokio-serde-postcard", "dep:tokio-util"]
+quinn-transport = ["dep:flume", "dep:quinn", "dep:tokio-serde", "dep:tokio-util"]
 flume-transport = ["dep:flume"]
-iroh-net-transport = ["dep:iroh-net", "dep:flume", "dep:quinn", "dep:tokio-serde", "dep:tokio-serde-postcard", "dep:tokio-util"]
+iroh-net-transport = ["dep:iroh-net", "dep:flume", "dep:quinn", "dep:tokio-serde", "dep:tokio-util"]
 macros = []
 default = ["flume-transport", "hyper-transport"]
 

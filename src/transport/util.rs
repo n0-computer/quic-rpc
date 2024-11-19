@@ -120,3 +120,71 @@ impl<T: AsyncWrite, Out: Serialize> Sink<Out> for FramedPostcardWrite<T, Out> {
         Pin::new(&mut self.project().0).poll_close(cx)
     }
 }
+
+mod tokio_serde_postcard {
+    use {
+        bytes::{BufMut as _, Bytes, BytesMut},
+        pin_project::pin_project,
+        serde::{Deserialize, Serialize},
+        std::{io, marker::PhantomData, pin::Pin},
+        tokio_serde::{Deserializer, Serializer},
+    };
+
+    #[pin_project]
+    pub struct Postcard<Item, SinkItem> {
+        #[pin]
+        buffer: Box<Option<BytesMut>>,
+        _marker: PhantomData<(Item, SinkItem)>,
+    }
+
+    impl<Item, SinkItem> Default for Postcard<Item, SinkItem> {
+        fn default() -> Self {
+            Self::new()
+        }
+    }
+
+    impl<Item, SinkItem> Postcard<Item, SinkItem> {
+        pub fn new() -> Self {
+            Self {
+                buffer: Box::new(None),
+                _marker: PhantomData,
+            }
+        }
+    }
+
+    pub type SymmetricalPostcard<T> = Postcard<T, T>;
+
+    impl<Item, SinkItem> Deserializer<Item> for Postcard<Item, SinkItem>
+    where
+        for<'a> Item: Deserialize<'a>,
+    {
+        type Error = io::Error;
+
+        fn deserialize(self: Pin<&mut Self>, src: &BytesMut) -> Result<Item, Self::Error> {
+            postcard::from_bytes(&src)
+                .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))
+        }
+    }
+
+    impl<Item, SinkItem> Serializer<SinkItem> for Postcard<Item, SinkItem>
+    where
+        SinkItem: Serialize,
+    {
+        type Error = io::Error;
+
+        fn serialize(self: Pin<&mut Self>, data: &SinkItem) -> Result<Bytes, Self::Error> {
+            let mut this = self.project();
+            let buffer = this.buffer.take().unwrap_or_default();
+            let mut buffer = postcard::to_io(data, buffer.writer())
+                .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?
+                .into_inner();
+            if buffer.len() <= 1024 {
+                let res = buffer.split().freeze();
+                this.buffer.replace(buffer);
+                Ok(res)
+            } else {
+                Ok(buffer.freeze())
+            }
+        }
+    }
+}
