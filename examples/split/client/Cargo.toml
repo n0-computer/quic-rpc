@@ -12,6 +12,5 @@ quic-rpc = { path = "../../..", features = ["quinn-transport", "macros"] }
 quinn = { package = "iroh-quinn", version = "0.12" }
 rustls = { version = "0.23", default-features = false, features = ["ring"] }
 tracing-subscriber = "0.3.16"
-serde = { version = "1", features = ["derive"] }
 tokio = { version = "1", features = ["full"] }
 types = { path = "../types" }
