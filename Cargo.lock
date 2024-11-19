@@ -2984,6 +2984,7 @@ dependencies = [
  "rcgen",
  "serde",
  "slab",
+ "smallvec",
  "tempfile",
  "testresult",
  "thousands",
