@@ -13,6 +13,7 @@ description = "A streaming rpc system based on quic"
 rust-version = "1.76"
 
 [dependencies]
+cc = "=1.1.31" # enforce cc version, because of https://github.com/rust-lang/cc-rs/issues/1278
 bincode = { version = "1.3.3", optional = true }
 bytes = { version = "1", optional = true }
 derive_more = { version = "1.0.0-beta.6", features = ["from", "try_into", "display"] }
@@ -24,18 +25,17 @@ hyper = { version = "0.14.16", features = ["full"], optional = true }
 iroh-net = { version = "0.28.1", optional = true }
 pin-project = "1"
 quinn = { package = "iroh-quinn", version = "0.12", optional = true }
-serde = { version = "1.0.183", features = ["derive"] }
+serde = { version = "1.0", features = ["derive"] }
 tokio = { version = "1", default-features = false, features = ["macros", "sync"] }
-tokio-serde = { version = "0.8", features = ["bincode"], optional = true }
+tokio-serde = { version = "0.9", features = ["bincode"], optional = true }
 tokio-util = { version = "0.7", features = ["rt"] }
 tracing = "0.1"
-hex = "0.4.3"
 futures = { version = "0.3.30", optional = true }
 anyhow = "1.0.73"
 
 # Indirect dependencies, is needed to make the minimal crates versions work
-educe = "0.4.20" # tokio-serde
 slab = "0.4.9" # iroh-quinn
+time = "0.3.36" # serde
 
 [dev-dependencies]
 anyhow = "1.0.73"
