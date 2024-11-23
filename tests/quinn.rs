@@ -4,15 +4,22 @@ use std::{
     sync::Arc,
 };
 
-use quic_rpc::{transport, RpcClient, RpcServer};
+use quic_rpc::{
+    transport::{
+        self,
+        quinn::{QuinnConnector, QuinnListener},
+    },
+    RpcClient, RpcServer,
+};
 use quinn::{
     crypto::rustls::{QuicClientConfig, QuicServerConfig},
     rustls, ClientConfig, Endpoint, ServerConfig,
 };
-use tokio::task::JoinHandle;
 
 mod math;
 use math::*;
+use testresult::TestResult;
+use tokio_util::task::AbortOnDropHandle;
 mod util;
 
 /// Constructs a QUIC endpoint configured for use a client only.
@@ -73,10 +80,9 @@ fn configure_client(server_certs: &[&[u8]]) -> anyhow::Result<ClientConfig> {
 #[allow(clippy::field_reassign_with_default)] // https://github.com/rust-lang/rust-clippy/issues/6527
 fn configure_server() -> anyhow::Result<(ServerConfig, Vec<u8>)> {
     let cert = rcgen::generate_simple_self_signed(vec!["localhost".into()])?;
-    let cert_der = cert.serialize_der()?;
-    let priv_key = cert.serialize_private_key_der();
-    let priv_key = rustls::pki_types::PrivatePkcs8KeyDer::from(priv_key);
-    let cert_chain = vec![rustls::pki_types::CertificateDer::from(cert_der.clone())];
+    let cert_der = cert.cert.der();
+    let priv_key = rustls::pki_types::PrivatePkcs8KeyDer::from(cert.key_pair.serialize_der());
+    let cert_chain = vec![cert_der.clone()];
 
     let crypto_server_config = rustls::ServerConfig::builder_with_provider(Arc::new(
         rustls::crypto::ring::default_provider(),
@@ -92,7 +98,7 @@ fn configure_server() -> anyhow::Result<(ServerConfig, Vec<u8>)> {
         .unwrap()
         .max_concurrent_uni_streams(0_u8.into());
 
-    Ok((server_config, cert_der))
+    Ok((server_config, cert_der.to_vec()))
 }
 
 pub struct Endpoints {
@@ -112,13 +118,10 @@ pub fn make_endpoints(port: u16) -> anyhow::Result<Endpoints> {
     })
 }
 
-fn run_server(server: quinn::Endpoint) -> JoinHandle<anyhow::Result<()>> {
-    tokio::task::spawn(async move {
-        let connection = transport::quinn::QuinnListener::new(server)?;
-        let server = RpcServer::new(connection);
-        ComputeService::server(server).await?;
-        anyhow::Ok(())
-    })
+fn run_server(server: quinn::Endpoint) -> AbortOnDropHandle<()> {
+    let listener = QuinnListener::new(server).unwrap();
+    let listener = RpcServer::new(listener);
+    ComputeService::server(listener)
 }
 
 // #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -131,13 +134,12 @@ async fn quinn_channel_bench() -> anyhow::Result<()> {
         server_addr,
     } = make_endpoints(12345)?;
     tracing::debug!("Starting server");
-    let server_handle = run_server(server);
+    let _server_handle = run_server(server);
     tracing::debug!("Starting client");
-    let client = transport::quinn::QuinnConnector::new(client, server_addr, "localhost".into());
+    let client = QuinnConnector::new(client, server_addr, "localhost".into());
     let client = RpcClient::new(client);
     tracing::debug!("Starting benchmark");
     bench(client, 50000).await?;
-    server_handle.abort();
     Ok(())
 }
 
@@ -149,11 +151,10 @@ async fn quinn_channel_smoke() -> anyhow::Result<()> {
         server,
         server_addr,
     } = make_endpoints(12346)?;
-    let server_handle = run_server(server);
+    let _server_handle = run_server(server);
     let client_connection =
         transport::quinn::QuinnConnector::new(client, server_addr, "localhost".into());
     smoke_test(client_connection).await?;
-    server_handle.abort();
     Ok(())
 }
 
@@ -162,7 +163,7 @@ async fn quinn_channel_smoke() -> anyhow::Result<()> {
 ///
 /// This is a regression test.
 #[tokio::test]
-async fn server_away_and_back() -> anyhow::Result<()> {
+async fn server_away_and_back() -> TestResult<()> {
     tracing_subscriber::fmt::try_init().ok();
     tracing::info!("Creating endpoints");
 
@@ -185,10 +186,10 @@ async fn server_away_and_back() -> anyhow::Result<()> {
     let server_handle = tokio::task::spawn(ComputeService::server_bounded(server, 1));
 
     // send the first request and wait for the response to ensure everything works as expected
-    let SqrResponse(response) = client.rpc(Sqr(4)).await.unwrap();
+    let SqrResponse(response) = client.rpc(Sqr(4)).await?;
     assert_eq!(response, 16);
 
-    let server = server_handle.await.unwrap().unwrap();
+    let server = server_handle.await??;
     drop(server);
     // wait for drop to free the socket
     tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
@@ -200,9 +201,8 @@ async fn server_away_and_back() -> anyhow::Result<()> {
     let server_handle = tokio::task::spawn(ComputeService::server_bounded(server, 5));
 
     // server is running, this should work
-    let SqrResponse(response) = client.rpc(Sqr(3)).await.unwrap();
+    let SqrResponse(response) = client.rpc(Sqr(3)).await?;
     assert_eq!(response, 9);
-
     server_handle.abort();
     Ok(())
 }

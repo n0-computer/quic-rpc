@@ -26,6 +26,7 @@ use quic_rpc::{
 };
 use serde::{Deserialize, Serialize};
 use thousands::Separable;
+use tokio_util::task::AbortOnDropHandle;
 
 /// compute the square of a number
 #[derive(Debug, Serialize, Deserialize)]
@@ -163,20 +164,14 @@ impl ComputeService {
         }
     }
 
-    pub async fn server<C: Listener<ComputeService>>(
+    pub fn server<C: Listener<ComputeService>>(
         server: RpcServer<ComputeService, C>,
-    ) -> result::Result<(), RpcServerError<C>> {
-        let s = server;
-        let service = ComputeService;
-        loop {
-            let (req, chan) = s.accept().await?.read_first().await?;
-            let service = service.clone();
-            tokio::spawn(async move { Self::handle_rpc_request(service, req, chan).await });
-        }
+    ) -> AbortOnDropHandle<()> {
+        server.spawn_accept_loop(|req, chan| Self::handle_rpc_request(ComputeService, req, chan))
     }
 
     pub async fn handle_rpc_request<E>(
-        service: ComputeService,
+        self,
         req: ComputeRequest,
         chan: RpcChannel<ComputeService, E>,
     ) -> Result<(), RpcServerError<E>>
@@ -186,10 +181,10 @@ impl ComputeService {
         use ComputeRequest::*;
         #[rustfmt::skip]
         match req {
-            Sqr(msg) => chan.rpc(msg, service, ComputeService::sqr).await,
-            Sum(msg) => chan.client_streaming(msg, service, ComputeService::sum).await,
-            Fibonacci(msg) => chan.server_streaming(msg, service, ComputeService::fibonacci).await,
-            Multiply(msg) => chan.bidi_streaming(msg, service, ComputeService::multiply).await,
+            Sqr(msg) => chan.rpc(msg, self, Self::sqr).await,
+            Sum(msg) => chan.client_streaming(msg, self, Self::sum).await,
+            Fibonacci(msg) => chan.server_streaming(msg, self, Self::fibonacci).await,
+            Multiply(msg) => chan.bidi_streaming(msg, self, Self::multiply).await,
             MultiplyUpdate(_) => Err(RpcServerError::UnexpectedStartMessage)?,
             SumUpdate(_) => Err(RpcServerError::UnexpectedStartMessage)?,
         }?;
