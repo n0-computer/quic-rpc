@@ -160,8 +160,7 @@ mod tokio_serde_postcard {
         type Error = io::Error;
 
         fn deserialize(self: Pin<&mut Self>, src: &BytesMut) -> Result<Item, Self::Error> {
-            postcard::from_bytes(&src)
-                .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))
+            postcard::from_bytes(src).map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))
         }
     }
 
