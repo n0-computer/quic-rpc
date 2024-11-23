@@ -61,7 +61,7 @@ quinn-transport = ["dep:flume", "dep:quinn", "dep:postcard", "dep:tokio-serde", 
 flume-transport = ["dep:flume"]
 iroh-net-transport = ["dep:iroh-net", "dep:flume", "dep:quinn", "dep:postcard", "dep:tokio-serde", "tokio-util/codec"]
 macros = []
-default = ["flume-transport", "hyper-transport"]
+default = ["flume-transport"]
 
 [package.metadata.docs.rs]
 all-features = true

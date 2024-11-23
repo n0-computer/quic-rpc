@@ -1,4 +1,5 @@
 #![cfg(feature = "hyper-transport")]
+#![cfg(feature = "macros")]
 use std::{assert, net::SocketAddr, result};
 
 use ::hyper::Uri;
