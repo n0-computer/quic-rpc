@@ -158,7 +158,7 @@ impl<'a, In: RpcMessage, Out: RpcMessage> OpenFuture<'a, In, Out> {
     }
 }
 
-impl<'a, In: RpcMessage, Out: RpcMessage> Future for OpenFuture<'a, In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> Future for OpenFuture<'_, In, Out> {
     type Output = anyhow::Result<(SendSink<Out>, RecvStream<In>)>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
@@ -199,7 +199,7 @@ impl<'a, In: RpcMessage, Out: RpcMessage> AcceptFuture<'a, In, Out> {
     }
 }
 
-impl<'a, In: RpcMessage, Out: RpcMessage> Future for AcceptFuture<'a, In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> Future for AcceptFuture<'_, In, Out> {
     type Output = anyhow::Result<(SendSink<Out>, RecvStream<In>)>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {

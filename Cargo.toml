@@ -13,7 +13,6 @@ description = "A streaming rpc system based on quic"
 rust-version = "1.76"
 
 [dependencies]
-bincode = { version = "1.3.3", optional = true }
 bytes = { version = "1", optional = true }
 derive_more = { version = "1.0.0-beta.6", features = ["from", "try_into", "display"] }
 flume = { version = "0.11", optional = true }
@@ -28,12 +27,14 @@ serde = { version = "1.0", features = ["derive"] }
 tokio = { version = "1", default-features = false, features = ["macros", "sync"] }
 tokio-serde = { version = "0.9", features = ["bincode"], optional = true }
 tokio-util = { version = "0.7", features = ["rt"] }
+postcard = { version = "1", features = ["use-std"], optional = true }
 tracing = "0.1"
 futures = { version = "0.3.30", optional = true }
 anyhow = "1.0.73"
 
 # Indirect dependencies, is needed to make the minimal crates versions work
 slab = "0.4.9" # iroh-quinn
+smallvec = "1.13.2"
 time = "0.3.36" # serde
 
 [dev-dependencies]
@@ -54,10 +55,10 @@ nested_enum_utils = "0.1.0"
 tokio-util = { version = "0.7", features = ["rt"] }
 
 [features]
-hyper-transport = ["dep:flume", "dep:hyper", "dep:bincode", "dep:bytes", "dep:tokio-serde", "tokio-util/codec"]
-quinn-transport = ["dep:flume", "dep:quinn", "dep:bincode", "dep:tokio-serde", "tokio-util/codec"]
+hyper-transport = ["dep:flume", "dep:hyper", "dep:postcard", "dep:bytes", "dep:tokio-serde", "tokio-util/codec"]
+quinn-transport = ["dep:flume", "dep:quinn", "dep:postcard", "dep:tokio-serde", "tokio-util/codec"]
 flume-transport = ["dep:flume"]
-iroh-net-transport = ["dep:iroh-net", "dep:flume", "dep:quinn", "dep:bincode", "dep:tokio-serde", "tokio-util/codec"]
+iroh-net-transport = ["dep:iroh-net", "dep:flume", "dep:quinn", "dep:postcard", "dep:tokio-serde", "tokio-util/codec"]
 macros = []
 default = ["flume-transport"]
 

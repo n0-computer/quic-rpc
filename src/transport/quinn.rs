@@ -18,7 +18,7 @@ use tokio::sync::oneshot;
 use tracing::{debug_span, Instrument};
 
 use super::{
-    util::{FramedBincodeRead, FramedBincodeWrite},
+    util::{FramedPostcardRead, FramedPostcardWrite},
     StreamTypes,
 };
 use crate::{
@@ -578,7 +578,7 @@ impl<'a, T> Receiver<'a, T> {
     }
 }
 
-impl<'a, T> Stream for Receiver<'a, T> {
+impl<T> Stream for Receiver<'_, T> {
     type Item = T;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
@@ -653,12 +653,12 @@ impl<In: RpcMessage, Out: RpcMessage> Connector for QuinnConnector<In, Out> {
     }
 }
 
-/// A sink that wraps a quinn SendStream with length delimiting and bincode
+/// A sink that wraps a quinn SendStream with length delimiting and postcard
 ///
 /// If you want to send bytes directly, use [SendSink::into_inner] to get the
 /// underlying [quinn::SendStream].
 #[pin_project]
-pub struct SendSink<Out>(#[pin] FramedBincodeWrite<quinn::SendStream, Out>);
+pub struct SendSink<Out>(#[pin] FramedPostcardWrite<quinn::SendStream, Out>);
 
 impl<Out> fmt::Debug for SendSink<Out> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -668,7 +668,7 @@ impl<Out> fmt::Debug for SendSink<Out> {
 
 impl<Out: Serialize> SendSink<Out> {
     fn new(inner: quinn::SendStream) -> Self {
-        let inner = FramedBincodeWrite::new(inner, MAX_FRAME_LENGTH);
+        let inner = FramedPostcardWrite::new(inner, MAX_FRAME_LENGTH);
         Self(inner)
     }
 }
@@ -710,12 +710,12 @@ impl<Out: Serialize> Sink<Out> for SendSink<Out> {
     }
 }
 
-/// A stream that wraps a quinn RecvStream with length delimiting and bincode
+/// A stream that wraps a quinn RecvStream with length delimiting and postcard
 ///
 /// If you want to receive bytes directly, use [RecvStream::into_inner] to get
 /// the underlying [quinn::RecvStream].
 #[pin_project]
-pub struct RecvStream<In>(#[pin] FramedBincodeRead<quinn::RecvStream, In>);
+pub struct RecvStream<In>(#[pin] FramedPostcardRead<quinn::RecvStream, In>);
 
 impl<In> fmt::Debug for RecvStream<In> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -725,7 +725,7 @@ impl<In> fmt::Debug for RecvStream<In> {
 
 impl<In: DeserializeOwned> RecvStream<In> {
     fn new(inner: quinn::RecvStream) -> Self {
-        let inner = FramedBincodeRead::new(inner, MAX_FRAME_LENGTH);
+        let inner = FramedPostcardRead::new(inner, MAX_FRAME_LENGTH);
         Self(inner)
     }
 }

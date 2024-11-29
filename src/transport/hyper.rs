@@ -297,7 +297,7 @@ async fn try_forward_all<In: RpcMessage>(
     let mut sent = 0;
     while let Some(msg) = try_get_length_prefixed(&buffer[sent..]) {
         sent += msg.len() + 4;
-        let item = bincode::deserialize::<In>(msg).map_err(RecvError::DeserializeError);
+        let item = postcard::from_bytes::<In>(msg).map_err(RecvError::DeserializeError);
         if let Err(_cause) = req_tx.send_async(item).await {
             // The receiver is gone, so we can't send any more data.
             //
@@ -434,7 +434,7 @@ impl<Out: RpcMessage> SendSink<Out> {
     fn serialize(&self, item: Out) -> Result<Bytes, SendError> {
         let mut data = Vec::with_capacity(1024);
         data.extend_from_slice(&[0u8; 4]);
-        bincode::serialize_into(&mut data, &item).map_err(SendError::SerializeError)?;
+        let mut data = postcard::to_extend(&item, data).map_err(SendError::SerializeError)?;
         let len = data.len() - 4;
         if len > self.config.max_payload_size {
             return Err(SendError::SizeError(len));
@@ -503,8 +503,8 @@ impl<Out: RpcMessage> Sink<Out> for SendSink<Out> {
 /// Send error for hyper channels.
 #[derive(Debug)]
 pub enum SendError {
-    /// Error when bincode serializing the message.
-    SerializeError(bincode::Error),
+    /// Error when postcard serializing the message.
+    SerializeError(postcard::Error),
     /// The message is too large to be sent.
     SizeError(usize),
     /// The connection has been closed.
@@ -522,8 +522,8 @@ impl error::Error for SendError {}
 /// Receive error for hyper channels.
 #[derive(Debug)]
 pub enum RecvError {
-    /// Error when bincode deserializing the message.
-    DeserializeError(bincode::Error),
+    /// Error when postcard deserializing the message.
+    DeserializeError(postcard::Error),
     /// Hyper network error.
     NetworkError(hyper::Error),
 }
