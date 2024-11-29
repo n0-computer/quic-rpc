@@ -55,7 +55,7 @@ fn run_server(server: iroh_net::Endpoint) -> AbortOnDropHandle<()> {
 
 // #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[tokio::test]
-async fn iroh_net_channel_bench() -> anyhow::Result<()> {
+async fn iroh_channel_bench() -> anyhow::Result<()> {
     tracing_subscriber::fmt::try_init().ok();
 
     let Endpoints {
@@ -74,7 +74,7 @@ async fn iroh_net_channel_bench() -> anyhow::Result<()> {
 }
 
 #[tokio::test]
-async fn iroh_net_channel_smoke() -> anyhow::Result<()> {
+async fn iroh_channel_smoke() -> anyhow::Result<()> {
     tracing_subscriber::fmt::try_init().ok();
     let Endpoints {
         client,
