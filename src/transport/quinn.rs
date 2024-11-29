@@ -578,7 +578,7 @@ impl<'a, T> Receiver<'a, T> {
     }
 }
 
-impl<'a, T> Stream for Receiver<'a, T> {
+impl<T> Stream for Receiver<'_, T> {
     type Item = T;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
