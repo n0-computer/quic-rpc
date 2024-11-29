@@ -1,4 +1,4 @@
-//! iroh-net transport implementation based on [iroh-net](https://crates.io/crates/iroh-net)
+//! iroh transport implementation based on [iroh-net](https://crates.io/crates/iroh)
 
 use std::{
     collections::BTreeSet,
@@ -79,12 +79,12 @@ pub enum AccessControl {
 
 /// A server endpoint using a quinn connection
 #[derive(Debug)]
-pub struct IrohNetListener<In: RpcMessage, Out: RpcMessage> {
+pub struct IrohListener<In: RpcMessage, Out: RpcMessage> {
     inner: Arc<ListenerInner>,
     _p: PhantomData<(In, Out)>,
 }
 
-impl<In: RpcMessage, Out: RpcMessage> IrohNetListener<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> IrohListener<In, Out> {
     /// handles RPC requests from a connection
     ///
     /// to cleanly shut down the handler, drop the receiver side of the sender.
@@ -259,7 +259,7 @@ impl<In: RpcMessage, Out: RpcMessage> IrohNetListener<In, Out> {
     }
 }
 
-impl<In: RpcMessage, Out: RpcMessage> Clone for IrohNetListener<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> Clone for IrohListener<In, Out> {
     fn clone(&self) -> Self {
         Self {
             inner: self.inner.clone(),
@@ -268,21 +268,21 @@ impl<In: RpcMessage, Out: RpcMessage> Clone for IrohNetListener<In, Out> {
     }
 }
 
-impl<In: RpcMessage, Out: RpcMessage> ConnectionErrors for IrohNetListener<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> ConnectionErrors for IrohListener<In, Out> {
     type SendError = io::Error;
     type RecvError = io::Error;
     type OpenError = quinn::ConnectionError;
     type AcceptError = quinn::ConnectionError;
 }
 
-impl<In: RpcMessage, Out: RpcMessage> StreamTypes for IrohNetListener<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> StreamTypes for IrohListener<In, Out> {
     type In = In;
     type Out = Out;
     type SendSink = SendSink<Out>;
     type RecvStream = RecvStream<In>;
 }
 
-impl<In: RpcMessage, Out: RpcMessage> Listener for IrohNetListener<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> Listener for IrohListener<In, Out> {
     async fn accept(&self) -> Result<(Self::SendSink, Self::RecvStream), AcceptError> {
         let (send, recv) = self
             .inner
@@ -342,13 +342,13 @@ impl Drop for ClientConnectionInner {
     }
 }
 
-/// A connection using an iroh-net connection
-pub struct IrohNetConnector<In: RpcMessage, Out: RpcMessage> {
+/// A connection using an iroh connection
+pub struct IrohConnector<In: RpcMessage, Out: RpcMessage> {
     inner: Arc<ClientConnectionInner>,
     _p: PhantomData<(In, Out)>,
 }
 
-impl<In: RpcMessage, Out: RpcMessage> IrohNetConnector<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> IrohConnector<In, Out> {
     async fn single_connection_handler(
         connection: quinn::Connection,
         requests_rx: flume::Receiver<oneshot::Sender<anyhow::Result<SocketInner>>>,
@@ -609,7 +609,7 @@ impl Future for ReconnectHandler {
     }
 }
 
-impl<In: RpcMessage, Out: RpcMessage> fmt::Debug for IrohNetConnector<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> fmt::Debug for IrohConnector<In, Out> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ClientChannel")
             .field("inner", &self.inner)
@@ -617,7 +617,7 @@ impl<In: RpcMessage, Out: RpcMessage> fmt::Debug for IrohNetConnector<In, Out> {
     }
 }
 
-impl<In: RpcMessage, Out: RpcMessage> Clone for IrohNetConnector<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> Clone for IrohConnector<In, Out> {
     fn clone(&self) -> Self {
         Self {
             inner: self.inner.clone(),
@@ -626,21 +626,21 @@ impl<In: RpcMessage, Out: RpcMessage> Clone for IrohNetConnector<In, Out> {
     }
 }
 
-impl<In: RpcMessage, Out: RpcMessage> ConnectionErrors for IrohNetConnector<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> ConnectionErrors for IrohConnector<In, Out> {
     type SendError = io::Error;
     type RecvError = io::Error;
     type OpenError = anyhow::Error;
     type AcceptError = anyhow::Error;
 }
 
-impl<In: RpcMessage, Out: RpcMessage> StreamTypes for IrohNetConnector<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> StreamTypes for IrohConnector<In, Out> {
     type In = In;
     type Out = Out;
     type SendSink = SendSink<Out>;
     type RecvStream = RecvStream<In>;
 }
 
-impl<In: RpcMessage, Out: RpcMessage> Connector for IrohNetConnector<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> Connector for IrohConnector<In, Out> {
     async fn open(&self) -> Result<(Self::SendSink, Self::RecvStream), Self::OpenError> {
         let (request_ack_tx, request_ack_rx) = oneshot::channel();
 

@@ -397,9 +397,9 @@ impl<In: RpcMessage, Out: RpcMessage> BoxableListener<In, Out>
     }
 }
 
-#[cfg(feature = "iroh-net-transport")]
+#[cfg(feature = "iroh-transport")]
 impl<In: RpcMessage, Out: RpcMessage> BoxableConnector<In, Out>
-    for super::iroh_net::IrohNetConnector<In, Out>
+    for super::iroh::IrohConnector<In, Out>
 {
     fn clone_box(&self) -> Box<dyn BoxableConnector<In, Out>> {
         Box::new(self.clone())
@@ -418,9 +418,9 @@ impl<In: RpcMessage, Out: RpcMessage> BoxableConnector<In, Out>
     }
 }
 
-#[cfg(feature = "iroh-net-transport")]
+#[cfg(feature = "iroh-transport")]
 impl<In: RpcMessage, Out: RpcMessage> BoxableListener<In, Out>
-    for super::iroh_net::IrohNetListener<In, Out>
+    for super::iroh::IrohListener<In, Out>
 {
     fn clone_box(&self) -> Box<dyn BoxableListener<In, Out>> {
         Box::new(self.clone())

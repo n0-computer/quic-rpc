@@ -35,14 +35,14 @@ pub mod combined;
 pub mod flume;
 #[cfg(feature = "hyper-transport")]
 pub mod hyper;
-#[cfg(feature = "iroh-net-transport")]
-pub mod iroh_net;
+#[cfg(feature = "iroh-transport")]
+pub mod iroh;
 pub mod mapped;
 pub mod misc;
 #[cfg(feature = "quinn-transport")]
 pub mod quinn;
 
-#[cfg(any(feature = "quinn-transport", feature = "iroh-net-transport"))]
+#[cfg(any(feature = "quinn-transport", feature = "iroh-transport"))]
 mod util;
 
 /// Errors that can happen when creating and using a [`Connector`] or [`Listener`].

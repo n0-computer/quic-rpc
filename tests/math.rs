@@ -2,7 +2,7 @@
     feature = "flume-transport",
     feature = "hyper-transport",
     feature = "quinn-transport",
-    feature = "iroh-net-transport",
+    feature = "iroh-transport",
 ))]
 #![allow(dead_code)]
 use std::{
