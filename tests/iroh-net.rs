@@ -1,10 +1,10 @@
-#![cfg(feature = "iroh-net-transport")]
+#![cfg(feature = "iroh-transport")]
 
 use iroh_net::{key::SecretKey, NodeAddr};
 use quic_rpc::{transport, RpcClient, RpcServer};
 use testresult::TestResult;
 
-use crate::transport::iroh_net::{IrohNetConnector, IrohNetListener};
+use crate::transport::iroh::{IrohConnector, IrohListener};
 
 mod math;
 use math::*;
@@ -48,7 +48,7 @@ impl Endpoints {
 }
 
 fn run_server(server: iroh_net::Endpoint) -> AbortOnDropHandle<()> {
-    let connection = IrohNetListener::new(server).unwrap();
+    let connection = IrohListener::new(server).unwrap();
     let server = RpcServer::new(connection);
     ComputeService::server(server)
 }
@@ -67,7 +67,7 @@ async fn iroh_net_channel_bench() -> anyhow::Result<()> {
     let _server_handle = run_server(server);
     tracing::debug!("Starting client");
 
-    let client = RpcClient::new(IrohNetConnector::new(client, server_node_addr, ALPN.into()));
+    let client = RpcClient::new(IrohConnector::new(client, server_node_addr, ALPN.into()));
     tracing::debug!("Starting benchmark");
     bench(client, 50000).await?;
     Ok(())
@@ -82,7 +82,7 @@ async fn iroh_net_channel_smoke() -> anyhow::Result<()> {
         server_node_addr,
     } = Endpoints::new().await?;
     let _server_handle = run_server(server);
-    let client_connection = IrohNetConnector::new(client, server_node_addr, ALPN.into());
+    let client_connection = IrohConnector::new(client, server_node_addr, ALPN.into());
     smoke_test(client_connection).await?;
     Ok(())
 }
@@ -102,15 +102,14 @@ async fn server_away_and_back() -> TestResult<()> {
     let server_node_id = server_secret_key.public();
 
     // create the RPC client
-    let client_connection =
-        transport::iroh_net::IrohNetConnector::<ComputeResponse, ComputeRequest>::new(
-            client_endpoint.clone(),
-            server_node_id,
-            ALPN.into(),
-        );
+    let client_connection = transport::iroh::IrohConnector::<ComputeResponse, ComputeRequest>::new(
+        client_endpoint.clone(),
+        server_node_id,
+        ALPN.into(),
+    );
     let client = RpcClient::<
         ComputeService,
-        transport::iroh_net::IrohNetConnector<ComputeResponse, ComputeRequest>,
+        transport::iroh::IrohConnector<ComputeResponse, ComputeRequest>,
     >::new(client_connection);
 
     // send a request. No server available so it should fail
@@ -119,7 +118,7 @@ async fn server_away_and_back() -> TestResult<()> {
     let server_endpoint = make_endpoint(server_secret_key.clone(), ALPN).await?;
 
     // create the RPC Server
-    let connection = transport::iroh_net::IrohNetListener::new(server_endpoint.clone())?;
+    let connection = transport::iroh::IrohListener::new(server_endpoint.clone())?;
     let server = RpcServer::new(connection);
     let server_handle = tokio::spawn(ComputeService::server_bounded(server, 1));
 
@@ -142,7 +141,7 @@ async fn server_away_and_back() -> TestResult<()> {
     let server_endpoint = make_endpoint(server_secret_key.clone(), ALPN).await?;
 
     // make the server run again
-    let connection = transport::iroh_net::IrohNetListener::new(server_endpoint.clone())?;
+    let connection = transport::iroh::IrohListener::new(server_endpoint.clone())?;
     let server = RpcServer::new(connection);
     let server_handle = tokio::spawn(ComputeService::server_bounded(server, 5));
 
