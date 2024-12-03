@@ -1,6 +1,6 @@
 #![cfg(feature = "iroh-transport")]
 
-use iroh_net::{key::SecretKey, NodeAddr};
+use iroh::{key::SecretKey, NodeAddr};
 use quic_rpc::{transport, RpcClient, RpcServer};
 use testresult::TestResult;
 
@@ -11,18 +11,15 @@ use math::*;
 use tokio_util::task::AbortOnDropHandle;
 mod util;
 
-const ALPN: &[u8] = b"quic-rpc/iroh-net/test";
+const ALPN: &[u8] = b"quic-rpc/iroh/test";
 
-/// Constructs an iroh-net endpoint
+/// Constructs an iroh endpoint
 ///
 /// ## Args
 ///
 /// - alpn: the ALPN protocol to use
-pub async fn make_endpoint(
-    secret_key: SecretKey,
-    alpn: &[u8],
-) -> anyhow::Result<iroh_net::Endpoint> {
-    iroh_net::Endpoint::builder()
+pub async fn make_endpoint(secret_key: SecretKey, alpn: &[u8]) -> anyhow::Result<iroh::Endpoint> {
+    iroh::Endpoint::builder()
         .secret_key(secret_key)
         .alpns(vec![alpn.to_vec()])
         .bind()
@@ -30,8 +27,8 @@ pub async fn make_endpoint(
 }
 
 pub struct Endpoints {
-    client: iroh_net::Endpoint,
-    server: iroh_net::Endpoint,
+    client: iroh::Endpoint,
+    server: iroh::Endpoint,
     server_node_addr: NodeAddr,
 }
 
@@ -47,7 +44,7 @@ impl Endpoints {
     }
 }
 
-fn run_server(server: iroh_net::Endpoint) -> AbortOnDropHandle<()> {
+fn run_server(server: iroh::Endpoint) -> AbortOnDropHandle<()> {
     let connection = IrohListener::new(server).unwrap();
     let server = RpcServer::new(connection);
     ComputeService::server(server)
