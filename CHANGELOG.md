@@ -6,6 +6,13 @@ All notable changes to quic-rpc will be documented in this file.
 
 ### ⛰️  Features
 
+- Update to iroh@0.29.0 - ([02b2559](https://github.com/n0-computer/iroh/commit/02b25594bbfd210acb29b65c59d80c3063565193))
+- Update to iroh@0.29.0 ([#125](https://github.com/n0-computer/iroh/issues/125)) - ([07f1335](https://github.com/n0-computer/iroh/commit/07f1335f1616359b93ee60277a80a07df7552e18))
+
+## [0.16.0](https://github.com/n0-computer/iroh/compare/v0.15.1..v0.16.0) - 2024-12-02
+
+### ⛰️  Features
+
 - Use postcard encoding for all transports that require serialization ([#114](https://github.com/n0-computer/iroh/issues/114)) - ([badb606](https://github.com/n0-computer/iroh/commit/badb6068db23e6262c183ef8981228fd8ca1ef61))
 
 ### 🚜 Refactor
@@ -20,6 +27,7 @@ All notable changes to quic-rpc will be documented in this file.
 - Prune some deps ([#119](https://github.com/n0-computer/iroh/issues/119)) - ([dc75b95](https://github.com/n0-computer/iroh/commit/dc75b951bcd6b3b2239ab7a71e2fedcd12152853))
 - Remove `cc` version pinning - ([6da6783](https://github.com/n0-computer/iroh/commit/6da6783ca95f90e38f22091d0d5c8e6b13f6a3ec))
 - Remove `cc` version pinning ([#122](https://github.com/n0-computer/iroh/issues/122)) - ([a5606c2](https://github.com/n0-computer/iroh/commit/a5606c260275d433f00c3aed2fb57ed082900c38))
+- Release 0.16.0 ([#124](https://github.com/n0-computer/iroh/issues/124)) - ([a19ce1b](https://github.com/n0-computer/iroh/commit/a19ce1be542382a65ca7c56843de49a108bf21db))
 
 ## [0.15.1](https://github.com/n0-computer/iroh/compare/v0.15.0..v0.15.1) - 2024-11-14
 
