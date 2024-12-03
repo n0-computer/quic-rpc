@@ -1,4 +1,4 @@
-//! iroh transport implementation based on [iroh-net](https://crates.io/crates/iroh)
+//! iroh transport implementation based on [iroh](https://crates.io/crates/iroh)
 
 use std::{
     collections::BTreeSet,
@@ -16,7 +16,7 @@ use std::{
 use flume::TryRecvError;
 use futures_lite::Stream;
 use futures_sink::Sink;
-use iroh_net::{NodeAddr, NodeId};
+use iroh::{NodeAddr, NodeId};
 use pin_project::pin_project;
 use quinn::Connection;
 use serde::{de::DeserializeOwned, Serialize};
@@ -36,7 +36,7 @@ const MAX_FRAME_LENGTH: usize = 1024 * 1024 * 16;
 
 #[derive(Debug)]
 struct ListenerInner {
-    endpoint: Option<iroh_net::Endpoint>,
+    endpoint: Option<iroh::Endpoint>,
     task: Option<tokio::task::JoinHandle<()>>,
     local_addr: Vec<LocalAddr>,
     receiver: flume::Receiver<SocketInner>,
@@ -51,9 +51,9 @@ impl Drop for ListenerInner {
                 let span = debug_span!("closing listener");
                 handle.spawn(
                     async move {
-                        // iroh-net endpoint's close is async, and internally it waits the
+                        // iroh endpoint's close is async, and internally it waits the
                         // underlying quinn endpoint to be idle.
-                        if let Err(e) = endpoint.close(0u32.into(), b"Listener dropped").await {
+                        if let Err(e) = endpoint.close().await {
                             tracing::warn!(?e, "error closing listener");
                         }
                     }
@@ -111,7 +111,7 @@ impl<In: RpcMessage, Out: RpcMessage> IrohListener<In, Out> {
     }
 
     async fn endpoint_handler(
-        endpoint: iroh_net::Endpoint,
+        endpoint: iroh::Endpoint,
         sender: flume::Sender<SocketInner>,
         allowed_node_ids: BTreeSet<NodeId>,
     ) {
@@ -136,16 +136,16 @@ impl<In: RpcMessage, Out: RpcMessage> IrohListener<In, Out> {
             // The same applies when it isn't empty, ignoring the check for emptiness and always
             // extracting the node id and checking if it's in the set.
             if !allowed_node_ids.is_empty() {
-                let Ok(client_node_id) = iroh_net::endpoint::get_remote_node_id(&connection)
-                    .map_err(|e| {
+                let Ok(client_node_id) =
+                    iroh::endpoint::get_remote_node_id(&connection).map_err(|e| {
                         tracing::error!(
                             ?e,
-                            "Failed to extract iroh-net node id from incoming connection from {:?}",
+                            "Failed to extract iroh node id from incoming connection from {:?}",
                             connection.remote_address()
                         )
                     })
                 else {
-                    connection.close(0u32.into(), b"failed to extract iroh-net node id");
+                    connection.close(0u32.into(), b"failed to extract iroh node id");
                     continue;
                 };
 
@@ -169,7 +169,7 @@ impl<In: RpcMessage, Out: RpcMessage> IrohListener<In, Out> {
     ///
     /// The server channel will take care of listening on the endpoint and spawning
     /// handlers for new connections.
-    pub fn new(endpoint: iroh_net::Endpoint) -> io::Result<Self> {
+    pub fn new(endpoint: iroh::Endpoint) -> io::Result<Self> {
         Self::new_with_access_control(endpoint, AccessControl::Unrestricted)
     }
 
@@ -178,7 +178,7 @@ impl<In: RpcMessage, Out: RpcMessage> IrohListener<In, Out> {
     /// The server channel will take care of listening on the endpoint and spawning
     /// handlers for new connections.
     pub fn new_with_access_control(
-        endpoint: iroh_net::Endpoint,
+        endpoint: iroh::Endpoint,
         access_control: AccessControl,
     ) -> io::Result<Self> {
         let allowed_node_ids = match access_control {
@@ -304,7 +304,7 @@ type SocketInner = (quinn::SendStream, quinn::RecvStream);
 #[derive(Debug)]
 struct ClientConnectionInner {
     /// The quinn endpoint, we just keep a clone of this for information
-    endpoint: Option<iroh_net::Endpoint>,
+    endpoint: Option<iroh::Endpoint>,
     /// The task that handles creating new connections
     task: Option<tokio::task::JoinHandle<()>>,
     /// The channel to send new received connections
@@ -320,12 +320,9 @@ impl Drop for ClientConnectionInner {
                 let span = debug_span!("closing client endpoint");
                 handle.spawn(
                     async move {
-                        // iroh-net endpoint's close is async, and internally it waits the
+                        // iroh endpoint's close is async, and internally it waits the
                         // underlying quinn endpoint to be idle.
-                        if let Err(e) = endpoint
-                            .close(0u32.into(), b"client connection dropped")
-                            .await
-                        {
+                        if let Err(e) = endpoint.close().await {
                             tracing::warn!(?e, "error closing client endpoint");
                         }
                     }
@@ -390,7 +387,7 @@ impl<In: RpcMessage, Out: RpcMessage> IrohConnector<In, Out> {
     /// All other errors are logged and handled internally.
     /// It will try to keep a connection open at all times.
     async fn reconnect_handler_inner(
-        endpoint: iroh_net::Endpoint,
+        endpoint: iroh::Endpoint,
         node_addr: NodeAddr,
         alpn: Vec<u8>,
         requests_rx: flume::Receiver<oneshot::Sender<anyhow::Result<SocketInner>>>,
@@ -482,7 +479,7 @@ impl<In: RpcMessage, Out: RpcMessage> IrohConnector<In, Out> {
     }
 
     async fn reconnect_handler(
-        endpoint: iroh_net::Endpoint,
+        endpoint: iroh::Endpoint,
         addr: NodeAddr,
         alpn: Vec<u8>,
         requests_rx: flume::Receiver<oneshot::Sender<anyhow::Result<SocketInner>>>,
@@ -506,11 +503,7 @@ impl<In: RpcMessage, Out: RpcMessage> IrohConnector<In, Out> {
     }
 
     /// Create a new channel
-    pub fn new(
-        endpoint: iroh_net::Endpoint,
-        node_addr: impl Into<NodeAddr>,
-        alpn: Vec<u8>,
-    ) -> Self {
+    pub fn new(endpoint: iroh::Endpoint, node_addr: impl Into<NodeAddr>, alpn: Vec<u8>) -> Self {
         let (requests_tx, requests_rx) = flume::bounded(16);
         let task = tokio::spawn(Self::reconnect_handler(
             endpoint.clone(),
@@ -530,7 +523,7 @@ impl<In: RpcMessage, Out: RpcMessage> IrohConnector<In, Out> {
 }
 
 struct ReconnectHandler {
-    endpoint: iroh_net::Endpoint,
+    endpoint: iroh::Endpoint,
     state: ConnectionState,
     node_addr: NodeAddr,
     alpn: Vec<u8>,
