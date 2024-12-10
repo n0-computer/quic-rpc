@@ -197,7 +197,7 @@ impl ComputeService {
         count: usize,
     ) -> result::Result<RpcServer<ComputeService, C>, RpcServerError<C>> {
         tracing::info!(%count, "server running");
-        let s = server;
+        let mut s = server;
         let mut received = 0;
         let service = ComputeService;
         while received < count {

@@ -58,7 +58,7 @@ async fn flume_channel_mapped_bench() -> anyhow::Result<()> {
     }
     let (server, client) = flume::channel(1);
 
-    let server = RpcServer::<OuterService, _>::new(server);
+    let mut server = RpcServer::<OuterService, _>::new(server);
     let server_handle: tokio::task::JoinHandle<Result<(), RpcServerError<_>>> =
         tokio::task::spawn(async move {
             let service = ComputeService;

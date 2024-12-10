@@ -203,7 +203,7 @@ impl<In: RpcMessage, Out: RpcMessage> StreamTypes for FlumeListener<In, Out> {
 
 impl<In: RpcMessage, Out: RpcMessage> Listener for FlumeListener<In, Out> {
     #[allow(refining_impl_trait)]
-    fn accept(&self) -> AcceptFuture<In, Out> {
+    fn accept(&mut self) -> AcceptFuture<In, Out> {
         AcceptFuture {
             wrapped: self.stream.clone().into_recv_async(),
             _p: PhantomData,

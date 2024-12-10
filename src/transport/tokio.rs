@@ -102,7 +102,7 @@ impl error::Error for RecvError {}
 /// Created using [channel].
 pub struct MemListener<In: RpcMessage, Out: RpcMessage> {
     #[allow(clippy::type_complexity)]
-    stream: tokio::sync::Mutex<tokio::sync::mpsc::Receiver<(SendSink<Out>, RecvStream<In>)>>,
+    stream: tokio::sync::mpsc::Receiver<(SendSink<Out>, RecvStream<In>)>,
 }
 
 impl<In: RpcMessage, Out: RpcMessage> fmt::Debug for MemListener<In, Out> {
@@ -183,9 +183,8 @@ impl<In: RpcMessage, Out: RpcMessage> StreamTypes for MemListener<In, Out> {
 }
 
 impl<In: RpcMessage, Out: RpcMessage> Listener for MemListener<In, Out> {
-    async fn accept(&self) -> Result<(Self::SendSink, Self::RecvStream), AcceptError> {
-        let mut stream = self.stream.lock().await;
-        match stream.recv().await {
+    async fn accept(&mut self) -> Result<(Self::SendSink, Self::RecvStream), AcceptError> {
+        match self.stream.recv().await {
             Some((send, recv)) => Ok((send, recv)),
             None => Err(AcceptError::RemoteDropped),
         }
@@ -323,6 +322,5 @@ pub fn channel<Req: RpcMessage, Res: RpcMessage>(
     buffer: usize,
 ) -> (MemListener<Req, Res>, MemConnector<Res, Req>) {
     let (sink, stream) = tokio::sync::mpsc::channel(buffer);
-    let stream = tokio::sync::Mutex::new(stream);
     (MemListener { stream }, MemConnector { sink })
 }

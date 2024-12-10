@@ -111,7 +111,7 @@ pub trait Listener: StreamTypes {
     /// Accept a new typed bidirectional channel on any of the connections we
     /// have currently opened.
     fn accept(
-        &self,
+        &mut self,
     ) -> impl Future<Output = Result<(Self::SendSink, Self::RecvStream), Self::AcceptError>> + Send;
 
     /// The local addresses this endpoint is bound to.
