@@ -67,6 +67,10 @@ default = ["flume-transport"]
 
 [package.metadata.docs.rs]
 all-features = true
+rustdoc-args = ["--cfg", "iroh_docsrs"]
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(iroh_docsrs)"] }
 
 [[example]]
 name = "errors"
