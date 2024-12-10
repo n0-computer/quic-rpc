@@ -177,3 +177,65 @@ impl<T: transport::Connector<In = S::Res, Out = S::Req>, S: Service> Connector<S
 pub trait Listener<S: Service>: transport::Listener<In = S::Req, Out = S::Res> {}
 
 impl<T: transport::Listener<In = S::Req, Out = S::Res>, S: Service> Listener<S> for T {}
+
+#[cfg(feature = "flume-transport")]
+mod flume_helpers {
+    use super::{transport, RpcClient, RpcServer, Service};
+    /// A flume listener for the given service
+    pub type FlumeListener<S> =
+        transport::flume::FlumeListener<<S as Service>::Req, <S as Service>::Res>;
+
+    /// A flume connector for the given service
+    pub type FlumeConnector<S> =
+        transport::flume::FlumeConnector<<S as Service>::Res, <S as Service>::Req>;
+
+    /// Create a pair of client and server using a flume channel
+    pub fn flume_channel<S: Service>(
+        size: usize,
+    ) -> (
+        RpcServer<S, FlumeListener<S>>,
+        RpcClient<S, FlumeConnector<S>>,
+    ) {
+        let (listener, connector) = transport::flume::channel(size);
+        (RpcServer::new(listener), RpcClient::new(connector))
+    }
+}
+
+#[cfg(feature = "flume-transport")]
+pub use flume_helpers::*;
+
+#[cfg(feature = "quinn-transport")]
+mod quinn_helpers {
+
+    use super::{transport, Service};
+    /// A quinn listener for the given service
+    pub type QuinnListener<S> =
+        transport::quinn::QuinnListener<<S as Service>::Req, <S as Service>::Res>;
+
+    /// A quinn connector for the given service
+    pub type QuinnConnector<S> =
+        transport::quinn::QuinnConnector<<S as Service>::Res, <S as Service>::Req>;
+
+    #[cfg(feature = "test-utils")]
+    /// Create a pair of client and server that are connected via a local network connection.
+    ///
+    /// This is useful for testing the quinn transport.
+    pub fn quinn_channel<S: Service>() -> anyhow::Result<(
+        super::RpcServer<S, QuinnListener<S>>,
+        super::RpcClient<S, QuinnConnector<S>>,
+    )> {
+        use super::{RpcClient, RpcServer};
+        let bind_addr: std::net::SocketAddr = ([0, 0, 0, 0], 0).into();
+        let (server_endpoint, cert_der) = transport::quinn::make_server_endpoint(bind_addr)?;
+        let addr = server_endpoint.local_addr()?;
+        let server = QuinnListener::<S>::new(server_endpoint)?;
+        let server = RpcServer::new(server);
+        let client_endpoint = transport::quinn::make_client_endpoint(bind_addr, &[&cert_der])?;
+        let client = QuinnConnector::<S>::new(client_endpoint, addr, "localhost".into());
+        let client = RpcClient::new(client);
+        Ok((server, client))
+    }
+}
+
+#[cfg(feature = "quinn-transport")]
+pub use quinn_helpers::*;
