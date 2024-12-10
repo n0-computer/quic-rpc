@@ -208,6 +208,9 @@ pub use flume_helpers::*;
 mod quinn_helpers {
 
     use super::{transport, Service};
+    #[cfg(feature = "test-utils")]
+    use super::{RpcClient, RpcServer};
+
     /// A quinn listener for the given service
     pub type QuinnListener<S> =
         transport::quinn::QuinnListener<<S as Service>::Req, <S as Service>::Res>;
@@ -221,10 +224,9 @@ mod quinn_helpers {
     ///
     /// This is useful for testing the quinn transport.
     pub fn quinn_channel<S: Service>() -> anyhow::Result<(
-        super::RpcServer<S, QuinnListener<S>>,
-        super::RpcClient<S, QuinnConnector<S>>,
+        RpcServer<S, QuinnListener<S>>,
+        RpcClient<S, QuinnConnector<S>>,
     )> {
-        use super::{RpcClient, RpcServer};
         let bind_addr: std::net::SocketAddr = ([0, 0, 0, 0], 0).into();
         let (server_endpoint, cert_der) = transport::quinn::make_server_endpoint(bind_addr)?;
         let addr = server_endpoint.local_addr()?;
