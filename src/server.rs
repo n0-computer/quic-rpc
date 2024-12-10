@@ -64,15 +64,6 @@ pub struct RpcServer<S, C = BoxedListener<S>> {
     _p: PhantomData<S>,
 }
 
-impl<S, C: Clone> Clone for RpcServer<S, C> {
-    fn clone(&self) -> Self {
-        Self {
-            source: self.source.clone(),
-            _p: PhantomData,
-        }
-    }
-}
-
 impl<S: Service, C: Listener<S>> RpcServer<S, C> {
     /// Create a new rpc server for a specific service for a [Service] given a compatible
     /// [Listener].

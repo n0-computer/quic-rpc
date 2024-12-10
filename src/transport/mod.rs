@@ -46,7 +46,7 @@ pub mod quinn;
 mod util;
 
 /// Errors that can happen when creating and using a [`Connector`] or [`Listener`].
-pub trait ConnectionErrors: Debug + Clone + Send + Sync + 'static {
+pub trait ConnectionErrors: Debug + Send + Sync + 'static {
     /// Error when sending a message via a channel
     type SendError: RpcError;
     /// Error when receiving a message via a channel
@@ -78,7 +78,7 @@ pub trait StreamTypes: ConnectionErrors {
 /// A connection to a specific remote machine
 ///
 /// A connection can be used to open bidirectional typed channels using [`Connector::open`].
-pub trait Connector: StreamTypes {
+pub trait Connector: StreamTypes + Clone {
     /// Open a channel to the remote che
     fn open(
         &self,
