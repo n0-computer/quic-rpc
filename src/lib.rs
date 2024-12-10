@@ -91,6 +91,7 @@
 //! ```
 #![deny(missing_docs)]
 #![deny(rustdoc::broken_intra_doc_links)]
+#![cfg_attr(iroh_docsrs, feature(doc_cfg))]
 use std::fmt::{Debug, Display};
 
 use serde::{de::DeserializeOwned, Serialize};
@@ -178,18 +179,29 @@ pub trait Listener<S: Service>: transport::Listener<In = S::Req, Out = S::Res> {
 
 impl<T: transport::Listener<In = S::Req, Out = S::Res>, S: Service> Listener<S> for T {}
 
+
 #[cfg(feature = "flume-transport")]
-mod flume_helpers {
+#[cfg_attr(iroh_docsrs, doc(cfg(feature = "flume-transport")))]
+/// A struct that needs the flume transport feature flag
+pub struct INeedFlumeTransport;
+
+#[cfg(feature = "flume-transport")]
+#[cfg_attr(iroh_docsrs, doc(cfg(feature = "flume-transport")))]
+/// foo
+pub mod flume_helpers {
     use super::{transport, RpcClient, RpcServer, Service};
     /// A flume listener for the given service
+    #[cfg_attr(iroh_docsrs, doc(cfg(feature = "flume-transport")))]
     pub type FlumeListener<S> =
         transport::flume::FlumeListener<<S as Service>::Req, <S as Service>::Res>;
 
     /// A flume connector for the given service
+    #[cfg_attr(iroh_docsrs, doc(cfg(feature = "flume-transport")))]
     pub type FlumeConnector<S> =
         transport::flume::FlumeConnector<<S as Service>::Res, <S as Service>::Req>;
 
     /// Create a pair of client and server using a flume channel
+    #[cfg_attr(iroh_docsrs, doc(cfg(feature = "flume-transport")))]
     pub fn flume_channel<S: Service>(
         size: usize,
     ) -> (
