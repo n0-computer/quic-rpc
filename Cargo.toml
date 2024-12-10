@@ -56,7 +56,7 @@ tokio-util = { version = "0.7", features = ["rt"] }
 
 [features]
 hyper-transport = ["dep:flume", "dep:hyper", "dep:postcard", "dep:bytes", "dep:tokio-serde", "tokio-util/codec"]
-quinn-transport = ["dep:flume", "dep:quinn", "dep:postcard", "dep:tokio-serde", "tokio-util/codec"]
+quinn-transport = ["dep:flume", "dep:quinn", "dep:postcard", "dep:bytes", "dep:tokio-serde", "tokio-util/codec"]
 flume-transport = ["dep:flume"]
 iroh-transport = ["dep:iroh", "dep:flume", "dep:postcard", "dep:tokio-serde", "tokio-util/codec"]
 macros = []
