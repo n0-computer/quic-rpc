@@ -179,16 +179,10 @@ pub trait Listener<S: Service>: transport::Listener<In = S::Req, Out = S::Res> {
 
 impl<T: transport::Listener<In = S::Req, Out = S::Res>, S: Service> Listener<S> for T {}
 
-
-#[cfg(feature = "flume-transport")]
-#[cfg_attr(iroh_docsrs, doc(cfg(feature = "flume-transport")))]
-/// A struct that needs the flume transport feature flag
-pub struct INeedFlumeTransport;
-
 #[cfg(feature = "flume-transport")]
 #[cfg_attr(iroh_docsrs, doc(cfg(feature = "flume-transport")))]
 /// foo
-pub mod flume_helpers {
+mod flume_helpers {
     use super::{transport, RpcClient, RpcServer, Service};
     /// A flume listener for the given service
     #[cfg_attr(iroh_docsrs, doc(cfg(feature = "flume-transport")))]
