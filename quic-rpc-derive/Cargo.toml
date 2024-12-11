@@ -13,12 +13,12 @@ description = "Macros for quic-rpc"
 proc-macro = true
 
 [dependencies]
-syn = { version = "1.0", features = ["full"] }
-quote = "1.0"
-proc-macro2 = "1.0"
+syn = { version = "1", features = ["full"] }
+quote = "1"
+proc-macro2 = "1"
 quic-rpc = { version = "0.17", path = ".." }
 
 [dev-dependencies]
 derive_more = { version = "1", features = ["from", "try_into", "display"] }
 serde = { version = "1", features = ["serde_derive"] }
-trybuild = "1.0.96"
+trybuild = "1.0"
