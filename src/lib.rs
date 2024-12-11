@@ -10,9 +10,6 @@
 //!
 //! See the [README](https://github.com/n0-computer/quic-rpc/blob/main/README.md)
 //!
-//! # Features
-#![doc = document_features::document_features!()]
-//!
 //! # Example
 //! ```
 //! # async fn example() -> anyhow::Result<()> {
@@ -92,6 +89,9 @@
 //! # Ok(())
 //! # }
 //! ```
+//!
+//! # Features
+#![doc = document_features::document_features!()]
 #![deny(missing_docs)]
 #![deny(rustdoc::broken_intra_doc_links)]
 #![cfg_attr(quicrpc_docsrs, feature(doc_cfg))]
@@ -105,6 +105,7 @@ pub mod transport;
 pub use client::RpcClient;
 pub use server::RpcServer;
 #[cfg(feature = "macros")]
+#[cfg_attr(quicrpc_docsrs, doc(cfg(feature = "macros")))]
 mod macros;
 
 pub mod pattern;
