@@ -3196,6 +3196,7 @@ dependencies = [
  "async-stream",
  "bytes",
  "derive_more",
+ "document-features",
  "flume",
  "futures",
  "futures-buffered",

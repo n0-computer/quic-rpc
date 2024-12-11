@@ -38,6 +38,7 @@ rustls = { version = "0.23", default-features = false, features = ["ring"], opti
 slab = "0.4.9" # iroh-quinn
 smallvec = "1.13.2"
 time = "0.3.36" # serde
+document-features = "0.2.10"
 
 [dev-dependencies]
 anyhow = "1.0.73"
@@ -57,12 +58,19 @@ nested_enum_utils = "0.1.0"
 tokio-util = { version = "0.7", features = ["rt"] }
 
 [features]
+## HTTP transport using the `hyper` crate
 hyper-transport = ["dep:flume", "dep:hyper", "dep:postcard", "dep:bytes", "dep:tokio-serde", "tokio-util/codec"]
+## QUIC transport using the `iroh-quinn` crate
 quinn-transport = ["dep:flume", "dep:quinn", "dep:postcard", "dep:bytes", "dep:tokio-serde", "tokio-util/codec"]
+## In memory transport using the `flume` crate
 flume-transport = ["dep:flume"]
+## p2p QUIC transport using the `iroh` crate
 iroh-transport = ["dep:iroh", "dep:flume", "dep:postcard", "dep:tokio-serde", "tokio-util/codec"]
+## Macros for creating request handlers
 macros = []
+## Utilities for testing
 test-utils = ["dep:rcgen", "dep:rustls"]
+## Default, includes the memory transport
 default = ["flume-transport"]
 
 [package.metadata.docs.rs]

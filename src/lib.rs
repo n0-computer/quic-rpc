@@ -10,6 +10,10 @@
 //!
 //! See the [README](https://github.com/n0-computer/quic-rpc/blob/main/README.md)
 //!
+//! # Features
+//!
+#![doc = document_features::document_features!()]
+//!
 //! # Example
 //! ```
 //! # async fn example() -> anyhow::Result<()> {
