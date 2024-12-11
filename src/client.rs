@@ -17,9 +17,7 @@ use crate::{
     Connector, Service,
 };
 
-/// Type alias for a boxed connection to a specific service
-///
-/// This is a convenience type alias for a boxed connection to a specific service.
+/// A boxed connector for the given [`Service`]
 pub type BoxedConnector<S> =
     crate::transport::boxed::BoxedConnector<<S as crate::Service>::Res, <S as crate::Service>::Req>;
 

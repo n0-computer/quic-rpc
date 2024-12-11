@@ -42,7 +42,7 @@ pub type BoxedChannelTypes<S> = crate::transport::boxed::BoxedStreamTypes<
     <S as crate::Service>::Res,
 >;
 
-/// Type alias for a service endpoint
+/// A boxed listener for the given [`Service`]
 pub type BoxedListener<S> =
     crate::transport::boxed::BoxedListener<<S as crate::Service>::Req, <S as crate::Service>::Res>;
 
