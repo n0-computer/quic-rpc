@@ -46,6 +46,18 @@ pub type BoxedChannelTypes<S> = crate::transport::boxed::BoxedStreamTypes<
 pub type BoxedListener<S> =
     crate::transport::boxed::BoxedListener<<S as crate::Service>::Req, <S as crate::Service>::Res>;
 
+#[cfg(feature = "flume-transport")]
+#[cfg_attr(quicrpc_docsrs, doc(cfg(feature = "flume-transport")))]
+/// A flume listener for the given [`Service`]
+pub type FlumeListener<S> =
+    crate::transport::flume::FlumeListener<<S as Service>::Req, <S as Service>::Res>;
+
+#[cfg(feature = "quinn-transport")]
+#[cfg_attr(quicrpc_docsrs, doc(cfg(feature = "quinn-transport")))]
+/// A quinn listener for the given [`Service`]
+pub type QuinnListener<S> =
+    crate::transport::quinn::QuinnListener<<S as Service>::Req, <S as Service>::Res>;
+
 /// A server for a specific service.
 ///
 /// This is a wrapper around a [`Listener`] that serves as the entry point for the server DSL.

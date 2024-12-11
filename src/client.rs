@@ -23,6 +23,18 @@ use crate::{
 pub type BoxedConnector<S> =
     crate::transport::boxed::BoxedConnector<<S as crate::Service>::Res, <S as crate::Service>::Req>;
 
+#[cfg(feature = "flume-transport")]
+#[cfg_attr(quicrpc_docsrs, doc(cfg(feature = "flume-transport")))]
+/// A flume connector for the given [`Service`]
+pub type FlumeConnector<S> =
+    crate::transport::flume::FlumeConnector<<S as Service>::Res, <S as Service>::Req>;
+
+#[cfg(feature = "quinn-transport")]
+#[cfg_attr(quicrpc_docsrs, doc(cfg(feature = "quinn-transport")))]
+/// A quinn connector for the given [`Service`]
+pub type QuinnConnector<S> =
+    crate::transport::quinn::QuinnConnector<<S as Service>::Res, <S as Service>::Req>;
+
 /// Sync version of `future::stream::BoxStream`.
 pub type BoxStreamSync<'a, T> = Pin<Box<dyn Stream<Item = T> + Send + Sync + 'a>>;
 
