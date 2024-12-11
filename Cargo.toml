@@ -14,7 +14,6 @@ rust-version = "1.76"
 
 [dependencies]
 bytes = { version = "1", optional = true }
-derive_more = { version = "1.0.0-beta.6", features = ["from", "try_into", "display"] }
 flume = { version = "0.11", optional = true }
 futures-lite = "2.3.0"
 futures-sink = "0.3.30"
@@ -23,26 +22,29 @@ hyper = { version = "0.14.16", features = ["full"], optional = true }
 iroh = { version = "0.29", optional = true }
 pin-project = "1"
 quinn = { package = "iroh-quinn", version = "0.12", optional = true }
-serde = { version = "1.0", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
 tokio = { version = "1", default-features = false, features = ["macros", "sync"] }
 tokio-serde = { version = "0.9", features = ["bincode"], optional = true }
 tokio-util = { version = "0.7", features = ["rt"] }
 postcard = { version = "1", features = ["use-std"], optional = true }
 tracing = "0.1"
 futures = { version = "0.3.30", optional = true }
-anyhow = "1.0.73"
+anyhow = "1"
+document-features = "0.2"
+# for test-utils
 rcgen = { version = "0.13", optional = true }
+# for test-utils
 rustls = { version = "0.23", default-features = false, features = ["ring"], optional = true }
 
 # Indirect dependencies, is needed to make the minimal crates versions work
 slab = "0.4.9" # iroh-quinn
 smallvec = "1.13.2"
 time = "0.3.36" # serde
-document-features = "0.2.10"
 
 [dev-dependencies]
-anyhow = "1.0.73"
+anyhow = "1"
 async-stream = "0.3.3"
+derive_more = { version = "1", features = ["from", "try_into", "display"] }
 
 serde = { version = "1", features = ["derive"] }
 tokio = { version = "1", features = ["full"] }
