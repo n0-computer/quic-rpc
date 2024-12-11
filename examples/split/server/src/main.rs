@@ -1,9 +1,11 @@
-use std::{net::SocketAddr, sync::Arc};
+use std::net::SocketAddr;
 
 use async_stream::stream;
 use futures::stream::{Stream, StreamExt};
-use quic_rpc::{server::run_server_loop, transport::quinn::QuinnListener};
-use quinn::{Endpoint, ServerConfig};
+use quic_rpc::{
+    server::run_server_loop,
+    transport::quinn::{make_server_endpoint, QuinnListener},
+};
 use types::compute::*;
 
 #[derive(Clone)]
@@ -70,24 +72,4 @@ async fn main() -> anyhow::Result<()> {
     )
     .await?;
     Ok(())
-}
-
-fn make_server_endpoint(bind_addr: SocketAddr) -> anyhow::Result<(Endpoint, Vec<u8>)> {
-    let (server_config, server_cert) = configure_server()?;
-    let endpoint = Endpoint::server(server_config, bind_addr)?;
-    Ok((endpoint, server_cert))
-}
-
-fn configure_server() -> anyhow::Result<(ServerConfig, Vec<u8>)> {
-    let cert = rcgen::generate_simple_self_signed(vec!["localhost".into()])?;
-    let cert_der = cert.cert.der();
-    let priv_key = rustls::pki_types::PrivatePkcs8KeyDer::from(cert.key_pair.serialize_der());
-    let cert_chain = vec![cert_der.clone()];
-
-    let mut server_config = ServerConfig::with_single_cert(cert_chain, priv_key.into())?;
-    Arc::get_mut(&mut server_config.transport)
-        .unwrap()
-        .max_concurrent_uni_streams(0_u8.into());
-
-    Ok((server_config, cert_der.to_vec()))
 }
