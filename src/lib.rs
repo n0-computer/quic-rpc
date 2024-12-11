@@ -91,7 +91,7 @@
 //! ```
 #![deny(missing_docs)]
 #![deny(rustdoc::broken_intra_doc_links)]
-#![cfg_attr(iroh_docsrs, feature(doc_cfg))]
+#![cfg_attr(quicrpc_docsrs, feature(doc_cfg))]
 use std::fmt::{Debug, Display};
 
 use serde::{de::DeserializeOwned, Serialize};
@@ -180,7 +180,7 @@ pub trait Listener<S: Service>: transport::Listener<In = S::Req, Out = S::Res> {
 impl<T: transport::Listener<In = S::Req, Out = S::Res>, S: Service> Listener<S> for T {}
 
 #[cfg(feature = "flume-transport")]
-#[cfg_attr(iroh_docsrs, doc(cfg(feature = "flume-transport")))]
+#[cfg_attr(quicrpc_docsrs, doc(cfg(feature = "flume-transport")))]
 mod flume_helpers {
     use super::{transport, RpcClient, RpcServer, Service};
     /// A flume listener for the given [`Service`]
@@ -207,7 +207,7 @@ mod flume_helpers {
 pub use flume_helpers::*;
 
 #[cfg(feature = "quinn-transport")]
-#[cfg_attr(iroh_docsrs, doc(cfg(feature = "quinn-transport")))]
+#[cfg_attr(quicrpc_docsrs, doc(cfg(feature = "quinn-transport")))]
 mod quinn_helpers {
     use super::{transport, Service};
     #[cfg(feature = "test-utils")]
@@ -222,7 +222,7 @@ mod quinn_helpers {
         transport::quinn::QuinnConnector<<S as Service>::Res, <S as Service>::Req>;
 
     #[cfg(feature = "test-utils")]
-    #[cfg_attr(iroh_docsrs, doc(cfg(feature = "test-utils")))]
+    #[cfg_attr(quicrpc_docsrs, doc(cfg(feature = "test-utils")))]
     /// Create a pair of [`RpcServer`] and [`RpcClient`] for the given [`Service`] type using a quinn channel
     ///
     /// This is using a network connection using the local network. It is useful for testing remote services
