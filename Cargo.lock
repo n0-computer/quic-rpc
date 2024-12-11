@@ -3879,8 +3879,6 @@ dependencies = [
  "futures",
  "iroh-quinn",
  "quic-rpc",
- "rcgen",
- "rustls",
  "tokio",
  "tracing-subscriber",
  "types",

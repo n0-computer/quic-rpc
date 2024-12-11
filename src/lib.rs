@@ -91,6 +91,7 @@
 //! ```
 #![deny(missing_docs)]
 #![deny(rustdoc::broken_intra_doc_links)]
+#![cfg_attr(quicrpc_docsrs, feature(doc_cfg))]
 use std::fmt::{Debug, Display};
 
 use serde::{de::DeserializeOwned, Serialize};
@@ -179,17 +180,18 @@ pub trait Listener<S: Service>: transport::Listener<In = S::Req, Out = S::Res> {
 impl<T: transport::Listener<In = S::Req, Out = S::Res>, S: Service> Listener<S> for T {}
 
 #[cfg(feature = "flume-transport")]
+#[cfg_attr(quicrpc_docsrs, doc(cfg(feature = "flume-transport")))]
 mod flume_helpers {
     use super::{transport, RpcClient, RpcServer, Service};
-    /// A flume listener for the given service
+    /// A flume listener for the given [`Service`]
     pub type FlumeListener<S> =
         transport::flume::FlumeListener<<S as Service>::Req, <S as Service>::Res>;
 
-    /// A flume connector for the given service
+    /// A flume connector for the given [`Service`]
     pub type FlumeConnector<S> =
         transport::flume::FlumeConnector<<S as Service>::Res, <S as Service>::Req>;
 
-    /// Create a pair of client and server using a flume channel
+    /// Create a pair of [`RpcServer`] and [`RpcClient`] for the given [`Service`] type using a flume channel
     pub fn flume_channel<S: Service>(
         size: usize,
     ) -> (
@@ -205,24 +207,27 @@ mod flume_helpers {
 pub use flume_helpers::*;
 
 #[cfg(feature = "quinn-transport")]
+#[cfg_attr(quicrpc_docsrs, doc(cfg(feature = "quinn-transport")))]
 mod quinn_helpers {
-
     use super::{transport, Service};
     #[cfg(feature = "test-utils")]
     use super::{RpcClient, RpcServer};
 
-    /// A quinn listener for the given service
+    /// A quinn listener for the given [`Service`]
     pub type QuinnListener<S> =
         transport::quinn::QuinnListener<<S as Service>::Req, <S as Service>::Res>;
 
-    /// A quinn connector for the given service
+    /// A quinn connector for the given [`Service`]
     pub type QuinnConnector<S> =
         transport::quinn::QuinnConnector<<S as Service>::Res, <S as Service>::Req>;
 
     #[cfg(feature = "test-utils")]
-    /// Create a pair of client and server that are connected via a local network connection.
+    #[cfg_attr(quicrpc_docsrs, doc(cfg(feature = "test-utils")))]
+    /// Create a pair of [`RpcServer`] and [`RpcClient`] for the given [`Service`] type using a quinn channel
     ///
-    /// This is useful for testing the quinn transport.
+    /// This is using a network connection using the local network. It is useful for testing remote services
+    /// in a more realistic way than the memory transport.
+    #[allow(clippy::type_complexity)]
     pub fn quinn_channel<S: Service>() -> anyhow::Result<(
         RpcServer<S, QuinnListener<S>>,
         RpcClient<S, QuinnConnector<S>>,

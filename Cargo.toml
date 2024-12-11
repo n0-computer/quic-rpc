@@ -67,6 +67,10 @@ default = ["flume-transport"]
 
 [package.metadata.docs.rs]
 all-features = true
+rustdoc-args = ["--cfg", "quicrpc_docsrs"]
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(quicrpc_docsrs)"] }
 
 [[example]]
 name = "errors"
