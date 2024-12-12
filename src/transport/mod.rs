@@ -32,17 +32,25 @@ use crate::{RpcError, RpcMessage};
 pub mod boxed;
 pub mod combined;
 #[cfg(feature = "flume-transport")]
+#[cfg_attr(quicrpc_docsrs, doc(cfg(feature = "flume-transport")))]
 pub mod flume;
 #[cfg(feature = "hyper-transport")]
+#[cfg_attr(quicrpc_docsrs, doc(cfg(feature = "hyper-transport")))]
 pub mod hyper;
 #[cfg(feature = "iroh-transport")]
+#[cfg_attr(quicrpc_docsrs, doc(cfg(feature = "iroh-transport")))]
 pub mod iroh;
 pub mod mapped;
 pub mod misc;
 #[cfg(feature = "quinn-transport")]
+#[cfg_attr(quicrpc_docsrs, doc(cfg(feature = "quinn-transport")))]
 pub mod quinn;
 
 #[cfg(any(feature = "quinn-transport", feature = "iroh-transport"))]
+#[cfg_attr(
+    quicrpc_docsrs,
+    doc(cfg(any(feature = "quinn-transport", feature = "iroh-transport")))
+)]
 mod util;
 
 /// Errors that can happen when creating and using a [`Connector`] or [`Listener`].

@@ -1,105 +1,24 @@
 #![cfg(feature = "quinn-transport")]
-use std::{
-    net::{Ipv4Addr, SocketAddr, SocketAddrV4},
-    sync::Arc,
-};
+#![cfg(feature = "test-utils")]
+use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 
 use quic_rpc::{
     transport::{
         self,
-        quinn::{QuinnConnector, QuinnListener},
+        quinn::{
+            configure_server, make_client_endpoint, make_server_endpoint, QuinnConnector,
+            QuinnListener,
+        },
     },
     RpcClient, RpcServer,
 };
-use quinn::{
-    crypto::rustls::{QuicClientConfig, QuicServerConfig},
-    rustls, ClientConfig, Endpoint, ServerConfig,
-};
+use quinn::Endpoint;
 
 mod math;
 use math::*;
 use testresult::TestResult;
 use tokio_util::task::AbortOnDropHandle;
 mod util;
-
-/// Constructs a QUIC endpoint configured for use a client only.
-///
-/// ## Args
-///
-/// - server_certs: list of trusted certificates.
-#[allow(unused)]
-pub fn make_client_endpoint(
-    bind_addr: SocketAddr,
-    server_certs: &[&[u8]],
-) -> anyhow::Result<Endpoint> {
-    let client_cfg = configure_client(server_certs)?;
-    let mut endpoint = Endpoint::client(bind_addr)?;
-    endpoint.set_default_client_config(client_cfg);
-    Ok(endpoint)
-}
-
-/// Constructs a QUIC endpoint configured to listen for incoming connections on a certain address
-/// and port.
-///
-/// ## Returns
-///
-/// - a stream of incoming QUIC connections
-/// - server certificate serialized into DER format
-#[allow(unused)]
-pub fn make_server_endpoint(bind_addr: SocketAddr) -> anyhow::Result<(Endpoint, Vec<u8>)> {
-    let (server_config, server_cert) = configure_server()?;
-    let endpoint = Endpoint::server(server_config, bind_addr)?;
-    Ok((endpoint, server_cert))
-}
-
-/// Builds default quinn client config and trusts given certificates.
-///
-/// ## Args
-///
-/// - server_certs: a list of trusted certificates in DER format.
-fn configure_client(server_certs: &[&[u8]]) -> anyhow::Result<ClientConfig> {
-    let mut certs = rustls::RootCertStore::empty();
-    for cert in server_certs {
-        let cert = rustls::pki_types::CertificateDer::from(cert.to_vec());
-        certs.add(cert)?;
-    }
-
-    let crypto_client_config = rustls::ClientConfig::builder_with_provider(Arc::new(
-        rustls::crypto::ring::default_provider(),
-    ))
-    .with_protocol_versions(&[&rustls::version::TLS13])
-    .expect("valid versions")
-    .with_root_certificates(certs)
-    .with_no_client_auth();
-    let quic_client_config = QuicClientConfig::try_from(crypto_client_config)?;
-
-    Ok(ClientConfig::new(Arc::new(quic_client_config)))
-}
-
-/// Returns default server configuration along with its certificate.
-#[allow(clippy::field_reassign_with_default)] // https://github.com/rust-lang/rust-clippy/issues/6527
-fn configure_server() -> anyhow::Result<(ServerConfig, Vec<u8>)> {
-    let cert = rcgen::generate_simple_self_signed(vec!["localhost".into()])?;
-    let cert_der = cert.cert.der();
-    let priv_key = rustls::pki_types::PrivatePkcs8KeyDer::from(cert.key_pair.serialize_der());
-    let cert_chain = vec![cert_der.clone()];
-
-    let crypto_server_config = rustls::ServerConfig::builder_with_provider(Arc::new(
-        rustls::crypto::ring::default_provider(),
-    ))
-    .with_protocol_versions(&[&rustls::version::TLS13])
-    .expect("valid versions")
-    .with_no_client_auth()
-    .with_single_cert(cert_chain, priv_key.into())?;
-    let quic_server_config = QuicServerConfig::try_from(crypto_server_config)?;
-    let mut server_config = ServerConfig::with_crypto(Arc::new(quic_server_config));
-
-    Arc::get_mut(&mut server_config.transport)
-        .unwrap()
-        .max_concurrent_uni_streams(0_u8.into());
-
-    Ok((server_config, cert_der.to_vec()))
-}
 
 pub struct Endpoints {
     client: Endpoint,

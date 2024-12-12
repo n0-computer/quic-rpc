@@ -8,4 +8,4 @@ edition = "2021"
 [dependencies]
 quic-rpc = { path = "../../..", features = ["macros"] }
 serde = { version = "1", features = ["derive"] }
-derive_more = { version = "1.0.0-beta.6", features = ["from", "try_into"] }
+derive_more = { version = "1", features = ["from", "try_into"] }

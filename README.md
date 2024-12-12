@@ -94,3 +94,8 @@ This may change in the future as quic implementations get more optimized.
 [quinn]: https://docs.rs/quinn/
 [flume]: https://docs.rs/flume/
 [grpc]: https://grpc.io/
+
+# Docs
+
+Properly building docs for this crate is quite complex. For all the gory details,
+see [DOCS.md].

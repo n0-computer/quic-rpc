@@ -42,9 +42,33 @@ pub type BoxedChannelTypes<S> = crate::transport::boxed::BoxedStreamTypes<
     <S as crate::Service>::Res,
 >;
 
-/// Type alias for a service endpoint
+/// A boxed listener for the given [`Service`]
 pub type BoxedListener<S> =
     crate::transport::boxed::BoxedListener<<S as crate::Service>::Req, <S as crate::Service>::Res>;
+
+#[cfg(feature = "flume-transport")]
+#[cfg_attr(quicrpc_docsrs, doc(cfg(feature = "flume-transport")))]
+/// A flume listener for the given [`Service`]
+pub type FlumeListener<S> =
+    crate::transport::flume::FlumeListener<<S as Service>::Req, <S as Service>::Res>;
+
+#[cfg(feature = "quinn-transport")]
+#[cfg_attr(quicrpc_docsrs, doc(cfg(feature = "quinn-transport")))]
+/// A quinn listener for the given [`Service`]
+pub type QuinnListener<S> =
+    crate::transport::quinn::QuinnListener<<S as Service>::Req, <S as Service>::Res>;
+
+#[cfg(feature = "hyper-transport")]
+#[cfg_attr(quicrpc_docsrs, doc(cfg(feature = "hyper-transport")))]
+/// A hyper listener for the given [`Service`]
+pub type HyperListener<S> =
+    crate::transport::hyper::HyperListener<<S as Service>::Req, <S as Service>::Res>;
+
+#[cfg(feature = "iroh-transport")]
+#[cfg_attr(quicrpc_docsrs, doc(cfg(feature = "iroh-transport")))]
+/// An iroh listener for the given [`Service`]
+pub type IrohListener<S> =
+    crate::transport::iroh::IrohListener<<S as Service>::Req, <S as Service>::Res>;
 
 /// A server for a specific service.
 ///

@@ -17,11 +17,33 @@ use crate::{
     Connector, Service,
 };
 
-/// Type alias for a boxed connection to a specific service
-///
-/// This is a convenience type alias for a boxed connection to a specific service.
+/// A boxed connector for the given [`Service`]
 pub type BoxedConnector<S> =
     crate::transport::boxed::BoxedConnector<<S as crate::Service>::Res, <S as crate::Service>::Req>;
+
+#[cfg(feature = "flume-transport")]
+#[cfg_attr(quicrpc_docsrs, doc(cfg(feature = "flume-transport")))]
+/// A flume connector for the given [`Service`]
+pub type FlumeConnector<S> =
+    crate::transport::flume::FlumeConnector<<S as Service>::Res, <S as Service>::Req>;
+
+#[cfg(feature = "quinn-transport")]
+#[cfg_attr(quicrpc_docsrs, doc(cfg(feature = "quinn-transport")))]
+/// A quinn connector for the given [`Service`]
+pub type QuinnConnector<S> =
+    crate::transport::quinn::QuinnConnector<<S as Service>::Res, <S as Service>::Req>;
+
+#[cfg(feature = "hyper-transport")]
+#[cfg_attr(quicrpc_docsrs, doc(cfg(feature = "hyper-transport")))]
+/// A hyper connector for the given [`Service`]
+pub type HyperConnector<S> =
+    crate::transport::hyper::HyperConnector<<S as Service>::Res, <S as Service>::Req>;
+
+#[cfg(feature = "iroh-transport")]
+#[cfg_attr(quicrpc_docsrs, doc(cfg(feature = "iroh-transport")))]
+/// An iroh connector for the given [`Service`]
+pub type IrohConnector<S> =
+    crate::transport::iroh::IrohConnector<<S as Service>::Res, <S as Service>::Req>;
 
 /// Sync version of `future::stream::BoxStream`.
 pub type BoxStreamSync<'a, T> = Pin<Box<dyn Stream<Item = T> + Send + Sync + 'a>>;
