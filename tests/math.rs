@@ -197,7 +197,7 @@ impl ComputeService {
         count: usize,
     ) -> result::Result<RpcServer<ComputeService, C>, RpcServerError<C>> {
         tracing::info!(%count, "server running");
-        let s = server;
+        let mut s = server;
         let mut received = 0;
         let service = ComputeService;
         while received < count {
@@ -221,46 +221,6 @@ impl ComputeService {
         }
         tracing::info!(%count, "server finished");
         Ok(s)
-    }
-
-    pub async fn server_par<C: Listener<ComputeService>>(
-        server: RpcServer<ComputeService, C>,
-        parallelism: usize,
-    ) -> result::Result<(), RpcServerError<C>> {
-        let s = server.clone();
-        let s2 = s.clone();
-        let service = ComputeService;
-        let request_stream = stream! {
-            loop {
-                yield s2.accept().await?.read_first().await;
-            }
-        };
-        let process_stream = request_stream.map(move |r| {
-            let service = service.clone();
-            async move {
-                let (req, chan) = r?;
-                use ComputeRequest::*;
-                #[rustfmt::skip]
-                match req {
-                    Sqr(msg) => chan.rpc(msg, service, ComputeService::sqr).await,
-                    Sum(msg) => chan.client_streaming(msg, service, ComputeService::sum).await,
-                    Fibonacci(msg) => chan.server_streaming(msg, service, ComputeService::fibonacci).await,
-                    Multiply(msg) => chan.bidi_streaming(msg, service, ComputeService::multiply).await,
-                    SumUpdate(_) => Err(RpcServerError::UnexpectedStartMessage)?,
-                    MultiplyUpdate(_) => Err(RpcServerError::UnexpectedStartMessage)?,
-                }?;
-                Ok::<_, RpcServerError<C>>(())
-            }
-        });
-        process_stream
-            .buffered_unordered(parallelism)
-            .for_each(|x| {
-                if let Err(e) = x {
-                    eprintln!("error: {e:?}");
-                }
-            })
-            .await;
-        Ok(())
     }
 }
 
