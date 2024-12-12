@@ -24,7 +24,7 @@ pin-project = "1"
 quinn = { package = "iroh-quinn", version = "0.12", optional = true }
 serde = { version = "1", features = ["derive"] }
 tokio = { version = "1", default-features = false, features = ["macros", "sync"] }
-tokio-serde = { version = "0.9", features = ["bincode"], optional = true }
+tokio-serde = { version = "0.9", features = [], optional = true }
 tokio-util = { version = "0.7", features = ["rt"] }
 postcard = { version = "1", features = ["use-std"], optional = true }
 tracing = "0.1"
