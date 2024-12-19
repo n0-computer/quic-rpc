@@ -1,7 +1,8 @@
 #![cfg(feature = "iroh-transport")]
 
-use iroh::{key::SecretKey, NodeAddr};
+use iroh::{NodeAddr, SecretKey};
 use quic_rpc::{transport, RpcClient, RpcServer};
+use rand::rngs::OsRng;
 use testresult::TestResult;
 
 use crate::transport::iroh::{IrohConnector, IrohListener};
@@ -34,10 +35,10 @@ pub struct Endpoints {
 
 impl Endpoints {
     pub async fn new() -> anyhow::Result<Self> {
-        let server = make_endpoint(SecretKey::generate(), ALPN).await?;
+        let server = make_endpoint(SecretKey::generate(OsRng), ALPN).await?;
 
         Ok(Endpoints {
-            client: make_endpoint(SecretKey::generate(), ALPN).await?,
+            client: make_endpoint(SecretKey::generate(OsRng), ALPN).await?,
             server_node_addr: server.node_addr().await?,
             server,
         })
@@ -93,9 +94,9 @@ async fn server_away_and_back() -> TestResult<()> {
     tracing_subscriber::fmt::try_init().ok();
     tracing::info!("Creating endpoints");
 
-    let client_endpoint = make_endpoint(SecretKey::generate(), ALPN).await?;
+    let client_endpoint = make_endpoint(SecretKey::generate(OsRng), ALPN).await?;
 
-    let server_secret_key = SecretKey::generate();
+    let server_secret_key = SecretKey::generate(OsRng);
     let server_node_id = server_secret_key.public();
 
     // create the RPC client
