@@ -111,7 +111,7 @@ impl ComputeService {
     pub async fn server<C: Listener<ComputeService>>(
         server: RpcServer<ComputeService, C>,
     ) -> result::Result<(), RpcServerError<C>> {
-        let s = server;
+        let mut s = server;
         let service = ComputeService;
         loop {
             let (req, chan) = s.accept().await?.read_first().await?;

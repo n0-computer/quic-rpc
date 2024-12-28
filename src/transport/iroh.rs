@@ -283,7 +283,7 @@ impl<In: RpcMessage, Out: RpcMessage> StreamTypes for IrohListener<In, Out> {
 }
 
 impl<In: RpcMessage, Out: RpcMessage> Listener for IrohListener<In, Out> {
-    async fn accept(&self) -> Result<(Self::SendSink, Self::RecvStream), AcceptError> {
+    async fn accept(&mut self) -> Result<(Self::SendSink, Self::RecvStream), AcceptError> {
         let (send, recv) = self
             .inner
             .receiver

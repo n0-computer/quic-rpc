@@ -1,18 +1,17 @@
-#![cfg(feature = "flume-transport")]
 #![allow(non_local_definitions)]
 mod math;
 use math::*;
 use quic_rpc::{
     server::{RpcChannel, RpcServerError},
-    transport::flume,
+    transport::tokio as tkio,
     RpcClient, RpcServer, Service,
 };
 use tokio_util::task::AbortOnDropHandle;
 
 #[tokio::test]
-async fn flume_channel_bench() -> anyhow::Result<()> {
+async fn tokio_channel_bench() -> anyhow::Result<()> {
     tracing_subscriber::fmt::try_init().ok();
-    let (server, client) = flume::channel(1);
+    let (server, client) = tkio::channel(1);
 
     let server = RpcServer::<ComputeService, _>::new(server);
     let _server_handle = AbortOnDropHandle::new(tokio::spawn(ComputeService::server(server)));
@@ -22,7 +21,7 @@ async fn flume_channel_bench() -> anyhow::Result<()> {
 }
 
 #[tokio::test]
-async fn flume_channel_mapped_bench() -> anyhow::Result<()> {
+async fn tokio_channel_mapped_bench() -> anyhow::Result<()> {
     use derive_more::{From, TryInto};
     use serde::{Deserialize, Serialize};
 
@@ -56,7 +55,7 @@ async fn flume_channel_mapped_bench() -> anyhow::Result<()> {
         type Req = InnerRequest;
         type Res = InnerResponse;
     }
-    let (server, client) = flume::channel(1);
+    let (server, client) = tkio::channel(1);
 
     let mut server = RpcServer::<OuterService, _>::new(server);
     let server_handle: tokio::task::JoinHandle<Result<(), RpcServerError<_>>> =
@@ -92,9 +91,9 @@ async fn flume_channel_mapped_bench() -> anyhow::Result<()> {
 
 /// simple happy path test for all 4 patterns
 #[tokio::test]
-async fn flume_channel_smoke() -> anyhow::Result<()> {
+async fn tokio_channel_smoke() -> anyhow::Result<()> {
     tracing_subscriber::fmt::try_init().ok();
-    let (server, client) = flume::channel(1);
+    let (server, client) = tkio::channel(1);
 
     let server = RpcServer::<ComputeService, _>::new(server);
     let _server_handle = AbortOnDropHandle::new(tokio::spawn(ComputeService::server(server)));

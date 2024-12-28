@@ -631,7 +631,7 @@ impl<In: RpcMessage, Out: RpcMessage> Listener for HyperListener<In, Out> {
         &self.local_addr
     }
 
-    async fn accept(&self) -> Result<(Self::SendSink, Self::RecvStream), AcceptError> {
+    async fn accept(&mut self) -> Result<(Self::SendSink, Self::RecvStream), AcceptError> {
         let (recv, send) = self
             .channel
             .recv_async()
