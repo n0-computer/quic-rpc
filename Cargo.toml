@@ -1,6 +1,6 @@
 [package]
 name = "quic-rpc"
-version = "0.17.3"
+version = "0.18.0"
 edition = "2021"
 authors = ["Rüdiger Klaehn <rklaehn@protonmail.com>", "n0 team"]
 keywords = ["api", "protocol", "network", "rpc"]
