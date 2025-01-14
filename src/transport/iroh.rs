@@ -53,9 +53,7 @@ impl Drop for ListenerInner {
                     async move {
                         // iroh endpoint's close is async, and internally it waits the
                         // underlying quinn endpoint to be idle.
-                        if let Err(e) = endpoint.close().await {
-                            tracing::warn!(?e, "error closing listener");
-                        }
+                        endpoint.close().await;
                     }
                     .instrument(span),
                 );
@@ -322,9 +320,7 @@ impl Drop for ClientConnectionInner {
                     async move {
                         // iroh endpoint's close is async, and internally it waits the
                         // underlying quinn endpoint to be idle.
-                        if let Err(e) = endpoint.close().await {
-                            tracing::warn!(?e, "error closing client endpoint");
-                        }
+                        endpoint.close().await;
                     }
                     .instrument(span),
                 );
