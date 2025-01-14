@@ -22,7 +22,6 @@ hyper = { version = "0.14.16", features = ["full"], optional = true }
 iroh = { version = "0.31", optional = true }
 pin-project = "1"
 quinn = { package = "iroh-quinn", version = "0.12", optional = true }
-rand = "0.8"
 serde = { version = "1", features = ["derive"] }
 tokio = { version = "1", default-features = false, features = ["macros", "sync"] }
 tokio-serde = { version = "0.9", features = [], optional = true }
@@ -46,6 +45,7 @@ time = "0.3.36" # serde
 anyhow = "1"
 async-stream = "0.3.3"
 derive_more = { version = "1", features = ["from", "try_into", "display"] }
+rand = "0.8"
 
 serde = { version = "1", features = ["derive"] }
 tokio = { version = "1", features = ["full"] }
