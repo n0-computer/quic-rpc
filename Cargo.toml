@@ -19,9 +19,10 @@ futures-lite = "2.3.0"
 futures-sink = "0.3.30"
 futures-util = { version = "0.3.30", features = ["sink"] }
 hyper = { version = "0.14.16", features = ["full"], optional = true }
-iroh = { version = "0.29", optional = true }
+iroh = { version = "0.30", optional = true }
 pin-project = "1"
 quinn = { package = "iroh-quinn", version = "0.12", optional = true }
+rand = "0.8"
 serde = { version = "1", features = ["derive"] }
 tokio = { version = "1", default-features = false, features = ["macros", "sync"] }
 tokio-serde = { version = "0.9", features = [], optional = true }
@@ -100,3 +101,6 @@ required-features = ["flume-transport"]
 
 [workspace]
 members = ["examples/split/types", "examples/split/server", "examples/split/client", "quic-rpc-derive"]
+
+[patch.crates-io]
+iroh = { git = "https://github.com/n0-computer/iroh", branch = "iroh-0-31-0" }
