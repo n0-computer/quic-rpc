@@ -1,15 +1,12 @@
-#![cfg(feature = "iroh-transport")]
-
 use iroh::{NodeAddr, SecretKey};
-use quic_rpc::{transport, RpcClient, RpcServer};
+use quic_rpc::{RpcClient, RpcServer};
 use testresult::TestResult;
 
-use crate::transport::iroh::{IrohConnector, IrohListener};
+use quic_rpc_transport_iroh::transport::{IrohConnector, IrohListener};
 
 mod math;
 use math::*;
 use tokio_util::task::AbortOnDropHandle;
-mod util;
 
 const ALPN: &[u8] = b"quic-rpc/iroh/test";
 
@@ -99,15 +96,14 @@ async fn server_away_and_back() -> TestResult<()> {
     let server_node_id = server_secret_key.public();
 
     // create the RPC client
-    let client_connection = transport::iroh::IrohConnector::<ComputeResponse, ComputeRequest>::new(
+    let client_connection = IrohConnector::<ComputeResponse, ComputeRequest>::new(
         client_endpoint.clone(),
         server_node_id,
         ALPN.into(),
     );
-    let client = RpcClient::<
-        ComputeService,
-        transport::iroh::IrohConnector<ComputeResponse, ComputeRequest>,
-    >::new(client_connection);
+    let client = RpcClient::<ComputeService, IrohConnector<ComputeResponse, ComputeRequest>>::new(
+        client_connection,
+    );
 
     // send a request. No server available so it should fail
     client.rpc(Sqr(4)).await.unwrap_err();
@@ -115,7 +111,7 @@ async fn server_away_and_back() -> TestResult<()> {
     let server_endpoint = make_endpoint(server_secret_key.clone(), ALPN).await?;
 
     // create the RPC Server
-    let connection = transport::iroh::IrohListener::new(server_endpoint.clone())?;
+    let connection = IrohListener::new(server_endpoint.clone())?;
     let server = RpcServer::new(connection);
     let server_handle = tokio::spawn(ComputeService::server_bounded(server, 1));
 
@@ -138,7 +134,7 @@ async fn server_away_and_back() -> TestResult<()> {
     let server_endpoint = make_endpoint(server_secret_key.clone(), ALPN).await?;
 
     // make the server run again
-    let connection = transport::iroh::IrohListener::new(server_endpoint.clone())?;
+    let connection = IrohListener::new(server_endpoint.clone())?;
     let server = RpcServer::new(connection);
     let server_handle = tokio::spawn(ComputeService::server_bounded(server, 5));
 

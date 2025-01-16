@@ -26,3 +26,13 @@ serde = { version = "1", features = ["derive"] }
 tracing = "0.1"
 anyhow = "1"
 pin-project = "1"
+
+[dev-dependencies]
+testresult = "0.4.1"
+tokio = { version = "1", features = ["full"] }
+rand = "0.8"
+async-stream = "0.3.3"
+derive_more = { version = "1", features = ["from", "try_into", "display"] }
+futures-buffered = "0.2.4"
+thousands = "0.2.0"
+tracing-subscriber = "0.3.16"

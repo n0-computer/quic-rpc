@@ -45,7 +45,6 @@ anyhow = "1"
 async-stream = "0.3.3"
 derive_more = { version = "1", features = ["from", "try_into", "display"] }
 rand = "0.8"
-
 serde = { version = "1", features = ["derive"] }
 tokio = { version = "1", features = ["full"] }
 quinn = { package = "iroh-quinn", version = "0.12", features = ["ring"] }
