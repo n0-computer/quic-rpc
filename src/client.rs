@@ -39,12 +39,6 @@ pub type QuinnConnector<S> =
 pub type HyperConnector<S> =
     crate::transport::hyper::HyperConnector<<S as Service>::Res, <S as Service>::Req>;
 
-#[cfg(feature = "iroh-transport")]
-#[cfg_attr(quicrpc_docsrs, doc(cfg(feature = "iroh-transport")))]
-/// An iroh connector for the given [`Service`]
-pub type IrohConnector<S> =
-    crate::transport::iroh::IrohConnector<<S as Service>::Res, <S as Service>::Req>;
-
 /// Sync version of `future::stream::BoxStream`.
 pub type BoxStreamSync<'a, T> = Pin<Box<dyn Stream<Item = T> + Send + Sync + 'a>>;
 

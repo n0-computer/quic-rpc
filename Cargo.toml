@@ -19,7 +19,6 @@ futures-lite = "2.3.0"
 futures-sink = "0.3.30"
 futures-util = { version = "0.3.30", features = ["sink"] }
 hyper = { version = "0.14.16", features = ["full"], optional = true }
-iroh = { version = "0.31", optional = true }
 pin-project = "1"
 quinn = { package = "iroh-quinn", version = "0.12", optional = true }
 serde = { version = "1", features = ["derive"] }
@@ -67,8 +66,6 @@ hyper-transport = ["dep:flume", "dep:hyper", "dep:postcard", "dep:bytes", "dep:t
 quinn-transport = ["dep:flume", "dep:quinn", "dep:postcard", "dep:bytes", "dep:tokio-serde", "tokio-util/codec"]
 ## In memory transport using the `flume` crate
 flume-transport = ["dep:flume"]
-## p2p QUIC transport using the `iroh` crate
-iroh-transport = ["dep:iroh", "dep:flume", "dep:postcard", "dep:tokio-serde", "tokio-util/codec"]
 ## Macros for creating request handlers
 macros = []
 ## Utilities for testing
@@ -100,4 +97,10 @@ name = "modularize"
 required-features = ["flume-transport"]
 
 [workspace]
-members = ["examples/split/types", "examples/split/server", "examples/split/client", "quic-rpc-derive"]
+members = [
+  "examples/split/types",
+  "examples/split/server",
+  "examples/split/client",
+  "quic-rpc-derive",
+  "quic-rpc-transport-iroh"
+]

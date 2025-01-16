@@ -1,0 +1,28 @@
+[package]
+name = "quic-rpc-transport-iroh"
+authors = ["Rüdiger Klaehn <rklaehn@protonmail.com>", "n0 team"]
+version = "0.31.0"
+edition = "2021"
+keywords = ["api", "protocol", "network", "rpc"]
+categories = ["network-programming"]
+license = "Apache-2.0/MIT"
+repository = "https://github.com/n0-computer/quic-rpc"
+description = "An iroh transport for quic-rpc"
+
+
+[dependencies]
+iroh = "0.31"
+quic-rpc = { version = "0.18.0", path = "../", default-features = false, features = ["quinn-transport"] }
+flume = "0.11"
+postcard = { version = "1", features = ["use-std"] }
+tokio-serde = { version = "0.9", features = [] }
+tokio-util = { version = "0.7", features = ["codec"] }
+quinn = { package = "iroh-quinn", version = "0.12" }
+futures-lite = "2.3.0"
+futures-sink = "0.3.30"
+futures-util = { version = "0.3.30", features = ["sink"] }
+tokio = { version = "1", default-features = false, features = ["macros", "sync"] }
+serde = { version = "1", features = ["derive"] }
+tracing = "0.1"
+anyhow = "1"
+pin-project = "1"

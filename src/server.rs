@@ -64,12 +64,6 @@ pub type QuinnListener<S> =
 pub type HyperListener<S> =
     crate::transport::hyper::HyperListener<<S as Service>::Req, <S as Service>::Res>;
 
-#[cfg(feature = "iroh-transport")]
-#[cfg_attr(quicrpc_docsrs, doc(cfg(feature = "iroh-transport")))]
-/// An iroh listener for the given [`Service`]
-pub type IrohListener<S> =
-    crate::transport::iroh::IrohListener<<S as Service>::Req, <S as Service>::Res>;
-
 /// A server for a specific service.
 ///
 /// This is a wrapper around a [`Listener`] that serves as the entry point for the server DSL.
