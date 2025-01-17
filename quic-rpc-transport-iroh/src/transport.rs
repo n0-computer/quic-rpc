@@ -1,5 +1,3 @@
-//! iroh transport implementation based on [iroh](https://crates.io/crates/iroh)
-
 use std::{
     collections::BTreeSet,
     fmt,
@@ -23,12 +21,11 @@ use serde::{de::DeserializeOwned, Serialize};
 use tokio::{sync::oneshot, task::yield_now};
 use tracing::{debug_span, Instrument};
 
-use super::{
-    util::{FramedPostcardRead, FramedPostcardWrite},
-    StreamTypes,
-};
-use crate::{
-    transport::{ConnectionErrors, Connector, Listener, LocalAddr},
+use quic_rpc::{
+    transport::{
+        ConnectionErrors, Connector, FramedPostcardRead, FramedPostcardWrite, Listener, LocalAddr,
+        StreamTypes,
+    },
     RpcMessage,
 };
 

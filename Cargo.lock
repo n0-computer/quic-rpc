@@ -2732,7 +2732,6 @@ dependencies = [
  "futures-sink",
  "futures-util",
  "hyper 0.14.32",
- "iroh",
  "iroh-quinn",
  "nested_enum_utils",
  "pin-project",
@@ -2766,6 +2765,34 @@ dependencies = [
  "serde",
  "syn 1.0.109",
  "trybuild",
+]
+
+[[package]]
+name = "quic-rpc-transport-iroh"
+version = "0.31.0"
+dependencies = [
+ "anyhow",
+ "async-stream",
+ "derive_more",
+ "flume",
+ "futures-buffered",
+ "futures-lite",
+ "futures-sink",
+ "futures-util",
+ "iroh",
+ "iroh-quinn",
+ "pin-project",
+ "postcard",
+ "quic-rpc",
+ "rand",
+ "serde",
+ "testresult",
+ "thousands",
+ "tokio",
+ "tokio-serde",
+ "tokio-util",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]

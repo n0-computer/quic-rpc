@@ -10,6 +10,7 @@ use serde::{de::DeserializeOwned, Serialize};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio_util::codec::LengthDelimitedCodec;
 
+/// Coded `FramedRead` using postcard.
 #[pin_project]
 pub struct FramedPostcardRead<T, In>(
     #[pin]

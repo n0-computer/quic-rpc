@@ -37,21 +37,18 @@ pub mod flume;
 #[cfg(feature = "hyper-transport")]
 #[cfg_attr(quicrpc_docsrs, doc(cfg(feature = "hyper-transport")))]
 pub mod hyper;
-#[cfg(feature = "iroh-transport")]
-#[cfg_attr(quicrpc_docsrs, doc(cfg(feature = "iroh-transport")))]
-pub mod iroh;
 pub mod mapped;
 pub mod misc;
 #[cfg(feature = "quinn-transport")]
 #[cfg_attr(quicrpc_docsrs, doc(cfg(feature = "quinn-transport")))]
 pub mod quinn;
 
-#[cfg(any(feature = "quinn-transport", feature = "iroh-transport"))]
-#[cfg_attr(
-    quicrpc_docsrs,
-    doc(cfg(any(feature = "quinn-transport", feature = "iroh-transport")))
-)]
+#[cfg(feature = "quinn-transport")]
+#[cfg_attr(quicrpc_docsrs, doc(cfg(feature = "quinn-transport")))]
 mod util;
+#[cfg(feature = "quinn-transport")]
+#[cfg_attr(quicrpc_docsrs, doc(cfg(feature = "quinn-transport")))]
+pub use self::util::{FramedPostcardRead, FramedPostcardWrite};
 
 /// Errors that can happen when creating and using a [`Connector`] or [`Listener`].
 pub trait ConnectionErrors: Debug + Clone + Send + Sync + 'static {

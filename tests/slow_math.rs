@@ -2,7 +2,6 @@
     feature = "flume-transport",
     feature = "hyper-transport",
     feature = "quinn-transport",
-    feature = "iroh-transport",
 ))]
 mod math;
 use std::result;
