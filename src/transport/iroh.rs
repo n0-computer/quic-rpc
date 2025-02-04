@@ -16,9 +16,8 @@ use std::{
 use flume::TryRecvError;
 use futures_lite::Stream;
 use futures_sink::Sink;
-use iroh::{NodeAddr, NodeId};
+use iroh::{endpoint::Connection, NodeAddr, NodeId};
 use pin_project::pin_project;
-use quinn::Connection;
 use serde::{de::DeserializeOwned, Serialize};
 use tokio::{sync::oneshot, task::yield_now};
 use tracing::{debug_span, Instrument};
@@ -86,7 +85,7 @@ impl<In: RpcMessage, Out: RpcMessage> IrohListener<In, Out> {
     /// handles RPC requests from a connection
     ///
     /// to cleanly shut down the handler, drop the receiver side of the sender.
-    async fn connection_handler(connection: quinn::Connection, sender: flume::Sender<SocketInner>) {
+    async fn connection_handler(connection: Connection, sender: flume::Sender<SocketInner>) {
         loop {
             tracing::debug!("Awaiting incoming bidi substream on existing connection...");
             let bidi_stream = match connection.accept_bi().await {
@@ -134,15 +133,12 @@ impl<In: RpcMessage, Out: RpcMessage> IrohListener<In, Out> {
             // The same applies when it isn't empty, ignoring the check for emptiness and always
             // extracting the node id and checking if it's in the set.
             if !allowed_node_ids.is_empty() {
-                let Ok(client_node_id) =
-                    iroh::endpoint::get_remote_node_id(&connection).map_err(|e| {
-                        tracing::error!(
-                            ?e,
-                            "Failed to extract iroh node id from incoming connection from {:?}",
-                            connection.remote_address()
-                        )
-                    })
-                else {
+                let Ok(client_node_id) = connection.remote_node_id().map_err(|e| {
+                    tracing::error!(
+                        ?e,
+                        "Failed to extract iroh node id from incoming connection",
+                    )
+                }) else {
                     connection.close(0u32.into(), b"failed to extract iroh node id");
                     continue;
                 };
@@ -155,7 +151,7 @@ impl<In: RpcMessage, Out: RpcMessage> IrohListener<In, Out> {
 
             tracing::debug!(
                 "Connection established from {:?}",
-                connection.remote_address()
+                connection.remote_node_id()
             );
 
             tracing::debug!("Spawning connection handler...");
@@ -216,7 +212,7 @@ impl<In: RpcMessage, Out: RpcMessage> IrohListener<In, Out> {
     /// This is useful if you want to manage the quinn endpoint yourself,
     /// use multiple endpoints, or use an endpoint for multiple protocols.
     pub fn handle_connections(
-        incoming: flume::Receiver<quinn::Connection>,
+        incoming: flume::Receiver<Connection>,
         local_addr: SocketAddr,
     ) -> Self {
         let (sender, receiver) = flume::bounded(16);
@@ -318,8 +314,6 @@ impl Drop for ClientConnectionInner {
                 let span = debug_span!("closing client endpoint");
                 handle.spawn(
                     async move {
-                        // iroh endpoint's close is async, and internally it waits the
-                        // underlying quinn endpoint to be idle.
                         endpoint.close().await;
                     }
                     .instrument(span),
@@ -343,7 +337,7 @@ pub struct IrohConnector<In: RpcMessage, Out: RpcMessage> {
 
 impl<In: RpcMessage, Out: RpcMessage> IrohConnector<In, Out> {
     async fn single_connection_handler(
-        connection: quinn::Connection,
+        connection: Connection,
         requests_rx: flume::Receiver<oneshot::Sender<anyhow::Result<SocketInner>>>,
     ) {
         loop {
@@ -485,7 +479,7 @@ impl<In: RpcMessage, Out: RpcMessage> IrohConnector<In, Out> {
     }
 
     /// Create a new channel
-    pub fn from_connection(connection: quinn::Connection) -> Self {
+    pub fn from_connection(connection: Connection) -> Self {
         let (requests_tx, requests_rx) = flume::bounded(16);
         let task = tokio::spawn(Self::single_connection_handler(connection, requests_rx));
         Self {
@@ -539,9 +533,9 @@ enum ConnectionState {
     /// There is no active connection. An attempt to connect will be made.
     NotConnected,
     /// Connecting to the remote.
-    Connecting(Pin<Box<dyn Future<Output = anyhow::Result<quinn::Connection>> + Send>>),
+    Connecting(Pin<Box<dyn Future<Output = anyhow::Result<Connection>> + Send>>),
     /// A connection is already established. In this state, no more connection attempts are made.
-    Connected(quinn::Connection),
+    Connected(Connection),
     /// Intermediate state while processing.
     Poisoned,
 }
@@ -557,7 +551,7 @@ impl ConnectionState {
 }
 
 impl Future for ReconnectHandler {
-    type Output = anyhow::Result<quinn::Connection>;
+    type Output = anyhow::Result<Connection>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         match self.state.poison() {
@@ -734,5 +728,5 @@ impl<In: DeserializeOwned> Stream for RecvStream<In> {
 /// Error for open. Currently just an anyhow::Error
 pub type OpenBiError = anyhow::Error;
 
-/// Error for accept. Currently just a quinn::ConnectionError
+/// Error for accept. Currently just a ConnectionError
 pub type AcceptError = quinn::ConnectionError;

@@ -124,17 +124,26 @@ async fn server_away_and_back() -> TestResult<()> {
 
     // Passing the server node address directly to client endpoint to not depend
     // on a discovery service
-    client_endpoint.add_node_addr(server_endpoint.node_addr().await?)?;
+    let addr = server_endpoint.node_addr().await?;
+    println!("adding addr {:?}", addr);
+    client_endpoint.add_node_addr(addr)?;
 
     // send the first request and wait for the response to ensure everything works as expected
     let SqrResponse(response) = client.rpc(Sqr(4)).await?;
     assert_eq!(response, 16);
 
+    println!("shutting down");
     let server = server_handle.await??;
     drop(server);
+    server_endpoint.close().await;
+
     // wait for drop to free the socket
     tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
 
+    // send a request. No server available so it should fail
+    client.rpc(Sqr(4)).await.unwrap_err();
+
+    println!("creating new endpoint");
     let server_endpoint = make_endpoint(server_secret_key.clone(), ALPN).await?;
 
     // make the server run again
@@ -147,7 +156,9 @@ async fn server_away_and_back() -> TestResult<()> {
 
     // Passing the server node address directly to client endpoint to not depend
     // on a discovery service
-    client_endpoint.add_node_addr(server_endpoint.node_addr().await?)?;
+    let addr = server_endpoint.node_addr().await?;
+    println!("adding addr {:?}", addr);
+    client_endpoint.add_node_addr(addr)?;
 
     // server is running, this should work
     let SqrResponse(response) = client.rpc(Sqr(3)).await?;
