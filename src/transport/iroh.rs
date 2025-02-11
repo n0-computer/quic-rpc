@@ -18,7 +18,6 @@ use futures_lite::Stream;
 use futures_sink::Sink;
 use iroh::{NodeAddr, NodeId};
 use pin_project::pin_project;
-use quinn::Connection;
 use serde::{de::DeserializeOwned, Serialize};
 use tokio::{sync::oneshot, task::yield_now};
 use tracing::{debug_span, Instrument};
@@ -86,12 +85,15 @@ impl<In: RpcMessage, Out: RpcMessage> IrohListener<In, Out> {
     /// handles RPC requests from a connection
     ///
     /// to cleanly shut down the handler, drop the receiver side of the sender.
-    async fn connection_handler(connection: quinn::Connection, sender: flume::Sender<SocketInner>) {
+    async fn connection_handler(
+        connection: iroh::endpoint::Connection,
+        sender: flume::Sender<SocketInner>,
+    ) {
         loop {
             tracing::debug!("Awaiting incoming bidi substream on existing connection...");
             let bidi_stream = match connection.accept_bi().await {
                 Ok(bidi_stream) => bidi_stream,
-                Err(quinn::ConnectionError::ApplicationClosed(e)) => {
+                Err(iroh::endpoint::ConnectionError::ApplicationClosed(e)) => {
                     tracing::debug!(?e, "Peer closed the connection");
                     break;
                 }
@@ -134,15 +136,12 @@ impl<In: RpcMessage, Out: RpcMessage> IrohListener<In, Out> {
             // The same applies when it isn't empty, ignoring the check for emptiness and always
             // extracting the node id and checking if it's in the set.
             if !allowed_node_ids.is_empty() {
-                let Ok(client_node_id) =
-                    iroh::endpoint::get_remote_node_id(&connection).map_err(|e| {
-                        tracing::error!(
-                            ?e,
-                            "Failed to extract iroh node id from incoming connection from {:?}",
-                            connection.remote_address()
-                        )
-                    })
-                else {
+                let Ok(client_node_id) = connection.remote_node_id().map_err(|e| {
+                    tracing::error!(
+                        ?e,
+                        "Failed to extract iroh node id from incoming connection",
+                    )
+                }) else {
                     connection.close(0u32.into(), b"failed to extract iroh node id");
                     continue;
                 };
@@ -155,7 +154,7 @@ impl<In: RpcMessage, Out: RpcMessage> IrohListener<In, Out> {
 
             tracing::debug!(
                 "Connection established from {:?}",
-                connection.remote_address()
+                connection.remote_node_id()
             );
 
             tracing::debug!("Spawning connection handler...");
@@ -216,7 +215,7 @@ impl<In: RpcMessage, Out: RpcMessage> IrohListener<In, Out> {
     /// This is useful if you want to manage the quinn endpoint yourself,
     /// use multiple endpoints, or use an endpoint for multiple protocols.
     pub fn handle_connections(
-        incoming: flume::Receiver<quinn::Connection>,
+        incoming: flume::Receiver<iroh::endpoint::Connection>,
         local_addr: SocketAddr,
     ) -> Self {
         let (sender, receiver) = flume::bounded(16);
@@ -269,8 +268,8 @@ impl<In: RpcMessage, Out: RpcMessage> Clone for IrohListener<In, Out> {
 impl<In: RpcMessage, Out: RpcMessage> ConnectionErrors for IrohListener<In, Out> {
     type SendError = io::Error;
     type RecvError = io::Error;
-    type OpenError = quinn::ConnectionError;
-    type AcceptError = quinn::ConnectionError;
+    type OpenError = iroh::endpoint::ConnectionError;
+    type AcceptError = iroh::endpoint::ConnectionError;
 }
 
 impl<In: RpcMessage, Out: RpcMessage> StreamTypes for IrohListener<In, Out> {
@@ -287,7 +286,7 @@ impl<In: RpcMessage, Out: RpcMessage> Listener for IrohListener<In, Out> {
             .receiver
             .recv_async()
             .await
-            .map_err(|_| quinn::ConnectionError::LocallyClosed)?;
+            .map_err(|_| iroh::endpoint::ConnectionError::LocallyClosed)?;
 
         Ok((SendSink::new(send), RecvStream::new(recv)))
     }
@@ -297,7 +296,7 @@ impl<In: RpcMessage, Out: RpcMessage> Listener for IrohListener<In, Out> {
     }
 }
 
-type SocketInner = (quinn::SendStream, quinn::RecvStream);
+type SocketInner = (iroh::endpoint::SendStream, iroh::endpoint::RecvStream);
 
 #[derive(Debug)]
 struct ClientConnectionInner {
@@ -343,7 +342,7 @@ pub struct IrohConnector<In: RpcMessage, Out: RpcMessage> {
 
 impl<In: RpcMessage, Out: RpcMessage> IrohConnector<In, Out> {
     async fn single_connection_handler(
-        connection: quinn::Connection,
+        connection: iroh::endpoint::Connection,
         requests_rx: flume::Receiver<oneshot::Sender<anyhow::Result<SocketInner>>>,
     ) {
         loop {
@@ -396,7 +395,7 @@ impl<In: RpcMessage, Out: RpcMessage> IrohConnector<In, Out> {
         });
 
         let mut pending_request: Option<oneshot::Sender<anyhow::Result<SocketInner>>> = None;
-        let mut connection: Option<Connection> = None;
+        let mut connection: Option<iroh::endpoint::Connection> = None;
 
         loop {
             // First we check if there is already a request ready in the channel
@@ -485,7 +484,7 @@ impl<In: RpcMessage, Out: RpcMessage> IrohConnector<In, Out> {
     }
 
     /// Create a new channel
-    pub fn from_connection(connection: quinn::Connection) -> Self {
+    pub fn from_connection(connection: iroh::endpoint::Connection) -> Self {
         let (requests_tx, requests_rx) = flume::bounded(16);
         let task = tokio::spawn(Self::single_connection_handler(connection, requests_rx));
         Self {
@@ -539,9 +538,9 @@ enum ConnectionState {
     /// There is no active connection. An attempt to connect will be made.
     NotConnected,
     /// Connecting to the remote.
-    Connecting(Pin<Box<dyn Future<Output = anyhow::Result<quinn::Connection>> + Send>>),
+    Connecting(Pin<Box<dyn Future<Output = anyhow::Result<iroh::endpoint::Connection>> + Send>>),
     /// A connection is already established. In this state, no more connection attempts are made.
-    Connected(quinn::Connection),
+    Connected(iroh::endpoint::Connection),
     /// Intermediate state while processing.
     Poisoned,
 }
@@ -557,7 +556,7 @@ impl ConnectionState {
 }
 
 impl Future for ReconnectHandler {
-    type Output = anyhow::Result<quinn::Connection>;
+    type Output = anyhow::Result<iroh::endpoint::Connection>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         match self.state.poison() {
@@ -637,11 +636,11 @@ impl<In: RpcMessage, Out: RpcMessage> Connector for IrohConnector<In, Out> {
             .requests_tx
             .send_async(request_ack_tx)
             .await
-            .map_err(|_| quinn::ConnectionError::LocallyClosed)?;
+            .map_err(|_| iroh::endpoint::ConnectionError::LocallyClosed)?;
 
         let (send, recv) = request_ack_rx
             .await
-            .map_err(|_| quinn::ConnectionError::LocallyClosed)??;
+            .map_err(|_| iroh::endpoint::ConnectionError::LocallyClosed)??;
 
         Ok((SendSink::new(send), RecvStream::new(recv)))
     }
@@ -650,9 +649,9 @@ impl<In: RpcMessage, Out: RpcMessage> Connector for IrohConnector<In, Out> {
 /// A sink that wraps a quinn SendStream with length delimiting and postcard
 ///
 /// If you want to send bytes directly, use [SendSink::into_inner] to get the
-/// underlying [quinn::SendStream].
+/// underlying [iroh::endpoint::SendStream].
 #[pin_project]
-pub struct SendSink<Out>(#[pin] FramedPostcardWrite<quinn::SendStream, Out>);
+pub struct SendSink<Out>(#[pin] FramedPostcardWrite<iroh::endpoint::SendStream, Out>);
 
 impl<Out> fmt::Debug for SendSink<Out> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -661,16 +660,16 @@ impl<Out> fmt::Debug for SendSink<Out> {
 }
 
 impl<Out: Serialize> SendSink<Out> {
-    fn new(inner: quinn::SendStream) -> Self {
+    fn new(inner: iroh::endpoint::SendStream) -> Self {
         let inner = FramedPostcardWrite::new(inner, MAX_FRAME_LENGTH);
         Self(inner)
     }
 }
 
 impl<Out> SendSink<Out> {
-    /// Get the underlying [quinn::SendStream], which implements
+    /// Get the underlying [iroh::endpoint::SendStream], which implements
     /// [tokio::io::AsyncWrite] and can be used to send bytes directly.
-    pub fn into_inner(self) -> quinn::SendStream {
+    pub fn into_inner(self) -> iroh::endpoint::SendStream {
         self.0.into_inner()
     }
 }
@@ -698,9 +697,9 @@ impl<Out: Serialize> Sink<Out> for SendSink<Out> {
 /// A stream that wraps a quinn RecvStream with length delimiting and postcard
 ///
 /// If you want to receive bytes directly, use [RecvStream::into_inner] to get
-/// the underlying [quinn::RecvStream].
+/// the underlying [iroh::endpoint::RecvStream].
 #[pin_project]
-pub struct RecvStream<In>(#[pin] FramedPostcardRead<quinn::RecvStream, In>);
+pub struct RecvStream<In>(#[pin] FramedPostcardRead<iroh::endpoint::RecvStream, In>);
 
 impl<In> fmt::Debug for RecvStream<In> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -709,16 +708,16 @@ impl<In> fmt::Debug for RecvStream<In> {
 }
 
 impl<In: DeserializeOwned> RecvStream<In> {
-    fn new(inner: quinn::RecvStream) -> Self {
+    fn new(inner: iroh::endpoint::RecvStream) -> Self {
         let inner = FramedPostcardRead::new(inner, MAX_FRAME_LENGTH);
         Self(inner)
     }
 }
 
 impl<In> RecvStream<In> {
-    /// Get the underlying [quinn::RecvStream], which implements
+    /// Get the underlying [iroh::endpoint::RecvStream], which implements
     /// [tokio::io::AsyncRead] and can be used to receive bytes directly.
-    pub fn into_inner(self) -> quinn::RecvStream {
+    pub fn into_inner(self) -> iroh::endpoint::RecvStream {
         self.0.into_inner()
     }
 }
@@ -734,5 +733,5 @@ impl<In: DeserializeOwned> Stream for RecvStream<In> {
 /// Error for open. Currently just an anyhow::Error
 pub type OpenBiError = anyhow::Error;
 
-/// Error for accept. Currently just a quinn::ConnectionError
-pub type AcceptError = quinn::ConnectionError;
+/// Error for accept. Currently just a iroh::endpoint::ConnectionError
+pub type AcceptError = iroh::endpoint::ConnectionError;
