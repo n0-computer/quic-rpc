@@ -9,7 +9,7 @@ edition = "2021"
 anyhow = "1.0.14"
 futures = "0.3.26"
 quic-rpc = { path = "../../..", features = ["quinn-transport", "macros", "test-utils"] }
-quinn = { package = "iroh-quinn", version = "0.12" }
+quinn = { package = "iroh-quinn", version = "0.13" }
 rustls = { version = "0.23", default-features = false, features = ["ring"] }
 tracing-subscriber = "0.3.16"
 tokio = { version = "1", features = ["full"] }
