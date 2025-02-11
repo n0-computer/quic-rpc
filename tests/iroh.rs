@@ -132,6 +132,7 @@ async fn server_away_and_back() -> TestResult<()> {
 
     let server = server_handle.await??;
     drop(server);
+    server_endpoint.close().await;
     // wait for drop to free the socket
     tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
 
