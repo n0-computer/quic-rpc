@@ -241,9 +241,9 @@ impl<A: Listener, B: Listener<In = A::In, Out = A::Out>> StreamTypes for Combine
 }
 
 impl<A: Listener, B: Listener<In = A::In, Out = A::Out>> Listener for CombinedListener<A, B> {
-    async fn accept(&self) -> Result<(Self::SendSink, Self::RecvStream), Self::AcceptError> {
+    async fn accept(&mut self) -> Result<(Self::SendSink, Self::RecvStream), Self::AcceptError> {
         let a_fut = async {
-            if let Some(a) = &self.a {
+            if let Some(a) = &mut self.a {
                 let (send, recv) = a.accept().await.map_err(AcceptError::A)?;
                 Ok((SendSink::A(send), RecvStream::A(recv)))
             } else {
@@ -251,7 +251,7 @@ impl<A: Listener, B: Listener<In = A::In, Out = A::Out>> Listener for CombinedLi
             }
         };
         let b_fut = async {
-            if let Some(b) = &self.b {
+            if let Some(b) = &mut self.b {
                 let (send, recv) = b.accept().await.map_err(AcceptError::B)?;
                 Ok((SendSink::B(send), RecvStream::B(recv)))
             } else {

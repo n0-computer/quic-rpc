@@ -163,7 +163,7 @@ async fn hyper_channel_errors() -> anyhow::Result<()> {
         Receiver<result::Result<(), RpcServerError<SC>>>,
     ) {
         let channel = HyperListener::serve(addr).unwrap();
-        let server = RpcServer::new(channel);
+        let mut server = RpcServer::new(channel);
         let (res_tx, res_rx) = flume::unbounded();
         let handle = tokio::spawn(async move {
             loop {

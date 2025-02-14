@@ -42,7 +42,7 @@ impl<In: RpcMessage, Out: RpcMessage> StreamTypes for DummyListener<In, Out> {
 }
 
 impl<In: RpcMessage, Out: RpcMessage> Listener for DummyListener<In, Out> {
-    async fn accept(&self) -> Result<(Self::SendSink, Self::RecvStream), Self::AcceptError> {
+    async fn accept(&mut self) -> Result<(Self::SendSink, Self::RecvStream), Self::AcceptError> {
         futures_lite::future::pending().await
     }
 
