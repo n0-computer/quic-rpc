@@ -61,7 +61,7 @@ impl<T: RpcMessage> Sink<T> for SendSink<T> {
         match self.project().0 {
             #[cfg(feature = "flume-transport")]
             SendSinkInner::Direct(sink) => sink.start_send_unpin(item).map_err(anyhow::Error::from),
-            SendSinkInner::Boxed(sink) => sink.start_send_unpin(item).map_err(anyhow::Error::from),
+            SendSinkInner::Boxed(sink) => sink.start_send_unpin(item),
         }
     }
 
