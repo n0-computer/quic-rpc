@@ -464,10 +464,25 @@ impl<T> Future for UnwrapToPending<T> {
 }
 
 pub(crate) async fn race2<T, A: Future<Output = T>, B: Future<Output = T>>(f1: A, f2: B) -> T {
-    tokio::select! {
-        x = f1 => x,
-        x = f2 => x,
-    }
+    // Pin the futures on the stack for polling
+    let mut f1 = std::pin::pin!(f1);
+    let mut f2 = std::pin::pin!(f2);
+
+    // Create a future that resolves when either f1 or f2 completes
+    std::future::poll_fn(|cx| {
+        // Poll both futures
+        match f1.as_mut().poll(cx) {
+            Poll::Ready(result) => return Poll::Ready(result),
+            Poll::Pending => {}
+        }
+        match f2.as_mut().poll(cx) {
+            Poll::Ready(result) => return Poll::Ready(result),
+            Poll::Pending => {}
+        }
+        // If neither is ready, yield back to the executor
+        Poll::Pending
+    })
+    .await
 }
 
 /// Run a server loop, invoking a handler callback for each request.
