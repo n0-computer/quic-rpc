@@ -2694,6 +2694,7 @@ dependencies = [
  "time",
  "tokio",
  "tokio-serde",
+ "tokio-stream",
  "tokio-util",
  "tracing",
  "tracing-subscriber",

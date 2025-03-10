@@ -166,7 +166,7 @@ async fn main() -> anyhow::Result<()> {
     async fn server_future<C: Listener<StoreService>>(
         server: RpcServer<StoreService, C>,
     ) -> result::Result<(), RpcServerError<C>> {
-        let s = server;
+        let mut s = server;
         let store = Store;
         loop {
             let (req, chan) = s.accept().await?.read_first().await?;
@@ -239,7 +239,7 @@ async fn _main_unsugared() -> anyhow::Result<()> {
         type Req = u64;
         type Res = String;
     }
-    let (server, client) = flume::channel::<u64, String>(1);
+    let (mut server, client) = flume::channel::<u64, String>(1);
     let to_string_service = tokio::spawn(async move {
         let (mut send, mut recv) = server.accept().await?;
         while let Some(item) = recv.next().await {
