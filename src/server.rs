@@ -329,7 +329,7 @@ where
 {
     pub(crate) fn new(recv: C::RecvStream) -> (Self, UnwrapToPending<RpcServerError<C>>) {
         let (error_send, error_recv) = oneshot::channel();
-        let error_recv = UnwrapToPending(error_recv);
+        let error_recv = UnwrapToPending(futures_lite::future::fuse(error_recv));
         (Self(recv, Some(error_send), PhantomData), error_recv)
     }
 }
@@ -449,7 +449,7 @@ impl<C: ConnectionErrors> fmt::Display for RpcServerError<C> {
 impl<C: ConnectionErrors> error::Error for RpcServerError<C> {}
 
 /// Take an oneshot receiver and just return Pending the underlying future returns `Err(oneshot::Canceled)`
-pub(crate) struct UnwrapToPending<T>(oneshot::Receiver<T>);
+pub(crate) struct UnwrapToPending<T>(futures_lite::future::Fuse<oneshot::Receiver<T>>);
 
 impl<T> Future for UnwrapToPending<T> {
     type Output = T;
