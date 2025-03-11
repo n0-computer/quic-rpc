@@ -455,6 +455,7 @@ impl<T> Future for UnwrapToPending<T> {
     type Output = T;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut task::Context<'_>) -> Poll<Self::Output> {
+        // todo: use is_terminated from tokio 1.44 here to avoid the fused wrapper
         match Pin::new(&mut self.0).poll(cx) {
             Poll::Ready(Ok(x)) => Poll::Ready(x),
             Poll::Ready(Err(_)) => Poll::Pending,
