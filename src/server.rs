@@ -329,7 +329,7 @@ where
 {
     pub(crate) fn new(recv: C::RecvStream) -> (Self, UnwrapToPending<RpcServerError<C>>) {
         let (error_send, error_recv) = oneshot::channel();
-        let error_recv = UnwrapToPending(error_recv);
+        let error_recv = UnwrapToPending(futures_lite::future::fuse(error_recv));
         (Self(recv, Some(error_send), PhantomData), error_recv)
     }
 }
@@ -449,12 +449,13 @@ impl<C: ConnectionErrors> fmt::Display for RpcServerError<C> {
 impl<C: ConnectionErrors> error::Error for RpcServerError<C> {}
 
 /// Take an oneshot receiver and just return Pending the underlying future returns `Err(oneshot::Canceled)`
-pub(crate) struct UnwrapToPending<T>(oneshot::Receiver<T>);
+pub(crate) struct UnwrapToPending<T>(futures_lite::future::Fuse<oneshot::Receiver<T>>);
 
 impl<T> Future for UnwrapToPending<T> {
     type Output = T;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut task::Context<'_>) -> Poll<Self::Output> {
+        // todo: use is_terminated from tokio 1.44 here to avoid the fused wrapper
         match Pin::new(&mut self.0).poll(cx) {
             Poll::Ready(Ok(x)) => Poll::Ready(x),
             Poll::Ready(Err(_)) => Poll::Pending,
