@@ -1,8 +1,4 @@
-use quic_rpc::channel::{
-    mpsc,
-    none::{NoReceiver, NoSender},
-    oneshot,
-};
+use quic_rpc::channel::{none::NoSender, oneshot};
 use quic_rpc_derive::rpc_requests;
 use serde::{Deserialize, Serialize};
 
@@ -55,4 +51,15 @@ fn simple() {
     struct Service;
 
     impl quic_rpc::Service for Service {}
+}
+
+/// Use
+///
+/// TRYBUILD=overwrite cargo test --test smoke
+///
+/// to update the snapshots
+#[test]
+fn compile_fail() {
+    let t = trybuild::TestCases::new();
+    t.compile_fail("tests/compile_fail/*.rs");
 }

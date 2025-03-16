@@ -16,9 +16,9 @@ proc-macro = true
 syn = { version = "1", features = ["full"] }
 quote = "1"
 proc-macro2 = "1"
-quic-rpc = { path = ".." }
 
 [dev-dependencies]
 derive_more = { version = "1", features = ["from", "try_into", "display"] }
 serde = { version = "1", features = ["serde_derive"] }
 trybuild = "1.0"
+quic-rpc = { path = ".." }

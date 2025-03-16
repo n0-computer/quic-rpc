@@ -12,10 +12,17 @@ use syn::{
 
 // Helper function for error reporting
 fn error_tokens(span: Span, message: &str) -> TokenStream {
-    syn::Error::new(span, message)
-        .to_compile_error()
-        .into()
+    syn::Error::new(span, message).to_compile_error().into()
 }
+
+/// The only attribute we care about
+const ATTR_NAME: &str = "rpc";
+/// the tx type name
+const TX_ATTR: &str = "tx";
+/// the rx type name
+const RX_ATTR: &str = "rx";
+/// Fully qualified path to the default rx type
+const DEFAULT_RX_TYPE: &str = "::quic_rpc::channel::none::NoReceiver";
 
 fn generate_channels_impl(
     mut args: NamedTypeArgs,
@@ -24,50 +31,22 @@ fn generate_channels_impl(
     attr_span: Span,
 ) -> syn::Result<TokenStream2> {
     // Try to get rx, default to NoReceiver if not present
-    let rx = match args.types.remove("rx") {
-        Some(rx_type) => rx_type,
-        None => {
-            // Parse "NoReceiver" into a Type
-            syn::parse_str::<Type>("::quic_rpc::channel::none::NoReceiver").map_err(
-                |e| {
-                    syn::Error::new(
-                        attr_span,
-                        format!("Failed to parse default rx type: {}", e),
-                    )
-                },
-            )?
-        }
-    };
-    let tx = args.get("tx", attr_span)?;
-    
+    // Use unwrap_or_else for a cleaner default
+    let rx = args.types.remove(RX_ATTR).unwrap_or_else(|| {
+        // We can safely unwrap here because this is a known valid type
+        syn::parse_str::<Type>(DEFAULT_RX_TYPE).expect("Failed to parse default rx type")
+    });
+    let tx = args.get(TX_ATTR, attr_span)?;
+
     let res = quote! {
         impl ::quic_rpc::Channels<#service_name> for #request_type {
             type Tx = #tx;
             type Rx = #rx;
         }
     };
-    
+
     args.check_empty(attr_span)?;
     Ok(res)
-}
-
-// Parse arguments in the format (ServiceType, MessageEnumName)
-struct MacroArgs {
-    service_name: Ident,
-    message_enum_name: Ident,
-}
-
-impl Parse for MacroArgs {
-    fn parse(input: ParseStream) -> syn::Result<Self> {
-        let service_name: Ident = input.parse()?;
-        let _: Token![,] = input.parse()?;
-        let message_enum_name: Ident = input.parse()?;
-
-        Ok(MacroArgs {
-            service_name,
-            message_enum_name,
-        })
-    }
 }
 
 #[proc_macro_attribute]
@@ -91,30 +70,42 @@ pub fn rpc_requests(attr: TokenStream, item: TokenStream) -> TokenStream {
         // Check field structure for every variant
         let request_type = match &variant.fields {
             Fields::Unnamed(fields) if fields.unnamed.len() == 1 => &fields.unnamed[0].ty,
-            _ => return error_tokens(
-                variant.span(),
-                "Each variant must have exactly one unnamed field",
-            ),
+            _ => {
+                return error_tokens(
+                    variant.span(),
+                    "Each variant must have exactly one unnamed field",
+                )
+            }
         };
 
         if !types.insert(request_type.to_token_stream().to_string()) {
             return error_tokens(input_span, "Each variant must have a unique request type");
         }
-
         // Find and remove the rpc attribute
         let mut rpc_attr = None;
+        let mut multiple_rpc_attrs = false;
+
         variant.attrs.retain(|attr| {
-            if attr.path.is_ident("rpc") {
+            if attr.path.is_ident(ATTR_NAME) {
                 if rpc_attr.is_some() {
-                    // This should never happen since we're removing them as we go
-                    panic!("Multiple rpc attributes found");
+                    multiple_rpc_attrs = true;
+                    true // Keep this duplicate attribute
+                } else {
+                    rpc_attr = Some(attr.clone());
+                    false // Remove this attribute
                 }
-                rpc_attr = Some(attr.clone());
-                false // Remove this attribute
             } else {
                 true // Keep other attributes
             }
         });
+
+        // Check for multiple rpc attributes
+        if multiple_rpc_attrs {
+            return error_tokens(
+                variant.span(),
+                "Each variant can only have one rpc attribute",
+            );
+        }
 
         if let Some(attr) = rpc_attr {
             let args = match attr.parse_args::<NamedTypeArgs>() {
@@ -135,21 +126,20 @@ pub fn rpc_requests(attr: TokenStream, item: TokenStream) -> TokenStream {
         .map(|variant| {
             let variant_name = &variant.ident;
 
-            // Extract the inner type - we know it's already valid
-            let inner_type = match &variant.fields {
-                Fields::Unnamed(fields) => {
-                    if let Type::Path(type_path) = &fields.unnamed.first().unwrap().ty {
-                        if let Some(last_segment) = type_path.path.segments.last() {
-                            &last_segment.ident
-                        } else {
-                            &type_path.path.segments.first().unwrap().ident
-                        }
-                    } else {
-                        panic!("Unexpected type"); // Should never happen due to prior validation
-                    }
-                }
-                _ => panic!("Unexpected field type"), // Should never happen due to prior validation
+            // Extract the inner type using let-else patterns
+            let Fields::Unnamed(fields) = &variant.fields else {
+                unreachable!()
             };
+            let Some(field) = fields.unnamed.first() else {
+                unreachable!()
+            };
+            let Type::Path(type_path) = &field.ty else {
+                unreachable!()
+            };
+            let Some(last_segment) = type_path.path.segments.last() else {
+                unreachable!()
+            };
+            let inner_type = &last_segment.ident;
 
             quote! {
                 #variant_name(::quic_rpc::WithChannels<#inner_type, #service_name>)
@@ -173,6 +163,25 @@ pub fn rpc_requests(attr: TokenStream, item: TokenStream) -> TokenStream {
     };
 
     output.into()
+}
+
+// Parse arguments in the format (ServiceType, MessageEnumName)
+struct MacroArgs {
+    service_name: Ident,
+    message_enum_name: Ident,
+}
+
+impl Parse for MacroArgs {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        let service_name: Ident = input.parse()?;
+        let _: Token![,] = input.parse()?;
+        let message_enum_name: Ident = input.parse()?;
+
+        Ok(MacroArgs {
+            service_name,
+            message_enum_name,
+        })
+    }
 }
 
 struct NamedTypeArgs {

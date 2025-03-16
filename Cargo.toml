@@ -26,6 +26,9 @@ rustls = { version = "0.23.5", default-features = false, features = ["std"], opt
 rcgen = { version = "0.13.2", optional = true }
 smallvec = { version = "1.14.0", features = ["write"] }
 
+[dev-dependencies]
+quic-rpc-derive = { path = "quic-rpc-derive" }
+
 [features]
 quinn = ["dep:quinn", "dep:postcard"]
 default = ["quinn", "test"]
