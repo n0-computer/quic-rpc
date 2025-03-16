@@ -1,0 +1,23 @@
+[package]
+name = "qrpc2"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1"
+derive_more = { version = "2", features = ["debug", "display", "from"] }
+n0-future = "0.1.2"
+tracing = "0.1.41"
+serde = { version = "1.0.219", features = ["derive"] }
+tokio = { version = "1.44.1", features = ["full"] }
+postcard = { version = "1.1.1", features = ["alloc", "use-std"], optional = true }
+quinn = { version = "0.13.0", package = "iroh-quinn", optional = true }
+tracing-subscriber = { version = "0.3.19", features = ["fmt"] }
+rustls = { version = "0.23.5", default-features = false, features = ["std"], optional = true }
+rcgen = { version = "0.13.2", optional = true }
+smallvec = { version = "1.14.0", features = ["write"] }
+
+[features]
+quinn = ["dep:quinn", "dep:postcard"]
+default = ["quinn", "test"]
+test = ["rustls", "rcgen"]

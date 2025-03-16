@@ -1,0 +1,3 @@
+{
+  "rust-analyzer.cargo.features": ["hyper-transport", "quinn-transport", "iroh-transport", "test-utils"]
+}
