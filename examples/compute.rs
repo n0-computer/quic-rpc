@@ -6,7 +6,11 @@ use std::{
 };
 
 use anyhow::bail;
-use n0_future::task::{self, AbortOnDropHandle};
+use futures_buffered::BufferedStreamExt;
+use n0_future::{
+    stream::StreamExt,
+    task::{self, AbortOnDropHandle},
+};
 use quic_rpc::{
     channel::{mpsc, oneshot},
     rpc::{listen, Handler, RemoteRead},
@@ -15,6 +19,7 @@ use quic_rpc::{
 };
 use quic_rpc_derive::rpc_requests;
 use serde::{Deserialize, Serialize};
+use thousands::Separable;
 use tracing::trace;
 
 // Define the ComputeService
@@ -83,13 +88,15 @@ impl ComputeActor {
 
     async fn run(mut self) {
         while let Some(msg) = self.recv.recv().await {
-            if let Err(cause) = self.handle(msg).await {
-                eprintln!("Error: {}", cause);
-            }
+            n0_future::task::spawn(async move {
+                if let Err(cause) = Self::handle(msg).await {
+                    eprintln!("Error: {}", cause);
+                }
+            });
         }
     }
 
-    async fn handle(&mut self, msg: ComputeMessage) -> io::Result<()> {
+    async fn handle(msg: ComputeMessage) -> io::Result<()> {
         match msg {
             ComputeMessage::Sqr(sqr) => {
                 trace!("sqr {:?}", sqr);
@@ -338,7 +345,7 @@ async fn bench(api: ComputeApi, n: u64) -> anyhow::Result<()> {
         let rps = ((n as f64) / t0.elapsed().as_secs_f64()).round() as u64;
         assert_eq!(sum, sum_of_squares(n));
         clear_line()?;
-        println!("RPC seq {} rps", rps);
+        println!("RPC seq {} rps", rps.separate_with_underscores());
     }
 
     // Parallel RPCs
@@ -349,14 +356,12 @@ async fn bench(api: ComputeApi, n: u64) -> anyhow::Result<()> {
             let api = api.clone();
             async move { anyhow::Ok(api.sqr(i).await?.await?) }
         }));
-        use futures_buffered::BufferedStreamExt;
-        use n0_future::stream::StreamExt;
         let resp: Vec<_> = reqs.buffered_unordered(32).try_collect().await?;
         let sum = resp.into_iter().sum::<u128>();
         let rps = ((n as f64) / t0.elapsed().as_secs_f64()).round() as u64;
         assert_eq!(sum, sum_of_squares(n));
         clear_line()?;
-        println!("RPC par {} rps", rps);
+        println!("RPC par {} rps", rps.separate_with_underscores());
     }
 
     // Sequential streaming (using Multiply instead of MultiplyUpdate)
@@ -382,7 +387,7 @@ async fn bench(api: ComputeApi, n: u64) -> anyhow::Result<()> {
         let rps = ((n as f64) / t0.elapsed().as_secs_f64()).round() as u64;
         assert_eq!(sum, (0..n).map(|x| x * 2).sum());
         clear_line()?;
-        println!("bidi seq {} rps", rps);
+        println!("bidi seq {} rps", rps.separate_with_underscores());
         handle.await??;
     }
 
@@ -401,6 +406,65 @@ fn clear_line() -> io::Result<()> {
     Ok(())
 }
 
+
+// Simple benchmark sending oneshot senders via an mpsc channel
+pub async fn reference_bench(n: u64) -> anyhow::Result<()> {
+    // Create an mpsc channel to send oneshot senders
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<tokio::sync::oneshot::Sender<u64>>(32);
+
+    // Spawn a task to respond to all oneshot senders
+    tokio::spawn(async move {
+        while let Some(sender) = rx.recv().await {
+            // Immediately send a fixed response (42) back through the oneshot sender
+            sender.send(42).ok();
+        }
+        Ok::<(), io::Error>(())
+    });
+
+    // Sequential oneshot sends
+    {
+        let mut sum = 0;
+        let t0 = std::time::Instant::now();
+        for i in 0..n {
+            let (send, recv) = tokio::sync::oneshot::channel();
+            tx.send(send).await?;
+            sum += recv.await?;
+            if i % 10000 == 0 {
+                print!(".");
+                io::stdout().flush()?;
+            }
+        }
+        let rps = ((n as f64) / t0.elapsed().as_secs_f64()).round() as u64;
+        assert_eq!(sum, 42 * n); // Each response is 42
+        clear_line()?;
+        println!(
+            "Reference seq {} rps",
+            rps.separate_with_underscores()
+        );
+    }
+
+    // Parallel oneshot sends
+    {
+        let t0 = std::time::Instant::now();
+        let reqs = n0_future::stream::iter((0..n).map(|_| async {
+            let (send, recv) = tokio::sync::oneshot::channel();
+            tx.send(send).await?;
+            anyhow::Ok(recv.await?)
+        }));
+        let resp: Vec<_> = reqs.buffered_unordered(32).try_collect().await?;
+        let sum = resp.into_iter().sum::<u64>();
+        let rps = ((n as f64) / t0.elapsed().as_secs_f64()).round() as u64;
+        assert_eq!(sum, 42 * n); // Each response is 42
+        clear_line()?;
+        println!(
+            "Reference par {} rps",
+            rps.separate_with_underscores()
+        );
+    }
+
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt().init();
@@ -411,5 +475,7 @@ async fn main() -> anyhow::Result<()> {
 
     let api = ComputeActor::local();
     bench(api, 1000000).await?;
+
+    reference_bench(1000000).await?;
     Ok(())
 }

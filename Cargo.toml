@@ -47,6 +47,8 @@ derive_more = { version = "2", features = ["debug", "display", "from"] }
 tokio = { version = "1", features = ["full"] }
 # for AbortOnDropHandle
 n0-future = "0.1.2"
+# formatting
+thousands = "0.2.0"
 
 [features]
 # enable the remote transport
