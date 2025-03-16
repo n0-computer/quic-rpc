@@ -220,7 +220,7 @@ pub mod channel {
 
         pub enum Sender<T> {
             Tokio(tokio::sync::mpsc::Sender<T>),
-            Boxed(Box<dyn NetworkSender<T>>),
+            Boxed(Box<dyn BoxedSender<T>>),
         }
 
         impl<T> From<tokio::sync::mpsc::Sender<T>> for Sender<T> {
@@ -229,14 +229,14 @@ pub mod channel {
             }
         }
 
-        pub trait NetworkSender<T>: Debug + Send + Sync + 'static {
+        pub trait BoxedSender<T>: Debug + Send + Sync + 'static {
             fn send(
                 &mut self,
                 value: T,
             ) -> Pin<Box<dyn Future<Output = io::Result<()>> + Send + '_>>;
         }
 
-        pub trait NetworkReceiver<T>: Debug + Send + Sync + 'static {
+        pub trait BoxedReceiver<T>: Debug + Send + Sync + 'static {
             fn recv(&mut self) -> Pin<Box<dyn Future<Output = io::Result<Option<T>>> + Send + '_>>;
         }
 
@@ -264,7 +264,7 @@ pub mod channel {
 
         pub enum Receiver<T> {
             Tokio(tokio::sync::mpsc::Receiver<T>),
-            Boxed(Box<dyn NetworkReceiver<T>>),
+            Boxed(Box<dyn BoxedReceiver<T>>),
         }
 
         impl<T: RpcMessage> Receiver<T> {
@@ -317,7 +317,7 @@ pub mod channel {
 pub struct WithChannels<I: Channels<S>, S: Service> {
     /// The inner message.
     pub inner: I,
-    /// The return channel to send the response to. Can be set to [`NoSender`] if not needed.
+    /// The return channel to send the response to. Can be set to [`crate::channel::none::NoSender`] if not needed.
     pub tx: <I as Channels<S>>::Tx,
     /// The request channel to receive the request from. Can be set to [`NoReceiver`] if not needed.
     pub rx: <I as Channels<S>>::Rx,
@@ -425,7 +425,7 @@ pub mod rpc {
 
     use crate::{
         channel::{
-            mpsc::{self, NetworkReceiver, NetworkSender},
+            mpsc::{self, BoxedReceiver, BoxedSender},
             oneshot,
         },
         util::{AsyncReadVarintExt, WriteVarintExt},
@@ -530,7 +530,7 @@ pub mod rpc {
         }
     }
 
-    impl<T: RpcMessage> NetworkReceiver<T> for QuinnReceiver<T> {
+    impl<T: RpcMessage> BoxedReceiver<T> for QuinnReceiver<T> {
         fn recv(&mut self) -> Pin<Box<dyn Future<Output = io::Result<Option<T>>> + Send + '_>> {
             Box::pin(async {
                 let read = &mut self.recv;
@@ -564,7 +564,7 @@ pub mod rpc {
         }
     }
 
-    impl<T: RpcMessage> NetworkSender<T> for QuinnSender<T> {
+    impl<T: RpcMessage> BoxedSender<T> for QuinnSender<T> {
         fn send(&mut self, value: T) -> Pin<Box<dyn Future<Output = io::Result<()>> + Send + '_>> {
             Box::pin(async {
                 let value = value;
