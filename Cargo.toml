@@ -1,6 +1,6 @@
 [package]
 name = "quic-rpc"
-version = "0.18.3"
+version = "0.5.0"
 edition = "2021"
 authors = ["Rüdiger Klaehn <rklaehn@protonmail.com>", "n0 team"]
 keywords = ["api", "protocol", "network", "rpc"]
@@ -13,26 +13,45 @@ description = "A streaming rpc system based on quic"
 rust-version = "1.76"
 
 [dependencies]
-anyhow = "1"
-derive_more = { version = "2", features = ["debug", "display", "from"] }
-n0-future = "0.1.2"
-tracing = "0.1.41"
-serde = { version = "1.0.219", features = ["derive"] }
-tokio = { version = "1.44.1", features = ["full"] }
-postcard = { version = "1.1.1", features = ["alloc", "use-std"], optional = true }
+# we require serde even in non-rpc mode
+serde = { version = "1", default-features = false }
+# just for the oneshot and mpsc queues
+tokio = { version = "1", features = ["sync"], default-features = false  }
+
+# used in the endpoint handler code when using rpc
+tracing = { version = "0.1.41", optional = true }
+# used to ser/de messages when using rpc 
+postcard = { version = "1", features = ["alloc", "use-std"], optional = true }
+# currently only transport when using rpc
 quinn = { version = "0.13.0", package = "iroh-quinn", optional = true }
-tracing-subscriber = { version = "0.3.19", features = ["fmt"] }
+# used as a buffer for serialization when using rpc
+smallvec = { version = "1.14.0", features = ["write"], optional = true }
+# used in the test utils to generate quinn endpoints
 rustls = { version = "0.23.5", default-features = false, features = ["std"], optional = true }
+# used in the test utils to generate quinn endpoints
 rcgen = { version = "0.13.2", optional = true }
-smallvec = { version = "1.14.0", features = ["write"] }
+# used in the test utils to generate quinn endpoints
+anyhow = { version = "1", optional = true }
 
 [dev-dependencies]
+tracing-subscriber = { version = "0.3.19", features = ["fmt"] }
+# used in the derive example. This must not be a main crate dep or else it will be circular!
 quic-rpc-derive = { path = "quic-rpc-derive" }
+# just convenient for the enum definitions
+derive_more = { version = "2", features = ["debug", "display", "from"] }
+# we need full for example main etc.
+tokio = { version = "1", features = ["full"] }
+# for AbortOnDropHandle
+n0-future = "0.1.2"
 
 [features]
-rpc = ["dep:quinn", "dep:postcard"]
+# enable the remote transport
+rpc = ["dep:quinn", "dep:postcard", "dep:smallvec", "dep:tracing"]
+# add test utilities
+test = ["dep:rustls", "dep:rcgen", "dep:anyhow"]
+# switch on to avoid needing Send on the boxed futures
+wasm-browser = []
 default = ["rpc", "test"]
-test = ["rustls", "rcgen"]
 
 [workspace]
 members = ["quic-rpc-derive"]

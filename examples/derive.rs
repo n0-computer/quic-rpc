@@ -133,7 +133,8 @@ impl StorageApi {
                         Ok(())
                     })
                 });
-                Ok(listen(endpoint, fun))
+                let x = AbortOnDropHandle::new(tokio::spawn(listen(endpoint, fun)));
+                Ok(x)
             }
             ServiceSender::Remote(_, _, _) => {
                 Err(anyhow::anyhow!("cannot listen on a remote service"))

@@ -1,4 +1,4 @@
-use std::{fmt::Debug, marker::PhantomData, net::SocketAddr, ops::Deref};
+use std::{fmt::Debug, io, marker::PhantomData, ops::Deref};
 
 use channel::none::NoReceiver;
 use serde::{de::DeserializeOwned, Serialize};
@@ -33,6 +33,20 @@ pub trait Channels<S: Service> {
     type Rx: Receiver;
 }
 
+mod wasm_browser {
+    #![allow(dead_code)]
+    pub type BoxedFuture<'a, T> = std::pin::Pin<Box<dyn std::future::Future<Output = T> + 'a>>;
+}
+mod multithreaded {
+    #![allow(dead_code)]
+    pub type BoxedFuture<'a, T> =
+        std::pin::Pin<Box<dyn std::future::Future<Output = T> + Send + 'a>>;
+}
+#[cfg(not(feature = "wasm-browser"))]
+pub use multithreaded::*;
+#[cfg(feature = "wasm-browser")]
+pub use wasm_browser::*;
+
 /// Channels that abstract over local or remote sending
 pub mod channel {
     /// Oneshot channel, similar to tokio's oneshot channel
@@ -48,7 +62,7 @@ pub mod channel {
             Tokio(tokio::sync::oneshot::Sender<T>),
             Boxed(
                 Box<
-                    dyn FnOnce(T) -> n0_future::future::Boxed<io::Result<()>>
+                    dyn FnOnce(T) -> crate::BoxedFuture<'static, io::Result<()>>
                         + Send
                         + Sync
                         + 'static,
@@ -71,10 +85,25 @@ pub mod channel {
             }
         }
 
-        #[derive(Debug, derive_more::From, derive_more::Display)]
+        #[derive(Debug)]
         pub enum SendError {
             ReceiverClosed,
             Io(std::io::Error),
+        }
+
+        impl From<std::io::Error> for SendError {
+            fn from(e: std::io::Error) -> Self {
+                Self::Io(e)
+            }
+        }
+
+        impl std::fmt::Display for SendError {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                match self {
+                    SendError::ReceiverClosed => write!(f, "receiver closed"),
+                    SendError::Io(e) => write!(f, "io error: {}", e),
+                }
+            }
         }
 
         impl std::error::Error for SendError {
@@ -99,7 +128,7 @@ pub mod channel {
 
         pub enum Receiver<T> {
             Tokio(tokio::sync::oneshot::Receiver<T>),
-            Boxed(n0_future::future::Boxed<std::io::Result<T>>),
+            Boxed(crate::BoxedFuture<'static, std::io::Result<T>>),
         }
 
         impl<T> Future for Receiver<T> {
@@ -159,10 +188,25 @@ pub mod channel {
             (tx.into(), rx.into())
         }
 
-        #[derive(Debug, derive_more::From, derive_more::Display)]
+        #[derive(Debug)]
         pub enum SendError {
             ReceiverClosed,
             Io(std::io::Error),
+        }
+
+        impl From<std::io::Error> for SendError {
+            fn from(e: std::io::Error) -> Self {
+                Self::Io(e)
+            }
+        }
+
+        impl std::fmt::Display for SendError {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                match self {
+                    SendError::ReceiverClosed => write!(f, "receiver closed"),
+                    SendError::Io(e) => write!(f, "io error: {}", e),
+                }
+            }
         }
 
         impl std::error::Error for SendError {
@@ -329,7 +373,7 @@ impl<I: Channels<S>, S: Service> Deref for WithChannels<I, S> {
 pub enum ServiceSender<M, R, S> {
     Local(LocalMpscChannel<M, S>, PhantomData<R>),
     #[cfg(feature = "rpc")]
-    Remote(quinn::Endpoint, SocketAddr, PhantomData<(R, S)>),
+    Remote(quinn::Endpoint, std::net::SocketAddr, PhantomData<(R, S)>),
 }
 
 impl<M, R, S> From<LocalMpscChannel<M, S>> for ServiceSender<M, R, S> {
@@ -339,12 +383,15 @@ impl<M, R, S> From<LocalMpscChannel<M, S>> for ServiceSender<M, R, S> {
 }
 
 impl<M: Send + Sync + 'static, R, S: Service> ServiceSender<M, R, S> {
-    pub async fn request(&self) -> anyhow::Result<ServiceRequest<M, R, S>> {
+    pub async fn request(&self) -> io::Result<ServiceRequest<M, R, S>> {
         match self {
             Self::Local(tx, _) => Ok(ServiceRequest::from(tx.clone())),
             #[cfg(feature = "rpc")]
             Self::Remote(endpoint, addr, _) => {
-                let connection = endpoint.connect(*addr, "localhost")?.await?;
+                let connection = endpoint
+                    .connect(*addr, "localhost")
+                    .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?
+                    .await?;
                 let (send, recv) = connection.open_bi().await?;
                 Ok(ServiceRequest::Remote(rpc::RemoteRequest::new(send, recv)))
             }
@@ -371,7 +418,6 @@ impl<M, S> Clone for LocalMpscChannel<M, S> {
 pub mod rpc {
     use std::{fmt::Debug, future::Future, io, marker::PhantomData, pin::Pin, sync::Arc};
 
-    use n0_future::task::AbortOnDropHandle;
     use serde::{de::DeserializeOwned, Serialize};
     use smallvec::SmallVec;
     use tokio::task::JoinSet;
@@ -399,8 +445,14 @@ pub mod rpc {
         }
     }
 
-    #[derive(Debug, derive_more::From)]
+    #[derive(Debug)]
     pub struct RemoteRead(quinn::RecvStream);
+
+    impl RemoteRead {
+        pub(crate) fn new(recv: quinn::RecvStream) -> Self {
+            Self(recv)
+        }
+    }
 
     impl<T: DeserializeOwned> From<RemoteRead> for oneshot::Receiver<T> {
         fn from(read: RemoteRead) -> Self {
@@ -432,8 +484,14 @@ pub mod rpc {
         }
     }
 
-    #[derive(Debug, derive_more::From)]
+    #[derive(Debug)]
     pub struct RemoteWrite(quinn::SendStream);
+
+    impl RemoteWrite {
+        pub(crate) fn new(send: quinn::SendStream) -> Self {
+            Self(send)
+        }
+    }
 
     impl<T: RpcMessage> From<RemoteWrite> for oneshot::Sender<T> {
         fn from(write: RemoteWrite) -> Self {
@@ -526,7 +584,7 @@ pub mod rpc {
     }
 
     impl<R: Serialize, S> RemoteRequest<R, S> {
-        pub async fn write(self, msg: impl Into<R>) -> anyhow::Result<(RemoteRead, RemoteWrite)> {
+        pub async fn write(self, msg: impl Into<R>) -> io::Result<(RemoteRead, RemoteWrite)> {
             let RemoteRequest(mut send, recv, _) = self;
             let msg = msg.into();
             let mut buf = SmallVec::<[u8; 128]>::new();
@@ -538,51 +596,51 @@ pub mod rpc {
 
     /// Type alias for a handler fn for remote requests
     pub type Handler<R> = Arc<
-        dyn Fn(R, RemoteRead, RemoteWrite) -> n0_future::future::Boxed<anyhow::Result<()>>
+        dyn Fn(R, RemoteRead, RemoteWrite) -> crate::BoxedFuture<'static, io::Result<()>>
             + Send
             + Sync
             + 'static,
     >;
 
     /// Utility function to listen for incoming connections and handle them with the provided handler
-    pub fn listen<R: DeserializeOwned + 'static>(
+    pub async fn listen<R: DeserializeOwned + 'static>(
         endpoint: quinn::Endpoint,
         handler: Handler<R>,
-    ) -> AbortOnDropHandle<()> {
-        let task = tokio::spawn(async move {
-            let mut tasks = JoinSet::new();
-            while let Some(incoming) = endpoint.accept().await {
-                let handler = handler.clone();
-                tasks.spawn(async move {
-                    let connection = match incoming.await {
-                        Ok(connection) => connection,
+    ) {
+        let mut tasks = JoinSet::new();
+        while let Some(incoming) = endpoint.accept().await {
+            let handler = handler.clone();
+            tasks.spawn(async move {
+                let connection = match incoming.await {
+                    Ok(connection) => connection,
+                    Err(cause) => {
+                        warn!("failed to accept connection {cause:?}");
+                        return io::Result::Ok(());
+                    }
+                };
+                loop {
+                    let (send, mut recv) = match connection.accept_bi().await {
+                        Ok((s, r)) => (s, r),
                         Err(cause) => {
-                            warn!("failed to accept connection {cause:?}");
-                            return anyhow::Ok(());
+                            warn!("failed to accept bi stream {cause:?}");
+                            return Ok(());
                         }
                     };
-                    loop {
-                        let (send, mut recv) = match connection.accept_bi().await {
-                            Ok((s, r)) => (s, r),
-                            Err(cause) => {
-                                warn!("failed to accept bi stream {cause:?}");
-                                return anyhow::Ok(());
-                            }
-                        };
-                        let size = recv.read_varint_u64().await?.ok_or_else(|| {
-                            io::Error::new(io::ErrorKind::UnexpectedEof, "failed to read size")
-                        })?;
-                        let mut buf = vec![0; size as usize];
-                        recv.read_exact(&mut buf).await?;
-                        let msg: R = postcard::from_bytes(&buf)?;
-                        let rx = RemoteRead::from(recv);
-                        let tx = RemoteWrite::from(send);
-                        handler(msg, rx, tx).await?;
-                    }
-                });
-            }
-        });
-        AbortOnDropHandle::new(task)
+                    let size = recv.read_varint_u64().await?.ok_or_else(|| {
+                        io::Error::new(io::ErrorKind::UnexpectedEof, "failed to read size")
+                    })?;
+                    let mut buf = vec![0; size as usize];
+                    recv.read_exact(&mut buf)
+                        .await
+                        .map_err(|e| io::Error::new(io::ErrorKind::UnexpectedEof, e))?;
+                    let msg: R = postcard::from_bytes(&buf)
+                        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+                    let rx = RemoteRead::new(recv);
+                    let tx = RemoteWrite::new(send);
+                    handler(msg, rx, tx).await?;
+                }
+            });
+        }
     }
 }
 
@@ -600,12 +658,15 @@ impl<M, R, S> From<LocalMpscChannel<M, S>> for ServiceRequest<M, R, S> {
 }
 
 impl<M: Send + Sync + 'static, S: Service> LocalMpscChannel<M, S> {
-    pub async fn send<T>(&self, value: impl Into<WithChannels<T, S>>) -> anyhow::Result<()>
+    pub async fn send<T>(&self, value: impl Into<WithChannels<T, S>>) -> io::Result<()>
     where
         T: Channels<S>,
         M: From<WithChannels<T, S>>,
     {
-        self.0.send(value.into().into()).await?;
+        self.0
+            .send(value.into().into())
+            .await
+            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
         Ok(())
     }
 }

@@ -129,7 +129,7 @@ impl StorageApi {
         match &self.inner {
             ServiceSender::Local(local, _) => {
                 let local = LocalMpscChannel::from(local.clone());
-                let fun: Handler<StorageProtocol> = Arc::new(move |msg, _, tx| {
+                let fun: Handler<StorageProtocol> = Arc::new(move |msg, _rx, tx| {
                     let local = local.clone();
                     Box::pin(async move {
                         match msg {
@@ -146,7 +146,7 @@ impl StorageApi {
                         Ok(())
                     })
                 });
-                Ok(listen(endpoint, fun))
+                Ok(AbortOnDropHandle::new(tokio::spawn(listen(endpoint, fun))))
             }
             ServiceSender::Remote(_, _, _) => {
                 Err(anyhow::anyhow!("cannot listen on a remote service"))
