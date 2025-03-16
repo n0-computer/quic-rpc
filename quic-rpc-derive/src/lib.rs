@@ -10,52 +10,51 @@ use syn::{
     Data, DeriveInput, Fields, Ident, Token, Type,
 };
 
-const RPC: &str = "rpc";
-const ATTRS: [&str; 1] = [RPC];
+// Helper function for error reporting
+fn error_tokens(span: Span, message: &str) -> TokenStream {
+    syn::Error::new(span, message)
+        .to_compile_error()
+        .into()
+}
 
 fn generate_channels_impl(
-    pat: &str,
     mut args: NamedTypeArgs,
     service_name: &Ident,
     request_type: &Type,
     attr_span: Span,
 ) -> syn::Result<TokenStream2> {
-    let res = match pat {
-        RPC => {
-            // Try to get rx, default to NoReceiver if not present
-            let rx = match args.types.remove("rx") {
-                Some(rx_type) => rx_type,
-                None => {
-                    // Parse "NoReceiver" into a Type
-                    syn::parse_str::<Type>("::quic_rpc::channel::none::NoReceiver").map_err(
-                        |e| {
-                            syn::Error::new(
-                                attr_span,
-                                format!("Failed to parse default rx type: {}", e),
-                            )
-                        },
-                    )?
-                }
-            };
-            let tx = args.get("tx", pat, attr_span)?;
-            quote! {
-                impl ::quic_rpc::Channels<#service_name> for #request_type {
-                    type Tx = #tx;
-                    type Rx = #rx;
-                }
-            }
+    // Try to get rx, default to NoReceiver if not present
+    let rx = match args.types.remove("rx") {
+        Some(rx_type) => rx_type,
+        None => {
+            // Parse "NoReceiver" into a Type
+            syn::parse_str::<Type>("::quic_rpc::channel::none::NoReceiver").map_err(
+                |e| {
+                    syn::Error::new(
+                        attr_span,
+                        format!("Failed to parse default rx type: {}", e),
+                    )
+                },
+            )?
         }
-        _ => return Err(syn::Error::new(attr_span, "Unknown RPC pattern")),
     };
+    let tx = args.get("tx", attr_span)?;
+    
+    let res = quote! {
+        impl ::quic_rpc::Channels<#service_name> for #request_type {
+            type Tx = #tx;
+            type Rx = #rx;
+        }
+    };
+    
     args.check_empty(attr_span)?;
-
     Ok(res)
 }
 
-// Parse arguments in the format (MessageEnumName, ServiceType)
+// Parse arguments in the format (ServiceType, MessageEnumName)
 struct MacroArgs {
-    message_enum_name: Ident,
     service_name: Ident,
+    message_enum_name: Ident,
 }
 
 impl Parse for MacroArgs {
@@ -82,11 +81,7 @@ pub fn rpc_requests(attr: TokenStream, item: TokenStream) -> TokenStream {
     let input_span = input.span();
     let data_enum = match &mut input.data {
         Data::Enum(data_enum) => data_enum,
-        _ => {
-            return syn::Error::new(input.span(), "RpcRequests can only be applied to enums")
-                .to_compile_error()
-                .into()
-        }
+        _ => return error_tokens(input.span(), "RpcRequests can only be applied to enums"),
     };
 
     let mut additional_items = Vec::new();
@@ -96,48 +91,38 @@ pub fn rpc_requests(attr: TokenStream, item: TokenStream) -> TokenStream {
         // Check field structure for every variant
         let request_type = match &variant.fields {
             Fields::Unnamed(fields) if fields.unnamed.len() == 1 => &fields.unnamed[0].ty,
-            _ => {
-                return syn::Error::new(
-                    variant.span(),
-                    "Each variant must have exactly one unnamed field",
-                )
-                .to_compile_error()
-                .into()
-            }
+            _ => return error_tokens(
+                variant.span(),
+                "Each variant must have exactly one unnamed field",
+            ),
         };
 
         if !types.insert(request_type.to_token_stream().to_string()) {
-            return syn::Error::new(input_span, "Each variant must have a unique request type")
-                .to_compile_error()
-                .into();
+            return error_tokens(input_span, "Each variant must have a unique request type");
         }
 
-        // Extract and remove our attributes
-        let mut rpc_attr = Vec::new();
+        // Find and remove the rpc attribute
+        let mut rpc_attr = None;
         variant.attrs.retain(|attr| {
-            for ident in ATTRS {
-                if attr.path.is_ident(ident) {
-                    rpc_attr.push((ident, attr.clone()));
-                    return false;
+            if attr.path.is_ident("rpc") {
+                if rpc_attr.is_some() {
+                    // This should never happen since we're removing them as we go
+                    panic!("Multiple rpc attributes found");
                 }
+                rpc_attr = Some(attr.clone());
+                false // Remove this attribute
+            } else {
+                true // Keep other attributes
             }
-            true
         });
 
-        // Fail if there are multiple attributes
-        if rpc_attr.len() > 1 {
-            return syn::Error::new(variant.span(), "Each variant can only have one RPC pattern")
-                .to_compile_error()
-                .into();
-        }
-
-        if let Some((ident, attr)) = rpc_attr.pop() {
+        if let Some(attr) = rpc_attr {
             let args = match attr.parse_args::<NamedTypeArgs>() {
                 Ok(info) => info,
                 Err(e) => return e.to_compile_error().into(),
             };
 
-            match generate_channels_impl(ident, args, &service_name, request_type, attr.span()) {
+            match generate_channels_impl(args, &service_name, request_type, attr.span()) {
                 Ok(impls) => additional_items.extend(impls),
                 Err(e) => return e.to_compile_error().into(),
             }
@@ -196,10 +181,10 @@ struct NamedTypeArgs {
 
 impl NamedTypeArgs {
     /// Get and remove a type from the map, failing if it doesn't exist
-    fn get(&mut self, key: &str, kind: &str, span: Span) -> syn::Result<Type> {
+    fn get(&mut self, key: &str, span: Span) -> syn::Result<Type> {
         self.types
             .remove(key)
-            .ok_or_else(|| syn::Error::new(span, format!("{kind} requires a {key} type")))
+            .ok_or_else(|| syn::Error::new(span, format!("rpc requires a {key} type")))
     }
 
     /// Fail if there are any unknown arguments remaining
