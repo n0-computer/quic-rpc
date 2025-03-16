@@ -7,7 +7,7 @@ use syn::{
     parse::{Parse, ParseStream},
     parse_macro_input,
     spanned::Spanned,
-    Data, DeriveInput, Fields, Ident, Token, Type,
+    Data, DeriveInput, Fields, Ident, Macro, Token, Type,
 };
 
 const RPC: &str = "rpc";
@@ -52,10 +52,32 @@ fn generate_channels_impl(
     Ok(res)
 }
 
+// Parse arguments in the format (MessageEnumName, ServiceType)
+struct MacroArgs {
+    message_enum_name: Ident,
+    service_name: Ident,
+}
+
+impl Parse for MacroArgs {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        let service_name: Ident = input.parse()?;
+        let _: Token![,] = input.parse()?;
+        let message_enum_name: Ident = input.parse()?;
+
+        Ok(MacroArgs {
+            service_name,
+            message_enum_name,
+        })
+    }
+}
+
 #[proc_macro_attribute]
 pub fn rpc_requests(attr: TokenStream, item: TokenStream) -> TokenStream {
     let mut input = parse_macro_input!(item as DeriveInput);
-    let service_name = parse_macro_input!(attr as Ident);
+    let MacroArgs {
+        service_name,
+        message_enum_name,
+    } = parse_macro_input!(attr as MacroArgs);
 
     let input_span = input.span();
     let data_enum = match &mut input.data {
@@ -122,8 +144,45 @@ pub fn rpc_requests(attr: TokenStream, item: TokenStream) -> TokenStream {
         }
     }
 
+    let message_variants = data_enum
+        .variants
+        .iter()
+        .map(|variant| {
+            let variant_name = &variant.ident;
+
+            // Extract the inner type - we know it's already valid
+            let inner_type = match &variant.fields {
+                Fields::Unnamed(fields) => {
+                    if let Type::Path(type_path) = &fields.unnamed.first().unwrap().ty {
+                        if let Some(last_segment) = type_path.path.segments.last() {
+                            &last_segment.ident
+                        } else {
+                            &type_path.path.segments.first().unwrap().ident
+                        }
+                    } else {
+                        panic!("Unexpected type"); // Should never happen due to prior validation
+                    }
+                }
+                _ => panic!("Unexpected field type"), // Should never happen due to prior validation
+            };
+
+            quote! {
+                #variant_name(::quic_rpc::WithChannels<#inner_type, #service_name>)
+            }
+        })
+        .collect::<Vec<_>>();
+
+    let message_enum = quote! {
+        #[derive(derive_more::From)]
+        enum #message_enum_name {
+            #(#message_variants),*
+        }
+    };
+
     let output = quote! {
         #input
+
+        #message_enum
 
         #(#additional_items)*
     };

@@ -38,10 +38,10 @@ fn simple() {
     #[derive(Debug, Serialize, Deserialize)]
     struct Response4;
 
-    #[rpc_requests(Service)]
+    #[rpc_requests(Service, RequestWithChannels)]
     #[derive(Debug, Serialize, Deserialize, derive_more::From, derive_more::TryInto)]
     enum Request {
-        #[rpc(tx=NoSender)]
+        #[rpc(tx=oneshot::Sender<()>)]
         Rpc(RpcRequest),
         #[rpc(tx=NoSender)]
         ServerStreaming(ServerStreamingRequest),
