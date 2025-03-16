@@ -328,7 +328,7 @@ impl<I: Channels<S>, S: Service> Deref for WithChannels<I, S> {
 
 pub enum ServiceSender<M, R, S> {
     Local(LocalMpscChannel<M, S>, PhantomData<R>),
-    #[cfg(feature = "quinn")]
+    #[cfg(feature = "rpc")]
     Remote(quinn::Endpoint, SocketAddr, PhantomData<(R, S)>),
 }
 
@@ -342,7 +342,7 @@ impl<M: Send + Sync + 'static, R, S: Service> ServiceSender<M, R, S> {
     pub async fn request(&self) -> anyhow::Result<ServiceRequest<M, R, S>> {
         match self {
             Self::Local(tx, _) => Ok(ServiceRequest::from(tx.clone())),
-            #[cfg(feature = "quinn")]
+            #[cfg(feature = "rpc")]
             Self::Remote(endpoint, addr, _) => {
                 let connection = endpoint.connect(*addr, "localhost")?.await?;
                 let (send, recv) = connection.open_bi().await?;
@@ -367,7 +367,7 @@ impl<M, S> Clone for LocalMpscChannel<M, S> {
     }
 }
 
-#[cfg(feature = "quinn")]
+#[cfg(feature = "rpc")]
 pub mod rpc {
     use std::{fmt::Debug, future::Future, io, marker::PhantomData, pin::Pin, sync::Arc};
 
@@ -589,7 +589,7 @@ pub mod rpc {
 #[derive(Debug)]
 pub enum ServiceRequest<M, R, S> {
     Local(LocalMpscChannel<M, S>, PhantomData<R>),
-    #[cfg(feature = "quinn")]
+    #[cfg(feature = "rpc")]
     Remote(rpc::RemoteRequest<R, S>),
 }
 

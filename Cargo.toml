@@ -30,8 +30,8 @@ smallvec = { version = "1.14.0", features = ["write"] }
 quic-rpc-derive = { path = "quic-rpc-derive" }
 
 [features]
-quinn = ["dep:quinn", "dep:postcard"]
-default = ["quinn", "test"]
+rpc = ["dep:quinn", "dep:postcard"]
+default = ["rpc", "test"]
 test = ["rustls", "rcgen"]
 
 [workspace]

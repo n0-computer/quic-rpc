@@ -1,4 +1,4 @@
-#[cfg(feature = "test")]
+#[cfg(all(feature = "rpc", feature = "test"))]
 mod quinn_setup_utils {
     use std::{net::SocketAddr, sync::Arc};
 
@@ -138,10 +138,10 @@ mod quinn_setup_utils {
         }
     }
 }
-#[cfg(feature = "test")]
+#[cfg(all(feature = "rpc", feature = "test"))]
 pub use quinn_setup_utils::*;
 
-#[cfg(feature = "quinn")]
+#[cfg(feature = "rpc")]
 mod varint_util {
     use std::{
         future::Future,
@@ -341,7 +341,7 @@ mod varint_util {
         }
     }
 }
-#[cfg(feature = "quinn")]
+#[cfg(feature = "rpc")]
 pub use varint_util::{
     read_varint_u64, write_varint_u64, AsyncReadVarintExt, AsyncWriteVarintExt, WriteVarintExt,
 };

@@ -100,6 +100,7 @@ impl StorageActor {
         }
     }
 }
+
 struct StorageApi {
     inner: ServiceSender<StorageMessage, StorageProtocol, StorageService>,
 }
