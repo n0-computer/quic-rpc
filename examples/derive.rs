@@ -5,7 +5,8 @@ use std::{
     sync::Arc,
 };
 
-use n0_future::task::AbortOnDropHandle;
+use anyhow::bail;
+use n0_future::task::{self, AbortOnDropHandle};
 use quic_rpc::{
     channel::{mpsc, oneshot},
     rpc::{listen, Handler},
@@ -62,7 +63,7 @@ impl StorageActor {
             recv: rx,
             state: BTreeMap::new(),
         };
-        tokio::spawn(actor.run());
+        n0_future::task::spawn(actor.run());
         let local = LocalMpscChannel::<StorageMessage, StorageService>::from(tx);
         StorageApi {
             inner: local.into(),
@@ -116,28 +117,20 @@ impl StorageApi {
         match &self.inner {
             ServiceSender::Local(local, _) => {
                 let local = LocalMpscChannel::from(local.clone());
-                let fun: Handler<StorageProtocol> = Arc::new(move |msg, _, tx| {
+                let handler: Handler<StorageProtocol> = Arc::new(move |msg, _, tx| {
                     let local = local.clone();
-                    Box::pin(async move {
-                        match msg {
-                            StorageProtocol::Get(msg) => {
-                                local.send((msg, tx)).await?;
-                            }
-                            StorageProtocol::Set(msg) => {
-                                local.send((msg, tx)).await?;
-                            }
-                            StorageProtocol::List(msg) => {
-                                local.send((msg, tx)).await?;
-                            }
-                        };
-                        Ok(())
+                    Box::pin(match msg {
+                        StorageProtocol::Get(msg) => local.send((msg, tx)),
+                        StorageProtocol::Set(msg) => local.send((msg, tx)),
+                        StorageProtocol::List(msg) => local.send((msg, tx)),
                     })
                 });
-                let x = AbortOnDropHandle::new(tokio::spawn(listen(endpoint, fun)));
-                Ok(x)
+                Ok(AbortOnDropHandle::new(task::spawn(listen(
+                    endpoint, handler,
+                ))))
             }
             ServiceSender::Remote(_, _, _) => {
-                Err(anyhow::anyhow!("cannot listen on a remote service"))
+                bail!("cannot listen on a remote service");
             }
         }
     }

@@ -657,16 +657,75 @@ impl<M, R, S> From<LocalMpscChannel<M, S>> for ServiceRequest<M, R, S> {
     }
 }
 
-impl<M: Send + Sync + 'static, S: Service> LocalMpscChannel<M, S> {
-    pub async fn send<T>(&self, value: impl Into<WithChannels<T, S>>) -> io::Result<()>
+impl<M: Send, S: Service> LocalMpscChannel<M, S> {
+    pub fn send<T>(&self, value: impl Into<WithChannels<T, S>>) -> SendFut<M>
     where
         T: Channels<S>,
         M: From<WithChannels<T, S>>,
     {
-        self.0
-            .send(value.into().into())
-            .await
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
-        Ok(())
+        let value: M = value.into().into();
+        SendFut::new(self.0.clone(), value)
     }
 }
+
+mod send_fut {
+    use std::{
+        future::Future,
+        io,
+        pin::Pin,
+        task::{Context, Poll},
+    };
+
+    use tokio::sync::mpsc::Sender;
+    use tokio_util::sync::PollSender;
+
+    pub struct SendFut<T: Send> {
+        poll_sender: PollSender<T>,
+        value: Option<T>,
+    }
+
+    impl<T: Send> SendFut<T> {
+        pub fn new(sender: Sender<T>, value: T) -> Self {
+            Self {
+                poll_sender: PollSender::new(sender),
+                value: Some(value),
+            }
+        }
+    }
+
+    impl<T: Send + Unpin> Future for SendFut<T> {
+        type Output = io::Result<()>;
+
+        fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+            let this = self.get_mut();
+
+            // Safely extract the value
+            let value = match this.value.take() {
+                Some(v) => v,
+                None => return Poll::Ready(Ok(())), // Already completed
+            };
+
+            // Try to reserve capacity
+            match this.poll_sender.poll_reserve(cx) {
+                Poll::Ready(Ok(())) => {
+                    // Send the item
+                    this.poll_sender.send_item(value).ok();
+                    Poll::Ready(Ok(()))
+                }
+                Poll::Ready(Err(_)) => {
+                    // Channel is closed
+                    Poll::Ready(Err(io::Error::new(
+                        io::ErrorKind::BrokenPipe,
+                        "Channel closed",
+                    )))
+                }
+                Poll::Pending => {
+                    // Restore the value and wait
+                    this.value = Some(value);
+                    Poll::Pending
+                }
+            }
+        }
+    }
+}
+use send_fut::SendFut;
