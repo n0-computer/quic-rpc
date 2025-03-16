@@ -1,3 +1,8 @@
+use quic_rpc::channel::{
+    mpsc,
+    none::{NoReceiver, NoSender},
+    oneshot,
+};
 use quic_rpc_derive::rpc_requests;
 use serde::{Deserialize, Serialize};
 
@@ -36,44 +41,18 @@ fn simple() {
     #[rpc_requests(Service)]
     #[derive(Debug, Serialize, Deserialize, derive_more::From, derive_more::TryInto)]
     enum Request {
-        #[rpc(response=Response1)]
+        #[rpc(tx=NoSender)]
         Rpc(RpcRequest),
-        #[server_streaming(response=Response2)]
+        #[rpc(tx=NoSender)]
         ServerStreaming(ServerStreamingRequest),
-        #[bidi_streaming(update= Update1, response = Response3)]
+        #[rpc(tx=NoSender)]
         BidiStreaming(BidiStreamingRequest),
-        #[client_streaming(update = Update2, response = Response4)]
+        #[rpc(tx=NoSender)]
         ClientStreaming(ClientStreamingRequest),
-        Update1(Update1),
-        Update2(Update2),
-    }
-
-    #[derive(Debug, Serialize, Deserialize, derive_more::From, derive_more::TryInto)]
-    enum Response {
-        Response1(Response1),
-        Response2(Response2),
-        Response3(Response3),
-        Response4(Response4),
     }
 
     #[derive(Debug, Clone)]
     struct Service;
 
-    impl quic_rpc::Service for Service {
-        type Req = Request;
-        type Res = Response;
-    }
-
-    let _ = Service;
-}
-
-/// Use
-///
-/// TRYBUILD=overwrite cargo test --test smoke
-///
-/// to update the snapshots
-#[test]
-fn compile_fail() {
-    let t = trybuild::TestCases::new();
-    t.compile_fail("tests/compile_fail/*.rs");
+    impl quic_rpc::Service for Service {}
 }

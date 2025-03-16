@@ -1,5 +1,8 @@
+use std::collections::{BTreeMap, HashSet};
+
 use proc_macro::TokenStream;
-use quote::quote;
+use proc_macro2::{Span, TokenStream as TokenStream2};
+use quote::{quote, ToTokens};
 use syn::{
     parse::{Parse, ParseStream},
     parse_macro_input,
@@ -7,396 +10,223 @@ use syn::{
     Data, DeriveInput, Fields, Ident, Token, Type,
 };
 
-struct TxArgs {
-    tx_type: Type,
-}
+const SERVER_STREAMING: &str = "server_streaming";
+const CLIENT_STREAMING: &str = "client_streaming";
+const BIDI_STREAMING: &str = "bidi_streaming";
+const RPC: &str = "rpc";
+const TRY_SERVER_STREAMING: &str = "try_server_streaming";
+const IDENTS: [&str; 5] = [
+    SERVER_STREAMING,
+    CLIENT_STREAMING,
+    BIDI_STREAMING,
+    RPC,
+    TRY_SERVER_STREAMING,
+];
 
-impl Parse for TxArgs {
-    fn parse(input: ParseStream) -> syn::Result<Self> {
-        let tx_type: Type = input.parse()?;
-        Ok(TxArgs { tx_type })
-    }
-}
-
-struct RxArgs {
-    rx_type: Type,
-}
-
-impl Parse for RxArgs {
-    fn parse(input: ParseStream) -> syn::Result<Self> {
-        let rx_type: Type = input.parse()?;
-        Ok(RxArgs { rx_type })
-    }
-}
-
-/// A macro to generate a Message enum from a Protocol enum.
-///
-/// This macro takes a Protocol enum and generates a corresponding Message enum
-/// where each variant is wrapped in a WithChannels type.
-///
-/// # Example
-///
-/// ```
-/// #[message_enum(StorageMessage, StorageService)]
-/// #[derive(derive_more::From, Serialize, Deserialize)]
-/// enum StorageProtocol {
-///     Get(Get),
-///     Set(Set),
-///     List(List),
-/// }
-/// ```
-///
-/// Will generate:
-///
-/// ```
-/// #[derive(derive_more::From)]
-/// enum StorageMessage {
-///     Get(WithChannels<Get, StorageService>),
-///     Set(WithChannels<Set, StorageService>),
-///     List(WithChannels<List, StorageService>),
-/// }
-/// ```
-#[proc_macro_attribute]
-pub fn message_enum(attr: TokenStream, item: TokenStream) -> TokenStream {
-    // Parse the input
-    let input = parse_macro_input!(item as DeriveInput);
-    let attrs = parse_macro_input!(attr as syn::AttributeArgs);
-
-    // Parse the attribute arguments
-    if attrs.len() != 2 {
-        return syn::Error::new(
-            proc_macro2::Span::call_site(),
-            "Expected two arguments: message_enum_name and service_type",
-        )
-        .to_compile_error()
-        .into();
-    }
-
-    // Extract message enum name and service type from attributes
-    let message_enum_name = match &attrs[0] {
-        syn::NestedMeta::Meta(syn::Meta::Path(path)) => path.get_ident().unwrap(),
-        _ => {
-            return syn::Error::new(
-                proc_macro2::Span::call_site(),
-                "First argument must be an identifier for the message enum name",
-            )
-            .to_compile_error()
-            .into();
-        }
-    };
-
-    let service_type = match &attrs[1] {
-        syn::NestedMeta::Meta(syn::Meta::Path(path)) => path.get_ident().unwrap(),
-        _ => {
-            return syn::Error::new(
-                proc_macro2::Span::call_site(),
-                "Second argument must be an identifier for the service type",
-            )
-            .to_compile_error()
-            .into();
-        }
-    };
-
-    // Extract the variants from the enum
-    let data_enum = match &input.data {
-        Data::Enum(data_enum) => data_enum,
-        _ => {
-            return syn::Error::new(input.ident.span(), "This macro only works on enums")
-                .to_compile_error()
-                .into();
-        }
-    };
-
-    // Generate variants for the message enum
-    let message_variants = data_enum.variants.iter().map(|variant| {
-        let variant_name = &variant.ident;
-
-        // Extract the inner type from the variant
-        let inner_type = match &variant.fields {
-            Fields::Unnamed(fields) if fields.unnamed.len() == 1 => {
-                if let Type::Path(type_path) = &fields.unnamed.first().unwrap().ty {
-                    if let Some(last_segment) = type_path.path.segments.last() {
-                        &last_segment.ident
-                    } else {
-                        return syn::Error::new(
-                            variant.ident.span(),
-                            "Unable to extract type name from variant",
-                        )
-                        .to_compile_error();
-                    }
-                } else {
-                    return syn::Error::new(
-                        variant.ident.span(),
-                        "Variant must contain exactly one unnamed field of a simple type",
-                    )
-                    .to_compile_error();
+fn generate_rpc_impls(
+    pat: &str,
+    mut args: RpcArgs,
+    service_name: &Ident,
+    request_type: &Type,
+    attr_span: Span,
+) -> syn::Result<TokenStream2> {
+    let res = match pat {
+        RPC => {
+            let response = args.get("response", pat, attr_span)?;
+            quote! {
+                impl ::quic_rpc::pattern::rpc::RpcMsg<#service_name> for #request_type {
+                    type Response = #response;
                 }
             }
-            _ => {
-                return syn::Error::new(
-                    variant.ident.span(),
-                    "Variant must contain exactly one unnamed field",
-                )
-                .to_compile_error();
+        }
+        SERVER_STREAMING => {
+            let response = args.get("response", pat, attr_span)?;
+            quote! {
+                impl ::quic_rpc::message::Msg<#service_name> for #request_type {
+                    type Pattern = ::quic_rpc::pattern::server_streaming::ServerStreaming;
+                }
+                impl ::quic_rpc::pattern::server_streaming::ServerStreamingMsg<#service_name> for #request_type {
+                    type Response = #response;
+                }
             }
-        };
-
-        // Generate the message variant
-        quote! {
-            #variant_name(WithChannels<#inner_type, #service_type>)
         }
-    });
-
-    // Generate the message enum
-    let expanded = quote! {
-        // Keep the original protocol enum
-        #input
-
-        // Generate the message enum
-        #[derive(derive_more::From)]
-        enum #message_enum_name {
-            #(#message_variants),*
+        BIDI_STREAMING => {
+            let update = args.get("update", pat, attr_span)?;
+            let response = args.get("response", pat, attr_span)?;
+            quote! {
+                impl ::quic_rpc::message::Msg<#service_name> for #request_type {
+                    type Pattern = ::quic_rpc::pattern::bidi_streaming::BidiStreaming;
+                }
+                impl ::quic_rpc::pattern::bidi_streaming::BidiStreamingMsg<#service_name> for #request_type {
+                    type Update = #update;
+                    type Response = #response;
+                }
+            }
         }
+        CLIENT_STREAMING => {
+            let update = args.get("update", pat, attr_span)?;
+            let response = args.get("response", pat, attr_span)?;
+            quote! {
+                impl ::quic_rpc::message::Msg<#service_name> for #request_type {
+                    type Pattern = ::quic_rpc::pattern::client_streaming::ClientStreaming;
+                }
+                impl ::quic_rpc::pattern::client_streaming::ClientStreamingMsg<#service_name> for #request_type {
+                    type Update = #update;
+                    type Response = #response;
+                }
+            }
+        }
+        TRY_SERVER_STREAMING => {
+            let create_error = args.get("create_error", pat, attr_span)?;
+            let item_error = args.get("item_error", pat, attr_span)?;
+            let item = args.get("item", pat, attr_span)?;
+            quote! {
+                impl ::quic_rpc::message::Msg<#service_name> for #request_type {
+                    type Pattern = ::quic_rpc::pattern::try_server_streaming::TryServerStreaming;
+                }
+                impl ::quic_rpc::pattern::try_server_streaming::TryServerStreamingMsg<#service_name> for #request_type {
+                    type CreateError = #create_error;
+                    type ItemError = #item_error;
+                    type Item = #item;
+                }
+            }
+        }
+        _ => return Err(syn::Error::new(attr_span, "Unknown RPC pattern")),
     };
+    args.check_empty(attr_span)?;
 
-    expanded.into()
+    Ok(res)
 }
 
-/// A macro to generate a Message enum from a Protocol enum and implement Channels for each variant.
-/// 
-/// This macro:
-/// 1. Takes a Protocol enum and generates a corresponding Message enum with variants wrapped in WithChannels
-/// 2. Implements the Channels trait for each variant's inner type based on #[tx(...)] and #[rx(...)] attributes
-///
-/// Channel receiver (rx) defaults to NoReceiver if not specified.
-///
-/// # Example
-///
-/// ```
-/// #[rpc_protocol(StorageMessage, StorageService)]
-/// enum StorageProtocol {
-///     #[tx(oneshot::Sender<Option<String>>)]
-///     Get(Get),
-///     #[tx(oneshot::Sender<()>)]
-///     Set(Set),
-///     #[tx(mpsc::Sender<String>)]
-///     List(List),
-///     #[rx(mpsc::Receiver<Query>)]
-///     #[tx(mpsc::Sender<Result>)]
-///     Query(Query),
-/// }
-/// ```
 #[proc_macro_attribute]
-pub fn rpc_protocol(attr: TokenStream, item: TokenStream) -> TokenStream {
-    // Parse the input
+pub fn rpc_requests(attr: TokenStream, item: TokenStream) -> TokenStream {
     let mut input = parse_macro_input!(item as DeriveInput);
-    let attr_args = parse_macro_input!(attr as syn::AttributeArgs);
-    
-    // Extract message enum name and service type from attributes
-    if attr_args.len() != 2 {
-        return syn::Error::new(
-            proc_macro2::Span::call_site(),
-            "Expected two arguments: message_enum_name and service_type",
-        )
-        .to_compile_error()
-        .into();
-    }
-    
-    let message_enum_name = match &attr_args[0] {
-        syn::NestedMeta::Meta(syn::Meta::Path(path)) => {
-            if let Some(ident) = path.get_ident() {
-                ident
-            } else {
-                return syn::Error::new(
-                    proc_macro2::Span::call_site(),
-                    "First argument must be an identifier for the message enum name",
-                ).to_compile_error().into();
-            }
-        },
-        _ => {
-            return syn::Error::new(
-                proc_macro2::Span::call_site(),
-                "First argument must be an identifier for the message enum name",
-            ).to_compile_error().into();
-        }
-    };
-    
-    let service_type = match &attr_args[1] {
-        syn::NestedMeta::Meta(syn::Meta::Path(path)) => {
-            if let Some(ident) = path.get_ident() {
-                ident
-            } else {
-                return syn::Error::new(
-                    proc_macro2::Span::call_site(),
-                    "Second argument must be an identifier for the service type",
-                ).to_compile_error().into();
-            }
-        },
-        _ => {
-            return syn::Error::new(
-                proc_macro2::Span::call_site(),
-                "Second argument must be an identifier for the service type",
-            ).to_compile_error().into();
-        }
-    };
-    
-    // Extract the variants from the enum
+    let service_name = parse_macro_input!(attr as Ident);
+
+    let input_span = input.span();
     let data_enum = match &mut input.data {
         Data::Enum(data_enum) => data_enum,
         _ => {
-            return syn::Error::new(
-                input.ident.span(),
-                "This macro only works on enums",
-            ).to_compile_error().into();
+            return syn::Error::new(input.span(), "RpcRequests can only be applied to enums")
+                .to_compile_error()
+                .into()
         }
     };
-    
-    // Generate variants for the message enum
-    let message_variants = data_enum.variants.iter().map(|variant| {
-        let variant_name = &variant.ident;
-        
-        // Extract the inner type from the variant
-        let inner_type = match &variant.fields {
-            Fields::Unnamed(fields) if fields.unnamed.len() == 1 => {
-                if let Type::Path(type_path) = &fields.unnamed.first().unwrap().ty {
-                    if let Some(last_segment) = type_path.path.segments.last() {
-                        &last_segment.ident
-                    } else {
-                        return syn::Error::new(
-                            variant.ident.span(),
-                            "Unable to extract type name from variant",
-                        ).to_compile_error();
-                    }
-                } else {
-                    return syn::Error::new(
-                        variant.ident.span(),
-                        "Variant must contain exactly one unnamed field of a simple type",
-                    ).to_compile_error();
-                }
-            },
-            _ => {
-                return syn::Error::new(
-                    variant.ident.span(),
-                    "Variant must contain exactly one unnamed field",
-                ).to_compile_error();
-            }
-        };
-        
-        quote! {
-            #variant_name(WithChannels<#inner_type, #service_type>)
-        }
-    });
-    
-    // Storage for additional implementations
-    let mut channel_impls = Vec::new();
-    
-    // Process each variant
+
+    let mut additional_items = Vec::new();
+    let mut types = HashSet::new();
+
     for variant in &mut data_enum.variants {
-        // Extract the inner type from the variant
-        let inner_type = match &variant.fields {
-            Fields::Unnamed(fields) if fields.unnamed.len() == 1 => {
-                if let Type::Path(type_path) = &fields.unnamed.first().unwrap().ty {
-                    if let Some(last_segment) = type_path.path.segments.last() {
-                        last_segment.ident.clone()
-                    } else {
-                        return syn::Error::new(
-                            variant.ident.span(),
-                            "Unable to extract type name from variant",
-                        ).to_compile_error().into();
-                    }
-                } else {
-                    return syn::Error::new(
-                        variant.ident.span(),
-                        "Variant must contain exactly one unnamed field of a simple type",
-                    ).to_compile_error().into();
-                }
-            },
+        // Check field structure for every variant
+        let request_type = match &variant.fields {
+            Fields::Unnamed(fields) if fields.unnamed.len() == 1 => &fields.unnamed[0].ty,
             _ => {
                 return syn::Error::new(
-                    variant.ident.span(),
-                    "Variant must contain exactly one unnamed field",
-                ).to_compile_error().into();
+                    variant.span(),
+                    "Each variant must have exactly one unnamed field",
+                )
+                .to_compile_error()
+                .into()
             }
         };
-        
-        // Default rx to NoReceiver
-        let mut rx_type = quote! { NoReceiver };
-        let mut tx_type = None;
-        
-        // Extract and remove rx attributes
-        let mut rx_attr = None;
+
+        if !types.insert(request_type.to_token_stream().to_string()) {
+            return syn::Error::new(input_span, "Each variant must have a unique request type")
+                .to_compile_error()
+                .into();
+        }
+
+        // Extract and remove RPC attributes
+        let mut rpc_attr = Vec::new();
         variant.attrs.retain(|attr| {
-            if attr.path.is_ident("rx") {
-                rx_attr = Some(attr.clone());
-                false
-            } else {
-                true
+            for ident in IDENTS {
+                if attr.path.is_ident(ident) {
+                    rpc_attr.push((ident, attr.clone()));
+                    return false;
+                }
             }
+            true
         });
-        
-        // Extract and remove tx attributes
-        let mut tx_attr = None;
-        variant.attrs.retain(|attr| {
-            if attr.path.is_ident("tx") {
-                tx_attr = Some(attr.clone());
-                false
-            } else {
-                true
-            }
-        });
-        
-        // Parse rx attribute if found
-        if let Some(attr) = rx_attr {
-            match attr.parse_args::<RxArgs>() {
-                Ok(args) => {
-                    rx_type = quote! { #args.rx_type };
-                },
+
+        // Fail if there are multiple RPC patterns
+        if rpc_attr.len() > 1 {
+            return syn::Error::new(variant.span(), "Each variant can only have one RPC pattern")
+                .to_compile_error()
+                .into();
+        }
+
+        if let Some((ident, attr)) = rpc_attr.pop() {
+            let args = match attr.parse_args::<RpcArgs>() {
+                Ok(info) => info,
+                Err(e) => return e.to_compile_error().into(),
+            };
+
+            match generate_rpc_impls(ident, args, &service_name, request_type, attr.span()) {
+                Ok(impls) => additional_items.extend(impls),
                 Err(e) => return e.to_compile_error().into(),
             }
         }
-        
-        // Parse tx attribute - required
-        let tx_attr = match tx_attr {
-            Some(attr) => attr,
-            None => {
-                return syn::Error::new(
-                    variant.ident.span(),
-                    format!("Missing #[tx(...)] attribute for variant {}", variant.ident),
-                ).to_compile_error().into();
-            }
-        };
-        
-        match tx_attr.parse_args::<TxArgs>() {
-            Ok(args) => {
-                tx_type = Some(quote! { #args.tx_type });
-            },
-            Err(e) => return e.to_compile_error().into(),
-        }
-        
-        // Generate the Channel implementation
-        let tx_type = tx_type.unwrap();
-        channel_impls.push(quote! {
-            impl Channels<#service_type> for #inner_type {
-                type Rx = #rx_type;
-                type Tx = #tx_type;
-            }
-        });
     }
-    
-    // Generate the complete output
-    let expanded = quote! {
-        // Keep the original protocol enum
+
+    let output = quote! {
         #input
-        
-        // Generate the message enum
-        #[derive(derive_more::From)]
-        enum #message_enum_name {
-            #(#message_variants),*
-        }
-        
-        // Implement Channels for each type
-        #(#channel_impls)*
+
+        #(#additional_items)*
     };
-    
-    expanded.into()
+
+    output.into()
+}
+
+struct RpcArgs {
+    types: BTreeMap<String, Type>,
+}
+
+impl RpcArgs {
+    /// Get and remove a type from the map, failing if it doesn't exist
+    fn get(&mut self, key: &str, kind: &str, span: Span) -> syn::Result<Type> {
+        self.types
+            .remove(key)
+            .ok_or_else(|| syn::Error::new(span, format!("{kind} requires a {key} type")))
+    }
+
+    /// Fail if there are any unknown arguments remaining
+    fn check_empty(&self, span: Span) -> syn::Result<()> {
+        if self.types.is_empty() {
+            Ok(())
+        } else {
+            Err(syn::Error::new(
+                span,
+                format!(
+                    "Unknown arguments provided: {:?}",
+                    self.types.keys().collect::<Vec<_>>()
+                ),
+            ))
+        }
+    }
+}
+
+/// Parse the rpc args as a comma separated list of name=type pairs
+impl Parse for RpcArgs {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        let mut types = BTreeMap::new();
+
+        loop {
+            if input.is_empty() {
+                break;
+            }
+
+            let key: Ident = input.parse()?;
+            let _: Token![=] = input.parse()?;
+            let value: Type = input.parse()?;
+
+            types.insert(key.to_string(), value);
+
+            if !input.peek(Token![,]) {
+                break;
+            }
+            let _: Token![,] = input.parse()?;
+        }
+
+        Ok(RpcArgs { types })
+    }
 }

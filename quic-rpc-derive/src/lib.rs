@@ -10,84 +10,38 @@ use syn::{
     Data, DeriveInput, Fields, Ident, Token, Type,
 };
 
-const SERVER_STREAMING: &str = "server_streaming";
-const CLIENT_STREAMING: &str = "client_streaming";
-const BIDI_STREAMING: &str = "bidi_streaming";
 const RPC: &str = "rpc";
-const TRY_SERVER_STREAMING: &str = "try_server_streaming";
-const IDENTS: [&str; 5] = [
-    SERVER_STREAMING,
-    CLIENT_STREAMING,
-    BIDI_STREAMING,
-    RPC,
-    TRY_SERVER_STREAMING,
-];
+const ATTRS: [&str; 1] = [RPC];
 
-fn generate_rpc_impls(
+fn generate_channels_impl(
     pat: &str,
-    mut args: RpcArgs,
+    mut args: NamedTypeArgs,
     service_name: &Ident,
     request_type: &Type,
     attr_span: Span,
 ) -> syn::Result<TokenStream2> {
     let res = match pat {
         RPC => {
-            let response = args.get("response", pat, attr_span)?;
+            // Try to get rx, default to NoReceiver if not present
+            let rx = match args.types.remove("rx") {
+                Some(rx_type) => rx_type,
+                None => {
+                    // Parse "NoReceiver" into a Type
+                    syn::parse_str::<Type>("::quic_rpc::channel::none::NoReceiver").map_err(
+                        |e| {
+                            syn::Error::new(
+                                attr_span,
+                                format!("Failed to parse default rx type: {}", e),
+                            )
+                        },
+                    )?
+                }
+            };
+            let tx = args.get("tx", pat, attr_span)?;
             quote! {
-                impl ::quic_rpc::pattern::rpc::RpcMsg<#service_name> for #request_type {
-                    type Response = #response;
-                }
-            }
-        }
-        SERVER_STREAMING => {
-            let response = args.get("response", pat, attr_span)?;
-            quote! {
-                impl ::quic_rpc::message::Msg<#service_name> for #request_type {
-                    type Pattern = ::quic_rpc::pattern::server_streaming::ServerStreaming;
-                }
-                impl ::quic_rpc::pattern::server_streaming::ServerStreamingMsg<#service_name> for #request_type {
-                    type Response = #response;
-                }
-            }
-        }
-        BIDI_STREAMING => {
-            let update = args.get("update", pat, attr_span)?;
-            let response = args.get("response", pat, attr_span)?;
-            quote! {
-                impl ::quic_rpc::message::Msg<#service_name> for #request_type {
-                    type Pattern = ::quic_rpc::pattern::bidi_streaming::BidiStreaming;
-                }
-                impl ::quic_rpc::pattern::bidi_streaming::BidiStreamingMsg<#service_name> for #request_type {
-                    type Update = #update;
-                    type Response = #response;
-                }
-            }
-        }
-        CLIENT_STREAMING => {
-            let update = args.get("update", pat, attr_span)?;
-            let response = args.get("response", pat, attr_span)?;
-            quote! {
-                impl ::quic_rpc::message::Msg<#service_name> for #request_type {
-                    type Pattern = ::quic_rpc::pattern::client_streaming::ClientStreaming;
-                }
-                impl ::quic_rpc::pattern::client_streaming::ClientStreamingMsg<#service_name> for #request_type {
-                    type Update = #update;
-                    type Response = #response;
-                }
-            }
-        }
-        TRY_SERVER_STREAMING => {
-            let create_error = args.get("create_error", pat, attr_span)?;
-            let item_error = args.get("item_error", pat, attr_span)?;
-            let item = args.get("item", pat, attr_span)?;
-            quote! {
-                impl ::quic_rpc::message::Msg<#service_name> for #request_type {
-                    type Pattern = ::quic_rpc::pattern::try_server_streaming::TryServerStreaming;
-                }
-                impl ::quic_rpc::pattern::try_server_streaming::TryServerStreamingMsg<#service_name> for #request_type {
-                    type CreateError = #create_error;
-                    type ItemError = #item_error;
-                    type Item = #item;
+                impl ::quic_rpc::Channels<#service_name> for #request_type {
+                    type Tx = #tx;
+                    type Rx = #rx;
                 }
             }
         }
@@ -139,7 +93,7 @@ pub fn rpc_requests(attr: TokenStream, item: TokenStream) -> TokenStream {
         // Extract and remove RPC attributes
         let mut rpc_attr = Vec::new();
         variant.attrs.retain(|attr| {
-            for ident in IDENTS {
+            for ident in ATTRS {
                 if attr.path.is_ident(ident) {
                     rpc_attr.push((ident, attr.clone()));
                     return false;
@@ -156,12 +110,12 @@ pub fn rpc_requests(attr: TokenStream, item: TokenStream) -> TokenStream {
         }
 
         if let Some((ident, attr)) = rpc_attr.pop() {
-            let args = match attr.parse_args::<RpcArgs>() {
+            let args = match attr.parse_args::<NamedTypeArgs>() {
                 Ok(info) => info,
                 Err(e) => return e.to_compile_error().into(),
             };
 
-            match generate_rpc_impls(ident, args, &service_name, request_type, attr.span()) {
+            match generate_channels_impl(ident, args, &service_name, request_type, attr.span()) {
                 Ok(impls) => additional_items.extend(impls),
                 Err(e) => return e.to_compile_error().into(),
             }
@@ -177,11 +131,11 @@ pub fn rpc_requests(attr: TokenStream, item: TokenStream) -> TokenStream {
     output.into()
 }
 
-struct RpcArgs {
+struct NamedTypeArgs {
     types: BTreeMap<String, Type>,
 }
 
-impl RpcArgs {
+impl NamedTypeArgs {
     /// Get and remove a type from the map, failing if it doesn't exist
     fn get(&mut self, key: &str, kind: &str, span: Span) -> syn::Result<Type> {
         self.types
@@ -206,7 +160,7 @@ impl RpcArgs {
 }
 
 /// Parse the rpc args as a comma separated list of name=type pairs
-impl Parse for RpcArgs {
+impl Parse for NamedTypeArgs {
     fn parse(input: ParseStream) -> syn::Result<Self> {
         let mut types = BTreeMap::new();
 
@@ -227,6 +181,6 @@ impl Parse for RpcArgs {
             let _: Token![,] = input.parse()?;
         }
 
-        Ok(RpcArgs { types })
+        Ok(NamedTypeArgs { types })
     }
 }
