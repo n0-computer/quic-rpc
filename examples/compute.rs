@@ -212,7 +212,7 @@ impl ComputeApi {
         let msg = Fibonacci { max };
         match self.inner.request().await? {
             ServiceRequest::Local(request, _) => {
-                let (tx, rx) = mpsc::channel(10);
+                let (tx, rx) = mpsc::channel(128);
                 request.send((msg, tx)).await?;
                 Ok(rx)
             }
@@ -230,8 +230,8 @@ impl ComputeApi {
         let msg = Multiply { initial };
         match self.inner.request().await? {
             ServiceRequest::Local(request, _) => {
-                let (in_tx, in_rx) = mpsc::channel(10);
-                let (out_tx, out_rx) = mpsc::channel(10);
+                let (in_tx, in_rx) = mpsc::channel(128);
+                let (out_tx, out_rx) = mpsc::channel(128);
                 request.send((msg, out_tx, in_rx)).await?;
                 Ok((in_tx, out_rx))
             }
