@@ -3,7 +3,7 @@ mod quinn_setup_utils {
     use std::{net::SocketAddr, sync::Arc};
 
     use anyhow::Result;
-    use quinn::{ClientConfig, Endpoint, ServerConfig, crypto::rustls::QuicClientConfig};
+    use quinn::{crypto::rustls::QuicClientConfig, ClientConfig, Endpoint, ServerConfig};
 
     /// Builds default quinn client config and trusts given certificates.
     ///
@@ -143,7 +143,10 @@ pub use quinn_setup_utils::*;
 
 #[cfg(feature = "quinn")]
 mod varint_util {
-    use std::io::{self, Error};
+    use std::{
+        future::Future,
+        io::{self, Error},
+    };
 
     use serde::Serialize;
     use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
@@ -338,6 +341,7 @@ mod varint_util {
         }
     }
 }
+#[cfg(feature = "quinn")]
 pub use varint_util::{
-    AsyncReadVarintExt, AsyncWriteVarintExt, WriteVarintExt, read_varint_u64, write_varint_u64,
+    read_varint_u64, write_varint_u64, AsyncReadVarintExt, AsyncWriteVarintExt, WriteVarintExt,
 };

@@ -1,16 +1,7 @@
-use std::{fmt::Debug, io, marker::PhantomData, net::SocketAddr, ops::Deref, pin::Pin, sync::Arc};
+use std::{fmt::Debug, marker::PhantomData, net::SocketAddr, ops::Deref};
 
-use channel::{
-    mpsc::{self, NetworkReceiver, NetworkSender},
-    none::NoReceiver,
-    oneshot,
-};
-use n0_future::task::AbortOnDropHandle;
-use serde::{Serialize, de::DeserializeOwned};
-use smallvec::SmallVec;
-use tokio::task::JoinSet;
-use tracing::warn;
-use util::{AsyncReadVarintExt, WriteVarintExt};
+use channel::none::NoReceiver;
+use serde::{de::DeserializeOwned, Serialize};
 pub mod util;
 
 /// Requirements for a RPC message
@@ -46,7 +37,7 @@ pub trait Channels<S: Service> {
 pub mod channel {
     /// Oneshot channel, similar to tokio's oneshot channel
     pub mod oneshot {
-        use std::{fmt::Debug, io, pin::Pin};
+        use std::{fmt::Debug, future::Future, io, pin::Pin};
 
         pub fn channel<T>() -> (Sender<T>, Receiver<T>) {
             let (tx, rx) = tokio::sync::oneshot::channel();
@@ -159,7 +150,7 @@ pub mod channel {
 
     /// MPSC channel, similar to tokio's mpsc channel
     pub mod mpsc {
-        use std::{fmt::Debug, io, pin::Pin};
+        use std::{fmt::Debug, future::Future, io, pin::Pin};
 
         use crate::RpcMessage;
 
@@ -336,192 +327,279 @@ impl<I: Channels<S>, S: Service> Deref for WithChannels<I, S> {
 }
 
 pub enum ServiceSender<M, R, S> {
-    Local(tokio::sync::mpsc::Sender<M>),
+    Local(LocalMpscChannel<M, S>, PhantomData<R>),
+    #[cfg(feature = "quinn")]
     Remote(quinn::Endpoint, SocketAddr, PhantomData<(R, S)>),
+}
+
+impl<M, R, S> From<LocalMpscChannel<M, S>> for ServiceSender<M, R, S> {
+    fn from(tx: LocalMpscChannel<M, S>) -> Self {
+        Self::Local(tx, PhantomData)
+    }
 }
 
 impl<M: Send + Sync + 'static, R, S: Service> ServiceSender<M, R, S> {
     pub async fn request(&self) -> anyhow::Result<ServiceRequest<M, R, S>> {
         match self {
-            Self::Local(tx) => Ok(ServiceRequest::Local(LocalRequest(tx.clone(), PhantomData))),
+            Self::Local(tx, _) => Ok(ServiceRequest::from(tx.clone())),
+            #[cfg(feature = "quinn")]
             Self::Remote(endpoint, addr, _) => {
                 let connection = endpoint.connect(*addr, "localhost")?.await?;
                 let (send, recv) = connection.open_bi().await?;
-                Ok(ServiceRequest::Remote(RemoteRequest(
-                    send,
-                    recv,
-                    PhantomData,
-                )))
+                Ok(ServiceRequest::Remote(rpc::RemoteRequest::new(send, recv)))
             }
         }
     }
 }
 
 #[derive(Debug)]
-pub struct LocalRequest<M, S>(tokio::sync::mpsc::Sender<M>, std::marker::PhantomData<S>);
+pub struct LocalMpscChannel<M, S>(tokio::sync::mpsc::Sender<M>, std::marker::PhantomData<S>);
 
-impl<M, S> From<tokio::sync::mpsc::Sender<M>> for LocalRequest<M, S> {
+impl<M, S> From<tokio::sync::mpsc::Sender<M>> for LocalMpscChannel<M, S> {
     fn from(tx: tokio::sync::mpsc::Sender<M>) -> Self {
         Self(tx, PhantomData)
     }
 }
 
-impl<M, S> Clone for LocalRequest<M, S> {
+impl<M, S> Clone for LocalMpscChannel<M, S> {
     fn clone(&self) -> Self {
         Self(self.0.clone(), PhantomData)
     }
 }
 
-pub struct RemoteRequest<R, S>(
-    quinn::SendStream,
-    quinn::RecvStream,
-    std::marker::PhantomData<(R, S)>,
-);
+#[cfg(feature = "quinn")]
+pub mod rpc {
+    use std::{fmt::Debug, future::Future, io, marker::PhantomData, pin::Pin, sync::Arc};
 
-#[derive(Debug, derive_more::From)]
-pub struct RemoteRead(quinn::RecvStream);
+    use n0_future::task::AbortOnDropHandle;
+    use serde::{de::DeserializeOwned, Serialize};
+    use smallvec::SmallVec;
+    use tokio::task::JoinSet;
+    use tracing::warn;
 
-impl<T: DeserializeOwned> From<RemoteRead> for oneshot::Receiver<T> {
-    fn from(read: RemoteRead) -> Self {
-        let fut = async move {
-            let mut read = read.0;
-            let size = read.read_varint_u64().await?.ok_or(io::Error::new(
-                io::ErrorKind::UnexpectedEof,
-                "failed to read size",
-            ))?;
-            let rest = read
-                .read_to_end(size as usize)
-                .await
-                .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-            let msg: T = postcard::from_bytes(&rest)
-                .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-            io::Result::Ok(msg)
-        };
-        oneshot::Receiver::from(|| fut)
+    use crate::{
+        channel::{
+            mpsc::{self, NetworkReceiver, NetworkSender},
+            oneshot,
+        },
+        util::{AsyncReadVarintExt, WriteVarintExt},
+        RpcMessage,
+    };
+
+    #[derive(Debug)]
+    pub struct RemoteRequest<R, S>(
+        quinn::SendStream,
+        quinn::RecvStream,
+        std::marker::PhantomData<(R, S)>,
+    );
+
+    impl<R, S> RemoteRequest<R, S> {
+        pub fn new(send: quinn::SendStream, recv: quinn::RecvStream) -> Self {
+            Self(send, recv, PhantomData)
+        }
     }
-}
 
-impl<T: RpcMessage> From<RemoteRead> for mpsc::Receiver<T> {
-    fn from(read: RemoteRead) -> Self {
-        let read = read.0;
-        mpsc::Receiver::Boxed(Box::new(QuinnReceiver {
-            recv: read,
-            _marker: PhantomData,
-        }))
-    }
-}
+    #[derive(Debug, derive_more::From)]
+    pub struct RemoteRead(quinn::RecvStream);
 
-#[derive(Debug, derive_more::From)]
-pub struct RemoteWrite(quinn::SendStream);
-
-impl<T: RpcMessage> From<RemoteWrite> for oneshot::Sender<T> {
-    fn from(write: RemoteWrite) -> Self {
-        let mut writer = write.0;
-        oneshot::Sender::Boxed(Box::new(move |value| {
-            Box::pin(async move {
-                // write via a small buffer to avoid allocation for small values
-                let mut buf = SmallVec::<[u8; 128]>::new();
-                buf.write_length_prefixed(value)?;
-                writer.write_all(&buf).await?;
-                io::Result::Ok(())
-            })
-        }))
-    }
-}
-
-impl<T: RpcMessage> From<RemoteWrite> for mpsc::Sender<T> {
-    fn from(write: RemoteWrite) -> Self {
-        let write = write.0;
-        mpsc::Sender::Boxed(Box::new(QuinnSender {
-            send: write,
-            buffer: SmallVec::new(),
-            _marker: PhantomData,
-        }))
-    }
-}
-
-struct QuinnReceiver<T> {
-    recv: quinn::RecvStream,
-    _marker: std::marker::PhantomData<T>,
-}
-
-impl<T> Debug for QuinnReceiver<T> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("QuinnReceiver").finish()
-    }
-}
-
-impl<T: RpcMessage> NetworkReceiver<T> for QuinnReceiver<T> {
-    fn recv(&mut self) -> Pin<Box<dyn Future<Output = io::Result<Option<T>>> + Send + '_>> {
-        Box::pin(async {
-            let read = &mut self.recv;
-            let Some(size) = read.read_varint_u64().await? else {
-                return Ok(None);
+    impl<T: DeserializeOwned> From<RemoteRead> for oneshot::Receiver<T> {
+        fn from(read: RemoteRead) -> Self {
+            let fut = async move {
+                let mut read = read.0;
+                let size = read.read_varint_u64().await?.ok_or(io::Error::new(
+                    io::ErrorKind::UnexpectedEof,
+                    "failed to read size",
+                ))?;
+                let rest = read
+                    .read_to_end(size as usize)
+                    .await
+                    .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+                let msg: T = postcard::from_bytes(&rest)
+                    .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+                io::Result::Ok(msg)
             };
-            let mut buf = vec![0; size as usize];
-            read.read_exact(&mut buf)
-                .await
-                .map_err(|e| io::Error::new(io::ErrorKind::UnexpectedEof, e))?;
-            let msg: T = postcard::from_bytes(&buf)
-                .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-            Ok(Some(msg))
-        })
+            oneshot::Receiver::from(|| fut)
+        }
+    }
+
+    impl<T: RpcMessage> From<RemoteRead> for mpsc::Receiver<T> {
+        fn from(read: RemoteRead) -> Self {
+            let read = read.0;
+            mpsc::Receiver::Boxed(Box::new(QuinnReceiver {
+                recv: read,
+                _marker: PhantomData,
+            }))
+        }
+    }
+
+    #[derive(Debug, derive_more::From)]
+    pub struct RemoteWrite(quinn::SendStream);
+
+    impl<T: RpcMessage> From<RemoteWrite> for oneshot::Sender<T> {
+        fn from(write: RemoteWrite) -> Self {
+            let mut writer = write.0;
+            oneshot::Sender::Boxed(Box::new(move |value| {
+                Box::pin(async move {
+                    // write via a small buffer to avoid allocation for small values
+                    let mut buf = SmallVec::<[u8; 128]>::new();
+                    buf.write_length_prefixed(value)?;
+                    writer.write_all(&buf).await?;
+                    io::Result::Ok(())
+                })
+            }))
+        }
+    }
+
+    impl<T: RpcMessage> From<RemoteWrite> for mpsc::Sender<T> {
+        fn from(write: RemoteWrite) -> Self {
+            let write = write.0;
+            mpsc::Sender::Boxed(Box::new(QuinnSender {
+                send: write,
+                buffer: SmallVec::new(),
+                _marker: PhantomData,
+            }))
+        }
+    }
+
+    struct QuinnReceiver<T> {
+        recv: quinn::RecvStream,
+        _marker: std::marker::PhantomData<T>,
+    }
+
+    impl<T> Debug for QuinnReceiver<T> {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.debug_struct("QuinnReceiver").finish()
+        }
+    }
+
+    impl<T: RpcMessage> NetworkReceiver<T> for QuinnReceiver<T> {
+        fn recv(&mut self) -> Pin<Box<dyn Future<Output = io::Result<Option<T>>> + Send + '_>> {
+            Box::pin(async {
+                let read = &mut self.recv;
+                let Some(size) = read.read_varint_u64().await? else {
+                    return Ok(None);
+                };
+                let mut buf = vec![0; size as usize];
+                read.read_exact(&mut buf)
+                    .await
+                    .map_err(|e| io::Error::new(io::ErrorKind::UnexpectedEof, e))?;
+                let msg: T = postcard::from_bytes(&buf)
+                    .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+                Ok(Some(msg))
+            })
+        }
+    }
+
+    impl<T> Drop for QuinnReceiver<T> {
+        fn drop(&mut self) {}
+    }
+
+    struct QuinnSender<T> {
+        send: quinn::SendStream,
+        buffer: SmallVec<[u8; 128]>,
+        _marker: std::marker::PhantomData<T>,
+    }
+
+    impl<T> Debug for QuinnSender<T> {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.debug_struct("QuinnSender").finish()
+        }
+    }
+
+    impl<T: RpcMessage> NetworkSender<T> for QuinnSender<T> {
+        fn send(&mut self, value: T) -> Pin<Box<dyn Future<Output = io::Result<()>> + Send + '_>> {
+            Box::pin(async {
+                let value = value;
+                self.buffer.clear();
+                self.buffer.write_length_prefixed(value)?;
+                self.send.write_all(&self.buffer).await?;
+                self.buffer.clear();
+                Ok(())
+            })
+        }
+    }
+
+    impl<T> Drop for QuinnSender<T> {
+        fn drop(&mut self) {
+            self.send.finish().ok();
+        }
+    }
+
+    impl<R: Serialize, S> RemoteRequest<R, S> {
+        pub async fn write(self, msg: impl Into<R>) -> anyhow::Result<(RemoteRead, RemoteWrite)> {
+            let RemoteRequest(mut send, recv, _) = self;
+            let msg = msg.into();
+            let mut buf = SmallVec::<[u8; 128]>::new();
+            buf.write_length_prefixed(msg)?;
+            send.write_all(&buf).await?;
+            Ok((RemoteRead(recv), RemoteWrite(send)))
+        }
+    }
+
+    /// Type alias for a handler fn for remote requests
+    pub type Handler<R> = Arc<
+        dyn Fn(R, RemoteRead, RemoteWrite) -> n0_future::future::Boxed<anyhow::Result<()>>
+            + Send
+            + Sync
+            + 'static,
+    >;
+
+    /// Utility function to listen for incoming connections and handle them with the provided handler
+    pub fn listen<R: DeserializeOwned + 'static>(
+        endpoint: quinn::Endpoint,
+        handler: Handler<R>,
+    ) -> AbortOnDropHandle<()> {
+        let task = tokio::spawn(async move {
+            let mut tasks = JoinSet::new();
+            while let Some(incoming) = endpoint.accept().await {
+                let handler = handler.clone();
+                tasks.spawn(async move {
+                    let connection = match incoming.await {
+                        Ok(connection) => connection,
+                        Err(cause) => {
+                            warn!("failed to accept connection {cause:?}");
+                            return anyhow::Ok(());
+                        }
+                    };
+                    loop {
+                        let (send, mut recv) = match connection.accept_bi().await {
+                            Ok((s, r)) => (s, r),
+                            Err(cause) => {
+                                warn!("failed to accept bi stream {cause:?}");
+                                return anyhow::Ok(());
+                            }
+                        };
+                        let size = recv.read_varint_u64().await?.ok_or_else(|| {
+                            io::Error::new(io::ErrorKind::UnexpectedEof, "failed to read size")
+                        })?;
+                        let mut buf = vec![0; size as usize];
+                        recv.read_exact(&mut buf).await?;
+                        let msg: R = postcard::from_bytes(&buf)?;
+                        let rx = RemoteRead::from(recv);
+                        let tx = RemoteWrite::from(send);
+                        handler(msg, rx, tx).await?;
+                    }
+                });
+            }
+        });
+        AbortOnDropHandle::new(task)
     }
 }
 
-impl<T> Drop for QuinnReceiver<T> {
-    fn drop(&mut self) {}
-}
-
-struct QuinnSender<T> {
-    send: quinn::SendStream,
-    buffer: SmallVec<[u8; 128]>,
-    _marker: std::marker::PhantomData<T>,
-}
-
-impl<T> Debug for QuinnSender<T> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("QuinnSender").finish()
-    }
-}
-
-impl<T: RpcMessage> NetworkSender<T> for QuinnSender<T> {
-    fn send(&mut self, value: T) -> Pin<Box<dyn Future<Output = io::Result<()>> + Send + '_>> {
-        Box::pin(async {
-            let value = value;
-            self.buffer.clear();
-            self.buffer.write_length_prefixed(value)?;
-            self.send.write_all(&self.buffer).await?;
-            self.buffer.clear();
-            Ok(())
-        })
-    }
-}
-
-impl<T> Drop for QuinnSender<T> {
-    fn drop(&mut self) {
-        self.send.finish().ok();
-    }
-}
-
-impl<R: Serialize, S> RemoteRequest<R, S> {
-    pub async fn write(self, msg: impl Into<R>) -> anyhow::Result<(RemoteRead, RemoteWrite)> {
-        let RemoteRequest(mut send, recv, _) = self;
-        let msg = msg.into();
-        let mut buf = SmallVec::<[u8; 128]>::new();
-        buf.write_length_prefixed(msg)?;
-        send.write_all(&buf).await?;
-        Ok((RemoteRead(recv), RemoteWrite(send)))
-    }
-}
-
-#[derive(derive_more::From)]
+#[derive(Debug)]
 pub enum ServiceRequest<M, R, S> {
-    Local(LocalRequest<M, S>),
-    Remote(RemoteRequest<R, S>),
+    Local(LocalMpscChannel<M, S>, PhantomData<R>),
+    #[cfg(feature = "quinn")]
+    Remote(rpc::RemoteRequest<R, S>),
 }
 
-impl<M: Send + Sync + 'static, S: Service> LocalRequest<M, S> {
+impl<M, R, S> From<LocalMpscChannel<M, S>> for ServiceRequest<M, R, S> {
+    fn from(tx: LocalMpscChannel<M, S>) -> Self {
+        Self::Local(tx, PhantomData)
+    }
+}
+
+impl<M: Send + Sync + 'static, S: Service> LocalMpscChannel<M, S> {
     pub async fn send<T>(&self, value: impl Into<WithChannels<T, S>>) -> anyhow::Result<()>
     where
         T: Channels<S>,
@@ -530,53 +608,4 @@ impl<M: Send + Sync + 'static, S: Service> LocalRequest<M, S> {
         self.0.send(value.into().into()).await?;
         Ok(())
     }
-}
-
-/// Type alias for a handler fn for remote requests
-pub type Handler<R> = Arc<
-    dyn Fn(R, RemoteRead, RemoteWrite) -> n0_future::future::Boxed<anyhow::Result<()>>
-        + Send
-        + Sync
-        + 'static,
->;
-
-/// Utility function to listen for incoming connections and handle them with the provided handler
-pub fn listen<R: DeserializeOwned + 'static>(
-    endpoint: quinn::Endpoint,
-    handler: Handler<R>,
-) -> AbortOnDropHandle<()> {
-    let task = tokio::spawn(async move {
-        let mut tasks = JoinSet::new();
-        while let Some(incoming) = endpoint.accept().await {
-            let handler = handler.clone();
-            tasks.spawn(async move {
-                let connection = match incoming.await {
-                    Ok(connection) => connection,
-                    Err(cause) => {
-                        warn!("failed to accept connection {cause:?}");
-                        return anyhow::Ok(());
-                    }
-                };
-                loop {
-                    let (send, mut recv) = match connection.accept_bi().await {
-                        Ok((s, r)) => (s, r),
-                        Err(cause) => {
-                            warn!("failed to accept bi stream {cause:?}");
-                            return anyhow::Ok(());
-                        }
-                    };
-                    let size = recv.read_varint_u64().await?.ok_or_else(|| {
-                        io::Error::new(io::ErrorKind::UnexpectedEof, "failed to read size")
-                    })?;
-                    let mut buf = vec![0; size as usize];
-                    recv.read_exact(&mut buf).await?;
-                    let msg: R = postcard::from_bytes(&buf)?;
-                    let rx = RemoteRead::from(recv);
-                    let tx = RemoteWrite::from(send);
-                    handler(msg, rx, tx).await?;
-                }
-            });
-        }
-    });
-    AbortOnDropHandle::new(task)
 }

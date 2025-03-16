@@ -1,0 +1,23 @@
+[package]
+name = "quic-rpc-derive"
+version = "0.18.1"
+edition = "2021"
+authors = ["Rüdiger Klaehn <rklaehn@protonmail.com>"]
+keywords = ["api", "protocol", "network", "rpc", "macro"]
+categories = ["network-programming"]
+license = "Apache-2.0/MIT"
+repository = "https://github.com/n0-computer/quic-rpc"
+description = "Macros for quic-rpc"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+syn = { version = "1", features = ["full"] }
+quote = "1"
+proc-macro2 = "1"
+
+[dev-dependencies]
+derive_more = { version = "1", features = ["from", "try_into", "display"] }
+serde = { version = "1", features = ["serde_derive"] }
+trybuild = "1.0"

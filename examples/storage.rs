@@ -6,12 +6,13 @@ use std::{
 };
 
 use n0_future::task::AbortOnDropHandle;
-use qrpc2::{
-    Channels, Handler, LocalRequest, Service, ServiceRequest, ServiceSender, WithChannels,
+use quic_rpc::{
     channel::{mpsc, none::NoReceiver, oneshot},
-    listen,
+    rpc::{listen, Handler},
     util::{make_client_endpoint, make_server_endpoint},
+    Channels, LocalMpscChannel, Service, ServiceRequest, ServiceSender, WithChannels,
 };
+use quic_rpc_derive::message_enum;
 use serde::{Deserialize, Serialize};
 use tracing::info;
 
@@ -51,17 +52,11 @@ impl Channels<StorageService> for Set {
 }
 
 #[derive(derive_more::From, Serialize, Deserialize)]
+#[message_enum(StorageMessage, StorageService)]
 enum StorageProtocol {
     Get(Get),
     Set(Set),
     List(List),
-}
-
-#[derive(derive_more::From)]
-enum StorageMessage {
-    Get(WithChannels<Get, StorageService>),
-    Set(WithChannels<Set, StorageService>),
-    List(WithChannels<List, StorageService>),
 }
 
 struct StorageActor {
@@ -77,8 +72,9 @@ impl StorageActor {
             state: BTreeMap::new(),
         };
         tokio::spawn(actor.run());
+        let local = LocalMpscChannel::<StorageMessage, StorageService>::from(tx);
         StorageApi {
-            inner: ServiceSender::<StorageMessage, StorageProtocol, StorageService>::Local(tx),
+            inner: local.into(),
         }
     }
 
@@ -126,8 +122,8 @@ impl StorageApi {
 
     pub fn listen(&self, endpoint: quinn::Endpoint) -> anyhow::Result<AbortOnDropHandle<()>> {
         match &self.inner {
-            ServiceSender::Local(local) => {
-                let local = LocalRequest::from(local.clone());
+            ServiceSender::Local(local, _) => {
+                let local = LocalMpscChannel::from(local.clone());
                 let fun: Handler<StorageProtocol> = Arc::new(move |msg, _, tx| {
                     let local = local.clone();
                     Box::pin(async move {
@@ -156,7 +152,7 @@ impl StorageApi {
     pub async fn get(&self, key: String) -> anyhow::Result<oneshot::Receiver<Option<String>>> {
         let msg = Get { key };
         match self.inner.request().await? {
-            ServiceRequest::Local(request) => {
+            ServiceRequest::Local(request, _) => {
                 let (tx, rx) = oneshot::channel();
                 request.send((msg, tx)).await?;
                 Ok(rx)
@@ -171,7 +167,7 @@ impl StorageApi {
     pub async fn list(&self) -> anyhow::Result<mpsc::Receiver<String>> {
         let msg = List;
         match self.inner.request().await? {
-            ServiceRequest::Local(request) => {
+            ServiceRequest::Local(request, _) => {
                 let (tx, rx) = mpsc::channel(10);
                 request.send((msg, tx)).await?;
                 Ok(rx)
@@ -186,7 +182,7 @@ impl StorageApi {
     pub async fn set(&self, key: String, value: String) -> anyhow::Result<oneshot::Receiver<()>> {
         let msg = Set { key, value };
         match self.inner.request().await? {
-            ServiceRequest::Local(request) => {
+            ServiceRequest::Local(request, _) => {
                 let (tx, rx) = oneshot::channel();
                 request.send((msg, tx)).await?;
                 Ok(rx)
