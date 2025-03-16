@@ -34,6 +34,8 @@ rustls = { version = "0.23.5", default-features = false, features = ["std"], opt
 rcgen = { version = "0.13.2", optional = true }
 # used in the test utils to generate quinn endpoints
 anyhow = { version = "1", optional = true }
+# used in the benches
+futures-buffered ={ version = "0.2.11", optional = true }
 
 [dev-dependencies]
 tracing-subscriber = { version = "0.3.19", features = ["fmt"] }
@@ -50,7 +52,7 @@ n0-future = "0.1.2"
 # enable the remote transport
 rpc = ["dep:quinn", "dep:postcard", "dep:smallvec", "dep:tracing", "tokio/io-util"]
 # add test utilities
-test = ["dep:rustls", "dep:rcgen", "dep:anyhow"]
+test = ["dep:rustls", "dep:rcgen", "dep:anyhow", "dep:futures-buffered"]
 # switch on to avoid needing Send on the boxed futures
 wasm-browser = []
 default = ["rpc", "test"]

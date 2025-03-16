@@ -2,7 +2,10 @@ use std::{fmt::Debug, io, marker::PhantomData, ops::Deref};
 
 use channel::none::NoReceiver;
 use serde::{de::DeserializeOwned, Serialize};
+#[cfg(feature = "test")]
 pub mod util;
+#[cfg(not(feature = "test"))]
+mod util;
 
 /// Requirements for a RPC message
 ///
@@ -35,39 +38,39 @@ pub trait Channels<S: Service> {
 
 mod wasm_browser {
     #![allow(dead_code)]
-    pub type BoxedFuture<'a, T> = std::pin::Pin<Box<dyn std::future::Future<Output = T> + 'a>>;
+    pub(crate) type BoxedFuture<'a, T> =
+        std::pin::Pin<Box<dyn std::future::Future<Output = T> + 'a>>;
 }
 mod multithreaded {
     #![allow(dead_code)]
-    pub type BoxedFuture<'a, T> =
+    pub(crate) type BoxedFuture<'a, T> =
         std::pin::Pin<Box<dyn std::future::Future<Output = T> + Send + 'a>>;
 }
 #[cfg(not(feature = "wasm-browser"))]
-pub use multithreaded::*;
+use multithreaded::*;
 #[cfg(feature = "wasm-browser")]
-pub use wasm_browser::*;
+use wasm_browser::*;
 
 /// Channels that abstract over local or remote sending
 pub mod channel {
     /// Oneshot channel, similar to tokio's oneshot channel
     pub mod oneshot {
-        use std::{fmt::Debug, future::Future, io, pin::Pin};
+        use std::{fmt::Debug, future::Future, io, pin::Pin, task};
 
         pub fn channel<T>() -> (Sender<T>, Receiver<T>) {
             let (tx, rx) = tokio::sync::oneshot::channel();
             (tx.into(), rx.into())
         }
 
+        pub type BoxedSender<T> = Box<
+            dyn FnOnce(T) -> crate::BoxedFuture<'static, io::Result<()>> + Send + Sync + 'static,
+        >;
+
+        pub type BoxedReceiver<T> = crate::BoxedFuture<'static, io::Result<T>>;
+
         pub enum Sender<T> {
             Tokio(tokio::sync::oneshot::Sender<T>),
-            Boxed(
-                Box<
-                    dyn FnOnce(T) -> crate::BoxedFuture<'static, io::Result<()>>
-                        + Send
-                        + Sync
-                        + 'static,
-                >,
-            ),
+            Boxed(BoxedSender<T>),
         }
 
         impl<T> Debug for Sender<T> {
@@ -88,11 +91,20 @@ pub mod channel {
         #[derive(Debug)]
         pub enum SendError {
             ReceiverClosed,
-            Io(std::io::Error),
+            Io(io::Error),
         }
 
-        impl From<std::io::Error> for SendError {
-            fn from(e: std::io::Error) -> Self {
+        impl From<SendError> for io::Error {
+            fn from(e: SendError) -> Self {
+                match e {
+                    SendError::ReceiverClosed => io::Error::new(io::ErrorKind::BrokenPipe, e),
+                    SendError::Io(e) => e,
+                }
+            }
+        }
+
+        impl From<io::Error> for SendError {
+            fn from(e: io::Error) -> Self {
                 Self::Io(e)
             }
         }
@@ -128,20 +140,17 @@ pub mod channel {
 
         pub enum Receiver<T> {
             Tokio(tokio::sync::oneshot::Receiver<T>),
-            Boxed(crate::BoxedFuture<'static, std::io::Result<T>>),
+            Boxed(BoxedReceiver<T>),
         }
 
         impl<T> Future for Receiver<T> {
-            type Output = std::io::Result<T>;
+            type Output = io::Result<T>;
 
-            fn poll(
-                self: Pin<&mut Self>,
-                cx: &mut std::task::Context,
-            ) -> std::task::Poll<Self::Output> {
+            fn poll(self: Pin<&mut Self>, cx: &mut task::Context) -> task::Poll<Self::Output> {
                 match self.get_mut() {
                     Self::Tokio(rx) => Pin::new(rx)
                         .poll(cx)
-                        .map_err(|e| std::io::Error::new(std::io::ErrorKind::BrokenPipe, e)),
+                        .map_err(|e| io::Error::new(io::ErrorKind::BrokenPipe, e)),
                     Self::Boxed(rx) => Pin::new(rx).poll(cx),
                 }
             }
@@ -158,7 +167,7 @@ pub mod channel {
         impl<T, F, Fut> From<F> for Receiver<T>
         where
             F: FnOnce() -> Fut,
-            Fut: Future<Output = std::io::Result<T>> + Send + 'static,
+            Fut: Future<Output = io::Result<T>> + Send + 'static,
         {
             fn from(f: F) -> Self {
                 Self::Boxed(Box::pin(f()))
@@ -191,12 +200,21 @@ pub mod channel {
         #[derive(Debug)]
         pub enum SendError {
             ReceiverClosed,
-            Io(std::io::Error),
+            Io(io::Error),
         }
 
-        impl From<std::io::Error> for SendError {
-            fn from(e: std::io::Error) -> Self {
+        impl From<io::Error> for SendError {
+            fn from(e: io::Error) -> Self {
                 Self::Io(e)
+            }
+        }
+
+        impl From<SendError> for io::Error {
+            fn from(e: SendError) -> Self {
+                match e {
+                    SendError::ReceiverClosed => io::Error::new(io::ErrorKind::BrokenPipe, e),
+                    SendError::Io(e) => e,
+                }
             }
         }
 
@@ -314,7 +332,7 @@ pub mod channel {
 ///
 /// rx and tx can be set to an appropriate channel kind.
 #[derive(Debug)]
-pub struct WithChannels<I: Channels<S>, S: Service> {
+pub struct Msg<I: Channels<S>, S: Service> {
     /// The inner message.
     pub inner: I,
     /// The return channel to send the response to. Can be set to [`crate::channel::none::NoSender`] if not needed.
@@ -326,7 +344,7 @@ pub struct WithChannels<I: Channels<S>, S: Service> {
 /// Tuple conversion from inner message and tx/rx channels to a WithChannels struct
 ///
 /// For the case where you want both tx and rx channels.
-impl<I: Channels<S>, S: Service, Tx, Rx> From<(I, Tx, Rx)> for WithChannels<I, S>
+impl<I: Channels<S>, S: Service, Tx, Rx> From<(I, Tx, Rx)> for Msg<I, S>
 where
     I: Channels<S>,
     <I as Channels<S>>::Tx: From<Tx>,
@@ -345,7 +363,7 @@ where
 /// Tuple conversion from inner message and tx channel to a WithChannels struct
 ///
 /// For the very common case where you just need a tx channel to send the response to.
-impl<I, S, Tx> From<(I, Tx)> for WithChannels<I, S>
+impl<I, S, Tx> From<(I, Tx)> for Msg<I, S>
 where
     I: Channels<S, Rx = NoReceiver>,
     S: Service,
@@ -362,7 +380,7 @@ where
 }
 
 /// Deref so you can access the inner fields directly
-impl<I: Channels<S>, S: Service> Deref for WithChannels<I, S> {
+impl<I: Channels<S>, S: Service> Deref for Msg<I, S> {
     type Target = I;
 
     fn deref(&self) -> &Self::Target {
@@ -374,6 +392,16 @@ pub enum ServiceSender<M, R, S> {
     Local(LocalMpscChannel<M, S>, PhantomData<R>),
     #[cfg(feature = "rpc")]
     Remote(quinn::Endpoint, std::net::SocketAddr, PhantomData<(R, S)>),
+}
+
+impl<M, R, S> Clone for ServiceSender<M, R, S> {
+    fn clone(&self) -> Self {
+        match self {
+            Self::Local(tx, _) => Self::Local(tx.clone(), PhantomData),
+            #[cfg(feature = "rpc")]
+            Self::Remote(endpoint, addr, _) => Self::Remote(endpoint.clone(), *addr, PhantomData),
+        }
+    }
 }
 
 impl<M, R, S> From<LocalMpscChannel<M, S>> for ServiceSender<M, R, S> {
@@ -658,10 +686,10 @@ impl<M, R, S> From<LocalMpscChannel<M, S>> for ServiceRequest<M, R, S> {
 }
 
 impl<M: Send, S: Service> LocalMpscChannel<M, S> {
-    pub fn send<T>(&self, value: impl Into<WithChannels<T, S>>) -> SendFut<M>
+    pub fn send<T>(&self, value: impl Into<Msg<T, S>>) -> SendFut<M>
     where
         T: Channels<S>,
-        M: From<WithChannels<T, S>>,
+        M: From<Msg<T, S>>,
     {
         let value: M = value.into().into();
         SendFut::new(self.0.clone(), value)

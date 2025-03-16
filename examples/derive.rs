@@ -11,7 +11,7 @@ use quic_rpc::{
     channel::{mpsc, oneshot},
     rpc::{listen, Handler},
     util::{make_client_endpoint, make_server_endpoint},
-    LocalMpscChannel, Service, ServiceRequest, ServiceSender, WithChannels,
+    LocalMpscChannel, Msg, Service, ServiceRequest, ServiceSender,
 };
 // Import the macro
 use quic_rpc_derive::rpc_requests;
@@ -80,18 +80,18 @@ impl StorageActor {
         match msg {
             StorageMessage::Get(get) => {
                 info!("get {:?}", get);
-                let WithChannels { tx, inner, .. } = get;
+                let Msg { tx, inner, .. } = get;
                 tx.send(self.state.get(&inner.key).cloned()).await.ok();
             }
             StorageMessage::Set(set) => {
                 info!("set {:?}", set);
-                let WithChannels { tx, inner, .. } = set;
+                let Msg { tx, inner, .. } = set;
                 self.state.insert(inner.key, inner.value);
                 tx.send(()).await.ok();
             }
             StorageMessage::List(list) => {
                 info!("list {:?}", list);
-                let WithChannels { mut tx, .. } = list;
+                let Msg { mut tx, .. } = list;
                 for (key, value) in &self.state {
                     if tx.send(format!("{key}={value}")).await.is_err() {
                         break;

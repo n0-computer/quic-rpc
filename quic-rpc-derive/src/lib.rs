@@ -142,7 +142,7 @@ pub fn rpc_requests(attr: TokenStream, item: TokenStream) -> TokenStream {
             let inner_type = &last_segment.ident;
 
             quote! {
-                #variant_name(::quic_rpc::WithChannels<#inner_type, #service_name>)
+                #variant_name(::quic_rpc::Msg<#inner_type, #service_name>)
             }
         })
         .collect::<Vec<_>>();

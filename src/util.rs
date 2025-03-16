@@ -169,8 +169,8 @@ mod varint_util {
         loop {
             // We can only shift up to 63 bits (for a u64)
             if shift >= 64 {
-                return Err(Error::new(
-                    std::io::ErrorKind::InvalidData,
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
                     "Varint is too large for u64",
                 ));
             }
@@ -179,7 +179,7 @@ mod varint_util {
             let res = reader.read_u8().await;
             if shift == 0 {
                 if let Err(cause) = res {
-                    if cause.kind() == std::io::ErrorKind::UnexpectedEof {
+                    if cause.kind() == io::ErrorKind::UnexpectedEof {
                         return Ok(None);
                     } else {
                         return Err(cause);
