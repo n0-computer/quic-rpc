@@ -7,7 +7,7 @@ use syn::{
     parse::{Parse, ParseStream},
     parse_macro_input,
     spanned::Spanned,
-    Data, DeriveInput, Fields, Ident, Macro, Token, Type,
+    Data, DeriveInput, Fields, Ident, Token, Type,
 };
 
 const RPC: &str = "rpc";
@@ -112,7 +112,7 @@ pub fn rpc_requests(attr: TokenStream, item: TokenStream) -> TokenStream {
                 .into();
         }
 
-        // Extract and remove RPC attributes
+        // Extract and remove our attributes
         let mut rpc_attr = Vec::new();
         variant.attrs.retain(|attr| {
             for ident in ATTRS {
@@ -124,7 +124,7 @@ pub fn rpc_requests(attr: TokenStream, item: TokenStream) -> TokenStream {
             true
         });
 
-        // Fail if there are multiple RPC patterns
+        // Fail if there are multiple attributes
         if rpc_attr.len() > 1 {
             return syn::Error::new(variant.span(), "Each variant can only have one RPC pattern")
                 .to_compile_error()
