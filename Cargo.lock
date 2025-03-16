@@ -757,7 +757,6 @@ dependencies = [
  "iroh-quinn",
  "n0-future",
  "postcard",
- "quic-rpc-derive",
  "rcgen",
  "rustls",
  "serde",
@@ -773,6 +772,7 @@ version = "0.18.1"
 dependencies = [
  "derive_more 1.0.0",
  "proc-macro2",
+ "quic-rpc",
  "quote",
  "serde",
  "syn 1.0.109",
