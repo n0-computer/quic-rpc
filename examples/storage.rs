@@ -12,7 +12,6 @@ use quic_rpc::{
     util::{make_client_endpoint, make_server_endpoint},
     Channels, LocalMpscChannel, Service, ServiceRequest, ServiceSender, WithChannels,
 };
-use quic_rpc_derive::message_enum;
 use serde::{Deserialize, Serialize};
 use tracing::info;
 
@@ -52,11 +51,17 @@ impl Channels<StorageService> for Set {
 }
 
 #[derive(derive_more::From, Serialize, Deserialize)]
-#[message_enum(StorageMessage, StorageService)]
 enum StorageProtocol {
     Get(Get),
     Set(Set),
     List(List),
+}
+
+#[derive(derive_more::From)]
+enum StorageMessage {
+    Get(WithChannels<Get, StorageService>),
+    Set(WithChannels<Set, StorageService>),
+    List(WithChannels<List, StorageService>),
 }
 
 struct StorageActor {
