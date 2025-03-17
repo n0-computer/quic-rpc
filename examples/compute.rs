@@ -12,7 +12,7 @@ use n0_future::{
     task::{self, AbortOnDropHandle},
 };
 use quic_rpc::{
-    channel::{mpsc, oneshot},
+    channel::{oneshot, spsc},
     rpc::{listen, Handler, RemoteRead},
     util::{make_client_endpoint, make_server_endpoint},
     LocalMpscChannel, Service, ServiceRequest, ServiceSender, WithChannels,
@@ -62,11 +62,11 @@ enum ComputeRequest {
 enum ComputeProtocol {
     #[rpc(tx=oneshot::Sender<u128>)]
     Sqr(Sqr),
-    #[rpc(rx=mpsc::Receiver<i64>, tx=oneshot::Sender<i64>)]
+    #[rpc(rx=spsc::Receiver<i64>, tx=oneshot::Sender<i64>)]
     Sum(Sum),
-    #[rpc(tx=mpsc::Sender<u64>)]
+    #[rpc(tx=spsc::Sender<u64>)]
     Fibonacci(Fibonacci),
-    #[rpc(rx=mpsc::Receiver<u64>, tx=mpsc::Sender<u64>)]
+    #[rpc(rx=spsc::Receiver<u64>, tx=spsc::Sender<u64>)]
     Multiply(Multiply),
 }
 
@@ -192,11 +192,11 @@ impl ComputeApi {
         }
     }
 
-    pub async fn sum(&self) -> anyhow::Result<(mpsc::Sender<i64>, oneshot::Receiver<i64>)> {
+    pub async fn sum(&self) -> anyhow::Result<(spsc::Sender<i64>, oneshot::Receiver<i64>)> {
         let msg = Sum;
         match self.inner.request().await? {
             ServiceRequest::Local(request, _) => {
-                let (num_tx, num_rx) = mpsc::channel(10);
+                let (num_tx, num_rx) = spsc::channel(10);
                 let (sum_tx, sum_rx) = oneshot::channel();
                 request.send((msg, sum_tx, num_rx)).await?;
                 Ok((num_tx, sum_rx))
@@ -208,11 +208,11 @@ impl ComputeApi {
         }
     }
 
-    pub async fn fibonacci(&self, max: u64) -> anyhow::Result<mpsc::Receiver<u64>> {
+    pub async fn fibonacci(&self, max: u64) -> anyhow::Result<spsc::Receiver<u64>> {
         let msg = Fibonacci { max };
         match self.inner.request().await? {
             ServiceRequest::Local(request, _) => {
-                let (tx, rx) = mpsc::channel(128);
+                let (tx, rx) = spsc::channel(128);
                 request.send((msg, tx)).await?;
                 Ok(rx)
             }
@@ -226,12 +226,12 @@ impl ComputeApi {
     pub async fn multiply(
         &self,
         initial: u64,
-    ) -> anyhow::Result<(mpsc::Sender<u64>, mpsc::Receiver<u64>)> {
+    ) -> anyhow::Result<(spsc::Sender<u64>, spsc::Receiver<u64>)> {
         let msg = Multiply { initial };
         match self.inner.request().await? {
             ServiceRequest::Local(request, _) => {
-                let (in_tx, in_rx) = mpsc::channel(128);
-                let (out_tx, out_rx) = mpsc::channel(128);
+                let (in_tx, in_rx) = spsc::channel(128);
+                let (out_tx, out_rx) = spsc::channel(128);
                 request.send((msg, out_tx, in_rx)).await?;
                 Ok((in_tx, out_rx))
             }

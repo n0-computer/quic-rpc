@@ -7,7 +7,7 @@ use std::{
 
 use n0_future::task::{self, AbortOnDropHandle};
 use quic_rpc::{
-    channel::{mpsc, none::NoReceiver, oneshot},
+    channel::{none::NoReceiver, oneshot, spsc},
     rpc::{listen, Handler},
     util::{make_client_endpoint, make_server_endpoint},
     Channels, LocalMpscChannel, Service, ServiceRequest, ServiceSender, WithChannels,
@@ -36,7 +36,7 @@ struct List;
 
 impl Channels<StorageService> for List {
     type Rx = NoReceiver;
-    type Tx = mpsc::Sender<String>;
+    type Tx = spsc::Sender<String>;
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -162,11 +162,11 @@ impl StorageApi {
         }
     }
 
-    pub async fn list(&self) -> anyhow::Result<mpsc::Receiver<String>> {
+    pub async fn list(&self) -> anyhow::Result<spsc::Receiver<String>> {
         let msg = List;
         match self.inner.request().await? {
             ServiceRequest::Local(request, _) => {
-                let (tx, rx) = mpsc::channel(10);
+                let (tx, rx) = spsc::channel(10);
                 request.send((msg, tx)).await?;
                 Ok(rx)
             }

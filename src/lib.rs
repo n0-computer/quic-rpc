@@ -1,3 +1,4 @@
+#![cfg_attr(quicrpc_docsrs, feature(doc_cfg))]
 use std::{fmt::Debug, io, marker::PhantomData, ops::Deref};
 
 use channel::none::NoReceiver;
@@ -23,21 +24,28 @@ impl<T> RpcMessage for T where
 }
 
 /// Marker trait for a service
+///
+/// This is usually implemented by a zero-sized struct.
+/// It has various bounds to make derives easier.
 pub trait Service: Send + Sync + Debug + Clone + 'static {}
 
 mod sealed {
     pub trait Sealed {}
 }
 
-/// Marker trait for a sender
+/// Sealed marker trait for a sender
 pub trait Sender: Debug + Sealed {}
 
-/// Marker trait for a receiver
+/// Sealed marker trait for a receiver
 pub trait Receiver: Debug + Sealed {}
 
 /// Channels to be used for a message and service
 pub trait Channels<S: Service> {
+    /// The sender type, can be either spsc, oneshot or none
     type Tx: Sender;
+    /// The receiver type, can be either spsc, oneshot or none
+    ///
+    /// For many services, the receiver is not needed, so it can be set to [`NoReceiver`].
     type Rx: Receiver;
 }
 
@@ -193,8 +201,10 @@ pub mod channel {
         impl<T> crate::Receiver for Receiver<T> {}
     }
 
-    /// MPSC channel, similar to tokio's mpsc channel
-    pub mod mpsc {
+    /// SPSC channel, similar to tokio's mpsc channel
+    ///
+    /// For the rpc case, the send side can not be cloned, hence spsc instead of mpsc.
+    pub mod spsc {
         use std::{fmt::Debug, future::Future, io, pin::Pin};
 
         use crate::RpcMessage;
@@ -294,6 +304,12 @@ pub mod channel {
         }
 
         impl<T: RpcMessage> Receiver<T> {
+            /// Receive a message
+            ///
+            /// Returns Ok(None) if the sender has been dropped or the remote end has
+            /// cleanly closed the connection.
+            ///
+            /// Returns an an io error if there was an error receiving the message.
             pub async fn recv(&mut self) -> io::Result<Option<T>> {
                 match self {
                     Self::Tokio(rx) => Ok(rx.recv().await),
@@ -323,18 +339,18 @@ pub mod channel {
 
     /// No channels, used when no communication is needed
     pub mod none {
-        use crate::{sealed::Sealed, Receiver, Sender};
+        use crate::sealed::Sealed;
 
         #[derive(Debug)]
         pub struct NoSender;
         impl Sealed for NoSender {}
-        impl Sender for NoSender {}
+        impl crate::Sender for NoSender {}
 
         #[derive(Debug)]
         pub struct NoReceiver;
 
         impl Sealed for NoReceiver {}
-        impl Receiver for NoReceiver {}
+        impl crate::Receiver for NoReceiver {}
     }
 }
 
@@ -403,6 +419,7 @@ impl<I: Channels<S>, S: Service> Deref for WithChannels<I, S> {
 pub enum ServiceSender<M, R, S> {
     Local(LocalMpscChannel<M, S>, PhantomData<R>),
     #[cfg(feature = "rpc")]
+    #[cfg_attr(quicrpc_docsrs, doc(cfg(feature = "rpc")))]
     Remote(quinn::Endpoint, std::net::SocketAddr, PhantomData<(R, S)>),
 }
 
@@ -411,6 +428,7 @@ impl<M, R, S> Clone for ServiceSender<M, R, S> {
         match self {
             Self::Local(tx, _) => Self::Local(tx.clone(), PhantomData),
             #[cfg(feature = "rpc")]
+            #[cfg_attr(quicrpc_docsrs, doc(cfg(feature = "rpc")))]
             Self::Remote(endpoint, addr, _) => Self::Remote(endpoint.clone(), *addr, PhantomData),
         }
     }
@@ -427,6 +445,7 @@ impl<M: Send + Sync + 'static, R, S: Service> ServiceSender<M, R, S> {
         match self {
             Self::Local(tx, _) => Ok(ServiceRequest::from(tx.clone())),
             #[cfg(feature = "rpc")]
+            #[cfg_attr(quicrpc_docsrs, doc(cfg(feature = "rpc")))]
             Self::Remote(endpoint, addr, _) => {
                 let connection = endpoint
                     .connect(*addr, "localhost")
@@ -455,6 +474,7 @@ impl<M, S> Clone for LocalMpscChannel<M, S> {
 }
 
 #[cfg(feature = "rpc")]
+#[cfg_attr(quicrpc_docsrs, doc(cfg(feature = "rpc")))]
 pub mod rpc {
     use std::{fmt::Debug, future::Future, io, marker::PhantomData, pin::Pin, sync::Arc};
 
@@ -465,8 +485,8 @@ pub mod rpc {
 
     use crate::{
         channel::{
-            mpsc::{self, BoxedReceiver, BoxedSender},
             oneshot,
+            spsc::{self, BoxedReceiver, BoxedSender},
         },
         util::{AsyncReadVarintExt, WriteVarintExt},
         RpcMessage,
@@ -514,10 +534,10 @@ pub mod rpc {
         }
     }
 
-    impl<T: RpcMessage> From<RemoteRead> for mpsc::Receiver<T> {
+    impl<T: RpcMessage> From<RemoteRead> for spsc::Receiver<T> {
         fn from(read: RemoteRead) -> Self {
             let read = read.0;
-            mpsc::Receiver::Boxed(Box::new(QuinnReceiver {
+            spsc::Receiver::Boxed(Box::new(QuinnReceiver {
                 recv: read,
                 _marker: PhantomData,
             }))
@@ -548,10 +568,10 @@ pub mod rpc {
         }
     }
 
-    impl<T: RpcMessage> From<RemoteWrite> for mpsc::Sender<T> {
+    impl<T: RpcMessage> From<RemoteWrite> for spsc::Sender<T> {
         fn from(write: RemoteWrite) -> Self {
             let write = write.0;
-            mpsc::Sender::Boxed(Box::new(QuinnSender {
+            spsc::Sender::Boxed(Box::new(QuinnSender {
                 send: write,
                 buffer: SmallVec::new(),
                 _marker: PhantomData,
@@ -688,6 +708,7 @@ pub mod rpc {
 pub enum ServiceRequest<M, R, S> {
     Local(LocalMpscChannel<M, S>, PhantomData<R>),
     #[cfg(feature = "rpc")]
+    #[cfg_attr(quicrpc_docsrs, doc(cfg(feature = "rpc")))]
     Remote(rpc::RemoteRequest<R, S>),
 }
 

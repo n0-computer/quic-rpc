@@ -8,7 +8,7 @@ use std::{
 use anyhow::bail;
 use n0_future::task::{self, AbortOnDropHandle};
 use quic_rpc::{
-    channel::{mpsc, oneshot},
+    channel::{oneshot, spsc},
     rpc::{listen, Handler},
     util::{make_client_endpoint, make_server_endpoint},
     LocalMpscChannel, Service, ServiceRequest, ServiceSender, WithChannels,
@@ -47,7 +47,7 @@ enum StorageProtocol {
     Get(Get),
     #[rpc(tx=oneshot::Sender<()>)]
     Set(Set),
-    #[rpc(tx=mpsc::Sender<String>)]
+    #[rpc(tx=spsc::Sender<String>)]
     List(List),
 }
 
@@ -150,11 +150,11 @@ impl StorageApi {
         }
     }
 
-    pub async fn list(&self) -> anyhow::Result<mpsc::Receiver<String>> {
+    pub async fn list(&self) -> anyhow::Result<spsc::Receiver<String>> {
         let msg = List;
         match self.inner.request().await? {
             ServiceRequest::Local(request, _) => {
-                let (tx, rx) = mpsc::channel(10);
+                let (tx, rx) = spsc::channel(10);
                 request.send((msg, tx)).await?;
                 Ok(rx)
             }
