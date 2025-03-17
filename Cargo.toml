@@ -18,7 +18,7 @@ serde = { version = "1", default-features = false }
 # just for the oneshot and mpsc queues
 tokio = { version = "1.38", features = ["sync"], default-features = false  }
 # for PollSender (which for some reason is not available in the main tokio api)
-tokio-util = { version = "0.7", default-features = false }
+tokio-util = { version = "0.7.14", default-features = false }
 
 # used in the endpoint handler code when using rpc
 tracing = { version = "0.1.41", optional = true }
