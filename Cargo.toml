@@ -1,6 +1,6 @@
 [package]
 name = "quic-rpc"
-version = "0.5.0"
+version = "0.50.0"
 edition = "2021"
 authors = ["Rüdiger Klaehn <rklaehn@protonmail.com>", "n0 team"]
 keywords = ["api", "protocol", "network", "rpc"]
@@ -22,8 +22,8 @@ tokio-util = { version = "0.7", default-features = false }
 
 # used in the endpoint handler code when using rpc
 tracing = { version = "0.1.41", optional = true }
-# used to ser/de messages when using rpc 
-postcard = { version = "1", features = ["alloc", "use-std"], optional = true }
+# used to ser/de messages when using rpc
+postcard = { version = "1.1.1", features = ["alloc", "use-std"], optional = true }
 # currently only transport when using rpc
 quinn = { version = "0.13.0", package = "iroh-quinn", optional = true }
 # used as a buffer for serialization when using rpc
