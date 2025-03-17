@@ -15,7 +15,7 @@ use quic_rpc::{
     channel::{mpsc, oneshot},
     rpc::{listen, Handler, RemoteRead},
     util::{make_client_endpoint, make_server_endpoint},
-    LocalMpscChannel, Msg, Service, ServiceRequest, ServiceSender,
+    LocalMpscChannel, Service, ServiceRequest, ServiceSender, WithChannels,
 };
 use quic_rpc_derive::rpc_requests;
 use serde::{Deserialize, Serialize};
@@ -100,13 +100,13 @@ impl ComputeActor {
         match msg {
             ComputeMessage::Sqr(sqr) => {
                 trace!("sqr {:?}", sqr);
-                let Msg { tx, inner, .. } = sqr;
+                let WithChannels { tx, inner, .. } = sqr;
                 let result = (inner.num as u128) * (inner.num as u128);
                 tx.send(result).await?;
             }
             ComputeMessage::Sum(sum) => {
                 trace!("sum {:?}", sum);
-                let Msg { rx, tx, .. } = sum;
+                let WithChannels { rx, tx, .. } = sum;
                 let mut receiver = rx;
                 let mut total = 0;
                 while let Some(num) = receiver.recv().await? {
@@ -116,7 +116,7 @@ impl ComputeActor {
             }
             ComputeMessage::Fibonacci(fib) => {
                 trace!("fibonacci {:?}", fib);
-                let Msg { tx, inner, .. } = fib;
+                let WithChannels { tx, inner, .. } = fib;
                 let mut sender = tx;
                 let mut a = 0u64;
                 let mut b = 1u64;
@@ -129,7 +129,7 @@ impl ComputeActor {
             }
             ComputeMessage::Multiply(mult) => {
                 trace!("multiply {:?}", mult);
-                let Msg { rx, tx, inner } = mult;
+                let WithChannels { rx, tx, inner } = mult;
                 let mut receiver = rx;
                 let mut sender = tx;
                 let multiplier = inner.initial;
@@ -406,7 +406,6 @@ fn clear_line() -> io::Result<()> {
     Ok(())
 }
 
-
 // Simple benchmark sending oneshot senders via an mpsc channel
 pub async fn reference_bench(n: u64) -> anyhow::Result<()> {
     // Create an mpsc channel to send oneshot senders
@@ -437,10 +436,7 @@ pub async fn reference_bench(n: u64) -> anyhow::Result<()> {
         let rps = ((n as f64) / t0.elapsed().as_secs_f64()).round() as u64;
         assert_eq!(sum, 42 * n); // Each response is 42
         clear_line()?;
-        println!(
-            "Reference seq {} rps",
-            rps.separate_with_underscores()
-        );
+        println!("Reference seq {} rps", rps.separate_with_underscores());
     }
 
     // Parallel oneshot sends
@@ -456,10 +452,7 @@ pub async fn reference_bench(n: u64) -> anyhow::Result<()> {
         let rps = ((n as f64) / t0.elapsed().as_secs_f64()).round() as u64;
         assert_eq!(sum, 42 * n); // Each response is 42
         clear_line()?;
-        println!(
-            "Reference par {} rps",
-            rps.separate_with_underscores()
-        );
+        println!("Reference par {} rps", rps.separate_with_underscores());
     }
 
     Ok(())

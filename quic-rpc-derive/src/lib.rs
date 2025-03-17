@@ -63,8 +63,12 @@ pub fn rpc_requests(attr: TokenStream, item: TokenStream) -> TokenStream {
         _ => return error_tokens(input.span(), "RpcRequests can only be applied to enums"),
     };
 
+    // builder for the trait impls
     let mut additional_items = Vec::new();
+    // types to check for uniqueness
     let mut types = HashSet::new();
+    // variant names and types
+    let mut variants = Vec::new();
 
     for variant in &mut data_enum.variants {
         // Check field structure for every variant
@@ -77,6 +81,7 @@ pub fn rpc_requests(attr: TokenStream, item: TokenStream) -> TokenStream {
                 )
             }
         };
+        variants.push((variant.ident.clone(), request_type.clone()));
 
         if !types.insert(request_type.to_token_stream().to_string()) {
             return error_tokens(input_span, "Each variant must have a unique request type");
@@ -107,6 +112,7 @@ pub fn rpc_requests(attr: TokenStream, item: TokenStream) -> TokenStream {
             );
         }
 
+        // if there is no attr, the user has to impl Channels manually
         if let Some(attr) = rpc_attr {
             let args = match attr.parse_args::<NamedTypeArgs>() {
                 Ok(info) => info,
@@ -120,29 +126,11 @@ pub fn rpc_requests(attr: TokenStream, item: TokenStream) -> TokenStream {
         }
     }
 
-    let message_variants = data_enum
-        .variants
-        .iter()
-        .map(|variant| {
-            let variant_name = &variant.ident;
-
-            // Extract the inner type using let-else patterns
-            let Fields::Unnamed(fields) = &variant.fields else {
-                unreachable!()
-            };
-            let Some(field) = fields.unnamed.first() else {
-                unreachable!()
-            };
-            let Type::Path(type_path) = &field.ty else {
-                unreachable!()
-            };
-            let Some(last_segment) = type_path.path.segments.last() else {
-                unreachable!()
-            };
-            let inner_type = &last_segment.ident;
-
+    let message_variants = variants
+        .into_iter()
+        .map(|(variant_name, inner_type)| {
             quote! {
-                #variant_name(::quic_rpc::Msg<#inner_type, #service_name>)
+                #variant_name(::quic_rpc::WithChannels<#inner_type, #service_name>)
             }
         })
         .collect::<Vec<_>>();

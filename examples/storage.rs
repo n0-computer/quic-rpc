@@ -10,7 +10,7 @@ use quic_rpc::{
     channel::{mpsc, none::NoReceiver, oneshot},
     rpc::{listen, Handler},
     util::{make_client_endpoint, make_server_endpoint},
-    Channels, LocalMpscChannel, Msg, Service, ServiceRequest, ServiceSender,
+    Channels, LocalMpscChannel, Service, ServiceRequest, ServiceSender, WithChannels,
 };
 use serde::{Deserialize, Serialize};
 use tracing::info;
@@ -59,9 +59,9 @@ enum StorageProtocol {
 
 #[derive(derive_more::From)]
 enum StorageMessage {
-    Get(Msg<Get, StorageService>),
-    Set(Msg<Set, StorageService>),
-    List(Msg<List, StorageService>),
+    Get(WithChannels<Get, StorageService>),
+    Set(WithChannels<Set, StorageService>),
+    List(WithChannels<List, StorageService>),
 }
 
 struct StorageActor {
@@ -93,18 +93,18 @@ impl StorageActor {
         match msg {
             StorageMessage::Get(get) => {
                 info!("get {:?}", get);
-                let Msg { tx, inner, .. } = get;
+                let WithChannels { tx, inner, .. } = get;
                 tx.send(self.state.get(&inner.key).cloned()).await.ok();
             }
             StorageMessage::Set(set) => {
                 info!("set {:?}", set);
-                let Msg { tx, inner, .. } = set;
+                let WithChannels { tx, inner, .. } = set;
                 self.state.insert(inner.key, inner.value);
                 tx.send(()).await.ok();
             }
             StorageMessage::List(list) => {
                 info!("list {:?}", list);
-                let Msg { mut tx, .. } = list;
+                let WithChannels { mut tx, .. } = list;
                 for (key, value) in &self.state {
                     if tx.send(format!("{key}={value}")).await.is_err() {
                         break;

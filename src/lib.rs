@@ -1,6 +1,7 @@
 use std::{fmt::Debug, io, marker::PhantomData, ops::Deref};
 
 use channel::none::NoReceiver;
+use sealed::Sealed;
 use serde::{de::DeserializeOwned, Serialize};
 #[cfg(feature = "test")]
 pub mod util;
@@ -22,13 +23,17 @@ impl<T> RpcMessage for T where
 }
 
 /// Marker trait for a service
-pub trait Service: Debug + Clone {}
+pub trait Service: Send + Sync + Debug + Clone + 'static {}
+
+mod sealed {
+    pub trait Sealed {}
+}
 
 /// Marker trait for a sender
-pub trait Sender: Debug {}
+pub trait Sender: Debug + Sealed {}
 
 /// Marker trait for a receiver
-pub trait Receiver: Debug {}
+pub trait Receiver: Debug + Sealed {}
 
 /// Channels to be used for a message and service
 pub trait Channels<S: Service> {
@@ -136,6 +141,7 @@ pub mod channel {
             }
         }
 
+        impl<T> crate::sealed::Sealed for Sender<T> {}
         impl<T> crate::Sender for Sender<T> {}
 
         pub enum Receiver<T> {
@@ -183,6 +189,7 @@ pub mod channel {
             }
         }
 
+        impl<T> crate::sealed::Sealed for Receiver<T> {}
         impl<T> crate::Receiver for Receiver<T> {}
     }
 
@@ -278,6 +285,7 @@ pub mod channel {
             }
         }
 
+        impl<T> crate::sealed::Sealed for Sender<T> {}
         impl<T> crate::Sender for Sender<T> {}
 
         pub enum Receiver<T> {
@@ -309,30 +317,34 @@ pub mod channel {
             }
         }
 
+        impl<T> crate::sealed::Sealed for Receiver<T> {}
         impl<T> crate::Receiver for Receiver<T> {}
     }
 
     /// No channels, used when no communication is needed
     pub mod none {
-        use crate::{Receiver, Sender};
+        use crate::{sealed::Sealed, Receiver, Sender};
 
         #[derive(Debug)]
         pub struct NoSender;
-
+        impl Sealed for NoSender {}
         impl Sender for NoSender {}
 
         #[derive(Debug)]
         pub struct NoReceiver;
 
+        impl Sealed for NoReceiver {}
         impl Receiver for NoReceiver {}
     }
 }
 
-/// A wrapper for a message with channels to send and receive it
+/// A wrapper for a message with channels to send and receive it.
+/// This expands the protocol message to a full message that includes the
+/// active and unserializable channels.
 ///
 /// rx and tx can be set to an appropriate channel kind.
 #[derive(Debug)]
-pub struct Msg<I: Channels<S>, S: Service> {
+pub struct WithChannels<I: Channels<S>, S: Service> {
     /// The inner message.
     pub inner: I,
     /// The return channel to send the response to. Can be set to [`crate::channel::none::NoSender`] if not needed.
@@ -344,7 +356,7 @@ pub struct Msg<I: Channels<S>, S: Service> {
 /// Tuple conversion from inner message and tx/rx channels to a WithChannels struct
 ///
 /// For the case where you want both tx and rx channels.
-impl<I: Channels<S>, S: Service, Tx, Rx> From<(I, Tx, Rx)> for Msg<I, S>
+impl<I: Channels<S>, S: Service, Tx, Rx> From<(I, Tx, Rx)> for WithChannels<I, S>
 where
     I: Channels<S>,
     <I as Channels<S>>::Tx: From<Tx>,
@@ -363,7 +375,7 @@ where
 /// Tuple conversion from inner message and tx channel to a WithChannels struct
 ///
 /// For the very common case where you just need a tx channel to send the response to.
-impl<I, S, Tx> From<(I, Tx)> for Msg<I, S>
+impl<I, S, Tx> From<(I, Tx)> for WithChannels<I, S>
 where
     I: Channels<S, Rx = NoReceiver>,
     S: Service,
@@ -380,7 +392,7 @@ where
 }
 
 /// Deref so you can access the inner fields directly
-impl<I: Channels<S>, S: Service> Deref for Msg<I, S> {
+impl<I: Channels<S>, S: Service> Deref for WithChannels<I, S> {
     type Target = I;
 
     fn deref(&self) -> &Self::Target {
@@ -686,10 +698,10 @@ impl<M, R, S> From<LocalMpscChannel<M, S>> for ServiceRequest<M, R, S> {
 }
 
 impl<M: Send, S: Service> LocalMpscChannel<M, S> {
-    pub fn send<T>(&self, value: impl Into<Msg<T, S>>) -> SendFut<M>
+    pub fn send<T>(&self, value: impl Into<WithChannels<T, S>>) -> SendFut<M>
     where
         T: Channels<S>,
-        M: From<Msg<T, S>>,
+        M: From<WithChannels<T, S>>,
     {
         let value: M = value.into().into();
         SendFut::new(self.0.clone(), value)
