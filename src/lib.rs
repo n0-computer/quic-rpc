@@ -4,11 +4,9 @@ use std::{fmt::Debug, io, marker::PhantomData, ops::Deref};
 use channel::none::NoReceiver;
 use sealed::Sealed;
 use serde::{de::DeserializeOwned, Serialize};
-#[cfg(feature = "test")]
-#[cfg_attr(quicrpc_docsrs, doc(cfg(all(feature = "rpc", feature = "test"))))]
+#[cfg(feature = "rpc")]
+#[cfg_attr(quicrpc_docsrs, doc(cfg(feature = "rpc")))]
 pub mod util;
-#[cfg(not(feature = "test"))]
-mod util;
 
 /// Requirements for a RPC message
 ///

@@ -1,3 +1,5 @@
+#[cfg(feature = "test")]
+#[cfg_attr(quicrpc_docsrs, doc(cfg(feature = "test")))]
 mod quinn_setup_utils {
     use std::{net::SocketAddr, sync::Arc};
 
@@ -137,6 +139,8 @@ mod quinn_setup_utils {
         }
     }
 }
+#[cfg(feature = "test")]
+#[cfg_attr(quicrpc_docsrs, doc(cfg(feature = "test")))]
 pub use quinn_setup_utils::*;
 
 mod varint_util {
