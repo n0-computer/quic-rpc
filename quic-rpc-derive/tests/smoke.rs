@@ -35,7 +35,7 @@ fn simple() {
     struct Response4;
 
     #[rpc_requests(Service, RequestWithChannels)]
-    #[derive(Debug, Serialize, Deserialize, derive_more::From, derive_more::TryInto)]
+    #[derive(Debug, Serialize, Deserialize)]
     enum Request {
         #[rpc(tx=oneshot::Sender<()>)]
         Rpc(RpcRequest),

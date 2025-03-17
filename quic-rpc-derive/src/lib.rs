@@ -48,6 +48,35 @@ fn generate_channels_impl(
     args.check_empty(attr_span)?;
     Ok(res)
 }
+fn generate_from_impls(
+    message_enum_name: &Ident,
+    variants: &[(Ident, Type)],
+    service_name: &Ident,
+    original_enum_name: &Ident,
+    additional_items: &mut Vec<proc_macro2::TokenTree>,
+) {
+    // Generate and add From impls for the message enum
+    for (variant_name, inner_type) in variants {
+        let message_impl = quote! {
+            impl From<::quic_rpc::WithChannels<#inner_type, #service_name>> for #message_enum_name {
+                fn from(value: ::quic_rpc::WithChannels<#inner_type, #service_name>) -> Self {
+                    #message_enum_name::#variant_name(value)
+                }
+            }
+        };
+        additional_items.extend(message_impl);
+
+        // Generate and add From impls for the original enum
+        let original_impl = quote! {
+            impl From<#inner_type> for #original_enum_name {
+                fn from(value: #inner_type) -> Self {
+                    #original_enum_name::#variant_name(value)
+                }
+            }
+        };
+        additional_items.extend(original_impl);
+    }
+}
 
 #[proc_macro_attribute]
 pub fn rpc_requests(attr: TokenStream, item: TokenStream) -> TokenStream {
@@ -127,7 +156,7 @@ pub fn rpc_requests(attr: TokenStream, item: TokenStream) -> TokenStream {
     }
 
     let message_variants = variants
-        .into_iter()
+        .iter()
         .map(|(variant_name, inner_type)| {
             quote! {
                 #variant_name(::quic_rpc::WithChannels<#inner_type, #service_name>)
@@ -136,11 +165,19 @@ pub fn rpc_requests(attr: TokenStream, item: TokenStream) -> TokenStream {
         .collect::<Vec<_>>();
 
     let message_enum = quote! {
-        #[derive(derive_more::From)]
         enum #message_enum_name {
             #(#message_variants),*
         }
     };
+
+    // Generate the From implementations
+    generate_from_impls(
+        &message_enum_name,
+        &variants,
+        &service_name,
+        &input.ident,
+        &mut additional_items,
+    );
 
     let output = quote! {
         #input

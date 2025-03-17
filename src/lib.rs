@@ -450,7 +450,7 @@ impl<M: Send + Sync + 'static, R, S: Service> ServiceSender<M, R, S> {
             Self::Remote(endpoint, addr, _) => {
                 let connection = endpoint
                     .connect(*addr, "localhost")
-                    .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?
+                    .map_err(io::Error::other)?
                     .await?;
                 let (send, recv) = connection.open_bi().await?;
                 Ok(ServiceRequest::Remote(rpc::RemoteRequest::new(send, recv)))

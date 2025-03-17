@@ -18,7 +18,7 @@ quote = "1"
 proc-macro2 = "1"
 
 [dev-dependencies]
-derive_more = { version = "1", features = ["from", "try_into", "display"] }
+derive_more = { version = "2", features = ["from"] }
 serde = { version = "1", features = ["serde_derive"] }
 trybuild = "1.0"
 quic-rpc = { path = ".." }

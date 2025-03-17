@@ -215,7 +215,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.100",
- "unicode-xid",
 ]
 
 [[package]]
@@ -774,7 +773,7 @@ dependencies = [
 name = "quic-rpc-derive"
 version = "0.50.0"
 dependencies = [
- "derive_more 1.0.0",
+ "derive_more 2.0.1",
  "proc-macro2",
  "quic-rpc",
  "quote",

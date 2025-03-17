@@ -42,7 +42,7 @@ tracing-subscriber = { version = "0.3.19", features = ["fmt"] }
 # used in the derive example. This must not be a main crate dep or else it will be circular!
 quic-rpc-derive = { path = "quic-rpc-derive" }
 # just convenient for the enum definitions
-derive_more = { version = "2", features = ["debug", "display", "from"] }
+derive_more = { version = "2", features = ["from"] }
 # we need full for example main etc.
 tokio = { version = "1", features = ["full"] }
 # formatting
