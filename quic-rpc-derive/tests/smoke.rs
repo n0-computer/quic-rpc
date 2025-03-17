@@ -59,6 +59,7 @@ fn simple() {
 ///
 /// to update the snapshots
 #[test]
+#[ignore = "stupid diffs depending on rustc version"]
 fn compile_fail() {
     let t = trybuild::TestCases::new();
     t.compile_fail("tests/compile_fail/*.rs");
