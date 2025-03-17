@@ -16,7 +16,7 @@ rust-version = "1.76"
 # we require serde even in non-rpc mode
 serde = { version = "1", default-features = false }
 # just for the oneshot and mpsc queues
-tokio = { version = "1", features = ["sync"], default-features = false  }
+tokio = { version = "1.38", features = ["sync"], default-features = false  }
 # for PollSender (which for some reason is not available in the main tokio api)
 tokio-util = { version = "0.7", default-features = false }
 
