@@ -128,7 +128,7 @@ impl StorageApi {
     pub fn listen(&self, endpoint: quinn::Endpoint) -> anyhow::Result<AbortOnDropHandle<()>> {
         match &self.inner {
             ServiceSender::Local(local, _) => {
-                let local = LocalMpscChannel::from(local.clone());
+                let local = local.clone();
                 let handler: Handler<StorageProtocol> = Arc::new(move |msg, _rx, tx| {
                     let local = local.clone();
                     Box::pin(match msg {
