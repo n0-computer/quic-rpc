@@ -1,5 +1,3 @@
-#[cfg(all(feature = "rpc", feature = "test"))]
-#[cfg_attr(quicrpc_docsrs, doc(cfg(all(feature = "rpc", feature = "test"))))]
 mod quinn_setup_utils {
     use std::{net::SocketAddr, sync::Arc};
 
@@ -139,12 +137,8 @@ mod quinn_setup_utils {
         }
     }
 }
-#[cfg(all(feature = "rpc", feature = "test"))]
-#[cfg_attr(quicrpc_docsrs, doc(cfg(all(feature = "rpc", feature = "test"))))]
 pub use quinn_setup_utils::*;
 
-#[cfg(feature = "rpc")]
-#[cfg_attr(quicrpc_docsrs, doc(cfg(feature = "rpc")))]
 mod varint_util {
     use std::{
         future::Future,
@@ -152,7 +146,7 @@ mod varint_util {
     };
 
     use serde::Serialize;
-    use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+    use tokio::io::{AsyncRead, AsyncReadExt};
 
     /// Reads a u64 varint from an AsyncRead source, using the Postcard/LEB128 format.
     ///
@@ -208,49 +202,6 @@ mod varint_util {
         }
 
         Ok(Some(result))
-    }
-
-    /// Writes a u64 varint to an AsyncWrite destination, using the same LEB128 format.
-    ///
-    /// The function stages the entire varint in a 9-byte buffer (maximum size needed for u64)
-    /// and performs just a single write operation.
-    ///
-    /// Returns the number of bytes written.
-    pub async fn write_varint_u64<W>(writer: &mut W, value: u64) -> io::Result<usize>
-    where
-        W: AsyncWrite + Unpin,
-    {
-        // Buffer to stage the varint (max 9 bytes for u64)
-        let mut buffer = [0u8; 9];
-        let mut pos = 0;
-
-        // Handle zero as a special case
-        if value == 0 {
-            buffer[0] = 0;
-            writer.write_all(&buffer[0..1]).await?;
-            return Ok(1);
-        }
-
-        // Encode the value using LEB128
-        let mut remaining = value;
-        while remaining > 0 {
-            // Extract the 7 least significant bits
-            let mut byte = (remaining & 0x7F) as u8;
-            remaining >>= 7;
-
-            // Set the continuation bit if there's more data
-            if remaining > 0 {
-                byte |= 0x80;
-            }
-
-            buffer[pos] = byte;
-            pos += 1;
-        }
-
-        // Write the entire buffer in one go
-        writer.write_all(&buffer[0..pos]).await?;
-
-        Ok(pos)
     }
 
     /// Writes a u64 varint to any object that implements the `std::io::Write` trait.
@@ -319,16 +270,6 @@ mod varint_util {
         }
     }
 
-    pub trait AsyncWriteVarintExt: AsyncWrite + Unpin {
-        fn write_varint_u64(&mut self, value: u64) -> impl Future<Output = io::Result<usize>>;
-    }
-
-    impl<T: AsyncWrite + Unpin> AsyncWriteVarintExt for T {
-        fn write_varint_u64(&mut self, value: u64) -> impl Future<Output = io::Result<usize>> {
-            write_varint_u64(self, value)
-        }
-    }
-
     pub trait WriteVarintExt: std::io::Write {
         fn write_varint_u64(&mut self, value: u64) -> io::Result<usize>;
         fn write_length_prefixed<T: Serialize>(&mut self, value: T) -> io::Result<()>;
@@ -344,8 +285,4 @@ mod varint_util {
         }
     }
 }
-#[cfg(feature = "rpc")]
-#[cfg_attr(quicrpc_docsrs, doc(cfg(feature = "rpc")))]
-pub use varint_util::{
-    read_varint_u64, write_varint_u64, AsyncReadVarintExt, AsyncWriteVarintExt, WriteVarintExt,
-};
+pub use varint_util::{AsyncReadVarintExt, WriteVarintExt};

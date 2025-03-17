@@ -5,6 +5,7 @@ use channel::none::NoReceiver;
 use sealed::Sealed;
 use serde::{de::DeserializeOwned, Serialize};
 #[cfg(feature = "test")]
+#[cfg_attr(quicrpc_docsrs, doc(cfg(all(feature = "rpc", feature = "test"))))]
 pub mod util;
 #[cfg(not(feature = "test"))]
 mod util;
@@ -59,9 +60,9 @@ mod multithreaded {
     pub(crate) type BoxedFuture<'a, T> =
         std::pin::Pin<Box<dyn std::future::Future<Output = T> + Send + 'a>>;
 }
-#[cfg(not(feature = "wasm-browser"))]
+#[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
 use multithreaded::*;
-#[cfg(feature = "wasm-browser")]
+#[cfg(all(target_family = "wasm", target_os = "unknown"))]
 use wasm_browser::*;
 
 /// Channels that abstract over local or remote sending
