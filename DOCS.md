@@ -1,5 +1,5 @@
-Building docs for this crate is a bit complex. There are lots of feature flags,
-so we want feature flag markers in the docs, especially for the transports.
+Building docs for this crate is a bit complex. There are some feature flags,
+so we want feature flag markers in the docs.
 
 There is an experimental cargo doc feature that adds feature flag markers. To
 get those, run docs with this command line:

@@ -10,166 +10,179 @@ use syn::{
     Data, DeriveInput, Fields, Ident, Token, Type,
 };
 
-const SERVER_STREAMING: &str = "server_streaming";
-const CLIENT_STREAMING: &str = "client_streaming";
-const BIDI_STREAMING: &str = "bidi_streaming";
-const RPC: &str = "rpc";
-const TRY_SERVER_STREAMING: &str = "try_server_streaming";
-const IDENTS: [&str; 5] = [
-    SERVER_STREAMING,
-    CLIENT_STREAMING,
-    BIDI_STREAMING,
-    RPC,
-    TRY_SERVER_STREAMING,
-];
+// Helper function for error reporting
+fn error_tokens(span: Span, message: &str) -> TokenStream {
+    syn::Error::new(span, message).to_compile_error().into()
+}
 
-fn generate_rpc_impls(
-    pat: &str,
-    mut args: RpcArgs,
+/// The only attribute we care about
+const ATTR_NAME: &str = "rpc";
+/// the tx type name
+const TX_ATTR: &str = "tx";
+/// the rx type name
+const RX_ATTR: &str = "rx";
+/// Fully qualified path to the default rx type
+const DEFAULT_RX_TYPE: &str = "::quic_rpc::channel::none::NoReceiver";
+
+fn generate_channels_impl(
+    mut args: NamedTypeArgs,
     service_name: &Ident,
     request_type: &Type,
     attr_span: Span,
 ) -> syn::Result<TokenStream2> {
-    let res = match pat {
-        RPC => {
-            let response = args.get("response", pat, attr_span)?;
-            quote! {
-                impl ::quic_rpc::pattern::rpc::RpcMsg<#service_name> for #request_type {
-                    type Response = #response;
-                }
-            }
-        }
-        SERVER_STREAMING => {
-            let response = args.get("response", pat, attr_span)?;
-            quote! {
-                impl ::quic_rpc::message::Msg<#service_name> for #request_type {
-                    type Pattern = ::quic_rpc::pattern::server_streaming::ServerStreaming;
-                }
-                impl ::quic_rpc::pattern::server_streaming::ServerStreamingMsg<#service_name> for #request_type {
-                    type Response = #response;
-                }
-            }
-        }
-        BIDI_STREAMING => {
-            let update = args.get("update", pat, attr_span)?;
-            let response = args.get("response", pat, attr_span)?;
-            quote! {
-                impl ::quic_rpc::message::Msg<#service_name> for #request_type {
-                    type Pattern = ::quic_rpc::pattern::bidi_streaming::BidiStreaming;
-                }
-                impl ::quic_rpc::pattern::bidi_streaming::BidiStreamingMsg<#service_name> for #request_type {
-                    type Update = #update;
-                    type Response = #response;
-                }
-            }
-        }
-        CLIENT_STREAMING => {
-            let update = args.get("update", pat, attr_span)?;
-            let response = args.get("response", pat, attr_span)?;
-            quote! {
-                impl ::quic_rpc::message::Msg<#service_name> for #request_type {
-                    type Pattern = ::quic_rpc::pattern::client_streaming::ClientStreaming;
-                }
-                impl ::quic_rpc::pattern::client_streaming::ClientStreamingMsg<#service_name> for #request_type {
-                    type Update = #update;
-                    type Response = #response;
-                }
-            }
-        }
-        TRY_SERVER_STREAMING => {
-            let create_error = args.get("create_error", pat, attr_span)?;
-            let item_error = args.get("item_error", pat, attr_span)?;
-            let item = args.get("item", pat, attr_span)?;
-            quote! {
-                impl ::quic_rpc::message::Msg<#service_name> for #request_type {
-                    type Pattern = ::quic_rpc::pattern::try_server_streaming::TryServerStreaming;
-                }
-                impl ::quic_rpc::pattern::try_server_streaming::TryServerStreamingMsg<#service_name> for #request_type {
-                    type CreateError = #create_error;
-                    type ItemError = #item_error;
-                    type Item = #item;
-                }
-            }
-        }
-        _ => return Err(syn::Error::new(attr_span, "Unknown RPC pattern")),
-    };
-    args.check_empty(attr_span)?;
+    // Try to get rx, default to NoReceiver if not present
+    // Use unwrap_or_else for a cleaner default
+    let rx = args.types.remove(RX_ATTR).unwrap_or_else(|| {
+        // We can safely unwrap here because this is a known valid type
+        syn::parse_str::<Type>(DEFAULT_RX_TYPE).expect("Failed to parse default rx type")
+    });
+    let tx = args.get(TX_ATTR, attr_span)?;
 
+    let res = quote! {
+        impl ::quic_rpc::Channels<#service_name> for #request_type {
+            type Tx = #tx;
+            type Rx = #rx;
+        }
+    };
+
+    args.check_empty(attr_span)?;
     Ok(res)
+}
+fn generate_from_impls(
+    message_enum_name: &Ident,
+    variants: &[(Ident, Type)],
+    service_name: &Ident,
+    original_enum_name: &Ident,
+    additional_items: &mut Vec<proc_macro2::TokenTree>,
+) {
+    // Generate and add From impls for the message enum
+    for (variant_name, inner_type) in variants {
+        let message_impl = quote! {
+            impl From<::quic_rpc::WithChannels<#inner_type, #service_name>> for #message_enum_name {
+                fn from(value: ::quic_rpc::WithChannels<#inner_type, #service_name>) -> Self {
+                    #message_enum_name::#variant_name(value)
+                }
+            }
+        };
+        additional_items.extend(message_impl);
+
+        // Generate and add From impls for the original enum
+        let original_impl = quote! {
+            impl From<#inner_type> for #original_enum_name {
+                fn from(value: #inner_type) -> Self {
+                    #original_enum_name::#variant_name(value)
+                }
+            }
+        };
+        additional_items.extend(original_impl);
+    }
 }
 
 #[proc_macro_attribute]
 pub fn rpc_requests(attr: TokenStream, item: TokenStream) -> TokenStream {
     let mut input = parse_macro_input!(item as DeriveInput);
-    let service_name = parse_macro_input!(attr as Ident);
+    let MacroArgs {
+        service_name,
+        message_enum_name,
+    } = parse_macro_input!(attr as MacroArgs);
 
     let input_span = input.span();
     let data_enum = match &mut input.data {
         Data::Enum(data_enum) => data_enum,
-        _ => {
-            return syn::Error::new(input.span(), "RpcRequests can only be applied to enums")
-                .to_compile_error()
-                .into()
-        }
+        _ => return error_tokens(input.span(), "RpcRequests can only be applied to enums"),
     };
 
+    // builder for the trait impls
     let mut additional_items = Vec::new();
+    // types to check for uniqueness
     let mut types = HashSet::new();
+    // variant names and types
+    let mut variants = Vec::new();
 
     for variant in &mut data_enum.variants {
         // Check field structure for every variant
         let request_type = match &variant.fields {
             Fields::Unnamed(fields) if fields.unnamed.len() == 1 => &fields.unnamed[0].ty,
             _ => {
-                return syn::Error::new(
+                return error_tokens(
                     variant.span(),
                     "Each variant must have exactly one unnamed field",
                 )
-                .to_compile_error()
-                .into()
             }
         };
+        variants.push((variant.ident.clone(), request_type.clone()));
 
         if !types.insert(request_type.to_token_stream().to_string()) {
-            return syn::Error::new(input_span, "Each variant must have a unique request type")
-                .to_compile_error()
-                .into();
+            return error_tokens(input_span, "Each variant must have a unique request type");
         }
+        // Find and remove the rpc attribute
+        let mut rpc_attr = None;
+        let mut multiple_rpc_attrs = false;
 
-        // Extract and remove RPC attributes
-        let mut rpc_attr = Vec::new();
         variant.attrs.retain(|attr| {
-            for ident in IDENTS {
-                if attr.path.is_ident(ident) {
-                    rpc_attr.push((ident, attr.clone()));
-                    return false;
+            if attr.path.is_ident(ATTR_NAME) {
+                if rpc_attr.is_some() {
+                    multiple_rpc_attrs = true;
+                    true // Keep this duplicate attribute
+                } else {
+                    rpc_attr = Some(attr.clone());
+                    false // Remove this attribute
                 }
+            } else {
+                true // Keep other attributes
             }
-            true
         });
 
-        // Fail if there are multiple RPC patterns
-        if rpc_attr.len() > 1 {
-            return syn::Error::new(variant.span(), "Each variant can only have one RPC pattern")
-                .to_compile_error()
-                .into();
+        // Check for multiple rpc attributes
+        if multiple_rpc_attrs {
+            return error_tokens(
+                variant.span(),
+                "Each variant can only have one rpc attribute",
+            );
         }
 
-        if let Some((ident, attr)) = rpc_attr.pop() {
-            let args = match attr.parse_args::<RpcArgs>() {
+        // if there is no attr, the user has to impl Channels manually
+        if let Some(attr) = rpc_attr {
+            let args = match attr.parse_args::<NamedTypeArgs>() {
                 Ok(info) => info,
                 Err(e) => return e.to_compile_error().into(),
             };
 
-            match generate_rpc_impls(ident, args, &service_name, request_type, attr.span()) {
+            match generate_channels_impl(args, &service_name, request_type, attr.span()) {
                 Ok(impls) => additional_items.extend(impls),
                 Err(e) => return e.to_compile_error().into(),
             }
         }
     }
 
+    let message_variants = variants
+        .iter()
+        .map(|(variant_name, inner_type)| {
+            quote! {
+                #variant_name(::quic_rpc::WithChannels<#inner_type, #service_name>)
+            }
+        })
+        .collect::<Vec<_>>();
+
+    let message_enum = quote! {
+        enum #message_enum_name {
+            #(#message_variants),*
+        }
+    };
+
+    // Generate the From implementations
+    generate_from_impls(
+        &message_enum_name,
+        &variants,
+        &service_name,
+        &input.ident,
+        &mut additional_items,
+    );
+
     let output = quote! {
         #input
+
+        #message_enum
 
         #(#additional_items)*
     };
@@ -177,16 +190,35 @@ pub fn rpc_requests(attr: TokenStream, item: TokenStream) -> TokenStream {
     output.into()
 }
 
-struct RpcArgs {
+// Parse arguments in the format (ServiceType, MessageEnumName)
+struct MacroArgs {
+    service_name: Ident,
+    message_enum_name: Ident,
+}
+
+impl Parse for MacroArgs {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        let service_name: Ident = input.parse()?;
+        let _: Token![,] = input.parse()?;
+        let message_enum_name: Ident = input.parse()?;
+
+        Ok(MacroArgs {
+            service_name,
+            message_enum_name,
+        })
+    }
+}
+
+struct NamedTypeArgs {
     types: BTreeMap<String, Type>,
 }
 
-impl RpcArgs {
+impl NamedTypeArgs {
     /// Get and remove a type from the map, failing if it doesn't exist
-    fn get(&mut self, key: &str, kind: &str, span: Span) -> syn::Result<Type> {
+    fn get(&mut self, key: &str, span: Span) -> syn::Result<Type> {
         self.types
             .remove(key)
-            .ok_or_else(|| syn::Error::new(span, format!("{kind} requires a {key} type")))
+            .ok_or_else(|| syn::Error::new(span, format!("rpc requires a {key} type")))
     }
 
     /// Fail if there are any unknown arguments remaining
@@ -206,7 +238,7 @@ impl RpcArgs {
 }
 
 /// Parse the rpc args as a comma separated list of name=type pairs
-impl Parse for RpcArgs {
+impl Parse for NamedTypeArgs {
     fn parse(input: ParseStream) -> syn::Result<Self> {
         let mut types = BTreeMap::new();
 
@@ -227,6 +259,6 @@ impl Parse for RpcArgs {
             let _: Token![,] = input.parse()?;
         }
 
-        Ok(RpcArgs { types })
+        Ok(NamedTypeArgs { types })
     }
 }

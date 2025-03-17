@@ -28,9 +28,9 @@ It is still a RPC system in the sense that interactions get initiated by the cli
 
 ### Transports
 
-- memory transport with very low overhead. In particular, no ser/deser, currently using [flume]
-- quic transport via the [quinn] crate
-- transparent combination of the above
+- memory transport with very low overhead. In particular, no ser/deser, currently using [tokio channels]
+   when using tokio channels, there is zero overhead compared to just manually including backchannels in messages
+- quic transport via the [iroh-quinn] crate
 
 ### API
 
@@ -64,35 +64,21 @@ channel. For almost all interactions these messages itself will again contain
 (oneshot or mpsc) channels for independent async communication between the
 subsystems.
 
-Quic-rpc with the mem channel does exactly the same thing, except that it hides
-the details and allows you to specify a clean high level interaction protocol
-in the rust type system.
+Quic-rpc with the mem channel does exactly the same thing, except that it
+distinguishes between the serializable protocol of a service and the full
+messages of a service that include unserializable channels.
 
 Instead of having a message that explicitly contains some data and the send side
-of a oneshot or mpsc channel for the response, it creates a pair of flume
-channels internally and sends one end of them to the server. This has some slight
-overhead (2 flume channels vs. 1 oneshot channel) for a RPC interaction. But
-for streaming interactions the overhead is negligible.
+of a oneshot or mpsc channel for the response, it allows you to specify the
+channel kind and message type of the channels in both directions.
 
 For the case where you have a process boundary, the overhead is very low for
 transports that already have a concept of cheap substreams (http2, quic, ...).
 Quic is the poster child of a network transport that has built in cheap
-substreams including per substream backpressure. However, I found that for raw
-data transfer http2/tcp has still superior performance. This is why the http2
-transport exists.
+substreams including per substream backpressure.
 
-Currently you would use the quinn transport for cases where you want to have
-connections to many different peers and can't accept a large per connection
-overhead, or where you want low latency for small messages.
-
-You would use the hyper transport for cases where you have a small number of
-connections, so per connection overhead does not matter that much, and where
-you want maximum throughput at the expense of some latency.
-
-This may change in the future as quic implementations get more optimized.
-
-[quinn]: https://docs.rs/quinn/
-[flume]: https://docs.rs/flume/
+[iroh-quinn]: https://docs.rs/iroh-quinn/
+[tokio channels]: https://docs.rs/tokio/latest/tokio/sync/index.html
 [grpc]: https://grpc.io/
 
 # Docs
