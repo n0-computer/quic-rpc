@@ -290,3 +290,23 @@ mod varint_util {
     }
 }
 pub use varint_util::{AsyncReadVarintExt, WriteVarintExt};
+
+mod fuse_wrapper {
+    use std::{future::Future, pin::Pin, task::{Context, Poll}};
+
+    pub struct FusedOneshotReceiver<T>(pub tokio::sync::oneshot::Receiver<T>);
+
+    impl<T> Future for FusedOneshotReceiver<T> {
+        type Output = std::result::Result<T, tokio::sync::oneshot::error::RecvError>;
+
+        fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+            if self.0.is_terminated() {
+                // don't panic when polling a terminated receiver
+                Poll::Pending
+            } else {
+                Future::poll(Pin::new(&mut self.0), cx)
+            }
+        }
+    }
+}
+pub use fuse_wrapper::FusedOneshotReceiver;

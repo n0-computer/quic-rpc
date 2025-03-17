@@ -69,6 +69,8 @@ pub mod channel {
     pub mod oneshot {
         use std::{fmt::Debug, future::Future, io, pin::Pin, task};
 
+        use crate::util::FusedOneshotReceiver;
+
         pub fn channel<T>() -> (Sender<T>, Receiver<T>) {
             let (tx, rx) = tokio::sync::oneshot::channel();
             (tx.into(), rx.into())
@@ -152,7 +154,7 @@ pub mod channel {
         impl<T> crate::Sender for Sender<T> {}
 
         pub enum Receiver<T> {
-            Tokio(tokio::sync::oneshot::Receiver<T>),
+            Tokio(FusedOneshotReceiver<T>),
             Boxed(BoxedReceiver<T>),
         }
 
@@ -172,7 +174,7 @@ pub mod channel {
         /// Convert a tokio oneshot receiver to a receiver for this crate
         impl<T> From<tokio::sync::oneshot::Receiver<T>> for Receiver<T> {
             fn from(rx: tokio::sync::oneshot::Receiver<T>) -> Self {
-                Self::Tokio(rx)
+                Self::Tokio(FusedOneshotReceiver(rx))
             }
         }
 
