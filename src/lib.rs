@@ -647,6 +647,7 @@ pub mod rpc {
             value: T,
         ) -> Pin<Box<dyn Future<Output = io::Result<bool>> + Send + '_>> {
             Box::pin(async {
+                // todo: move the non-async part out of the box. Will require a new return type.
                 let value = value;
                 self.buffer.clear();
                 self.buffer.write_length_prefixed(value)?;
