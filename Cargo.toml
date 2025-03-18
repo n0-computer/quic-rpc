@@ -35,7 +35,7 @@ rcgen = { version = "0.13.2", optional = true }
 # used in the test utils to generate quinn endpoints
 anyhow = { version = "1.0.66", optional = true }
 # used in the benches
-futures-buffered ={ version = "0.2.11", optional = true }
+futures-buffered ={ version = "0.2.9", optional = true }
 
 [dev-dependencies]
 tracing-subscriber = { version = "0.3.19", features = ["fmt"] }

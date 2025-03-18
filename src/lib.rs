@@ -1,5 +1,5 @@
 #![cfg_attr(quicrpc_docsrs, feature(doc_cfg))]
-use std::{fmt::Debug, io, marker::PhantomData, ops::Deref};
+use std::{fmt::Debug, future::Future, io, marker::PhantomData, ops::Deref};
 
 use channel::none::NoReceiver;
 use sealed::Sealed;
@@ -517,20 +517,30 @@ impl<M: Send + Sync + 'static, R, S: Service> ServiceSender<M, R, S> {
         }
     }
 
-    pub async fn request(
+    pub fn request(
         &self,
-    ) -> io::Result<ServiceRequest<&LocalMpscChannel<M, S>, rpc::RemoteRequest<R, S>>> {
-        match self {
-            Self::Local(tx, _) => Ok(ServiceRequest::Local(tx)),
+    ) -> impl Future<
+        Output = io::Result<ServiceRequest<LocalMpscChannel<M, S>, rpc::RemoteRequest<R, S>>>,
+    > + 'static {
+        let cloned = match self {
+            Self::Local(tx, _) => ServiceRequest::Local(tx.clone()),
             #[cfg(feature = "rpc")]
             #[cfg_attr(quicrpc_docsrs, doc(cfg(feature = "rpc")))]
-            Self::Remote(endpoint, addr, _) => {
-                let connection = endpoint
-                    .connect(*addr, "localhost")
-                    .map_err(io::Error::other)?
-                    .await?;
-                let (send, recv) = connection.open_bi().await?;
-                Ok(ServiceRequest::Remote(rpc::RemoteRequest::new(send, recv)))
+            Self::Remote(endpoint, addr, _) => ServiceRequest::Remote((endpoint.clone(), *addr)),
+        };
+        async move {
+            match cloned {
+                ServiceRequest::Local(tx) => Ok(ServiceRequest::Local(tx.clone())),
+                #[cfg(feature = "rpc")]
+                #[cfg_attr(quicrpc_docsrs, doc(cfg(feature = "rpc")))]
+                ServiceRequest::Remote((endpoint, addr)) => {
+                    let connection = endpoint
+                        .connect(addr, "localhost")
+                        .map_err(io::Error::other)?
+                        .await?;
+                    let (send, recv) = connection.open_bi().await?;
+                    Ok(ServiceRequest::Remote(rpc::RemoteRequest::new(send, recv)))
+                }
             }
         }
     }
