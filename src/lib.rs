@@ -270,6 +270,11 @@ pub mod channel {
                 &mut self,
                 value: T,
             ) -> Pin<Box<dyn Future<Output = io::Result<()>> + Send + '_>>;
+
+            fn try_send(
+                &mut self,
+                value: T,
+            ) -> Pin<Box<dyn Future<Output = io::Result<bool>> + Send + '_>>;
         }
 
         pub trait BoxedReceiver<T>: Debug + Send + Sync + 'static {
@@ -489,7 +494,7 @@ pub mod rpc {
             oneshot,
             spsc::{self, BoxedReceiver, BoxedSender},
         },
-        util::{AsyncReadVarintExt, WriteVarintExt},
+        util::{now_or_never, AsyncReadVarintExt, WriteVarintExt},
         RpcMessage,
     };
 
@@ -634,6 +639,24 @@ pub mod rpc {
                 self.send.write_all(&self.buffer).await?;
                 self.buffer.clear();
                 Ok(())
+            })
+        }
+
+        fn try_send(
+            &mut self,
+            value: T,
+        ) -> Pin<Box<dyn Future<Output = io::Result<bool>> + Send + '_>> {
+            Box::pin(async {
+                let value = value;
+                self.buffer.clear();
+                self.buffer.write_length_prefixed(value)?;
+                let Some(n) = now_or_never(self.send.write(&mut self.buffer)) else {
+                    return Ok(false);
+                };
+                let n = n?;
+                self.send.write_all(&self.buffer[n..]).await?;
+                self.buffer.clear();
+                Ok(true)
             })
         }
     }

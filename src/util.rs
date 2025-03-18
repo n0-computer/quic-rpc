@@ -292,7 +292,11 @@ mod varint_util {
 pub use varint_util::{AsyncReadVarintExt, WriteVarintExt};
 
 mod fuse_wrapper {
-    use std::{future::Future, pin::Pin, task::{Context, Poll}};
+    use std::{
+        future::Future,
+        pin::Pin,
+        task::{Context, Poll},
+    };
 
     pub struct FusedOneshotReceiver<T>(pub tokio::sync::oneshot::Receiver<T>);
 
@@ -310,3 +314,47 @@ mod fuse_wrapper {
     }
 }
 pub use fuse_wrapper::FusedOneshotReceiver;
+
+mod now_or_never {
+    use std::{
+        future::Future,
+        pin::Pin,
+        task::{Context, Poll, RawWaker, RawWakerVTable, Waker},
+    };
+
+    // Simple pin_mut! macro implementation
+    macro_rules! pin_mut {
+    ($($x:ident),* $(,)?) => {
+        $(
+            let mut $x = $x;
+            #[allow(unused_mut)]
+            let mut $x = unsafe { Pin::new_unchecked(&mut $x) };
+        )*
+    }
+}
+
+    // Minimal implementation of a no-op waker
+    fn noop_waker() -> Waker {
+        fn noop(_: *const ()) {}
+        fn clone(_: *const ()) -> RawWaker {
+            let vtable = &RawWakerVTable::new(clone, noop, noop, noop);
+            RawWaker::new(std::ptr::null(), vtable)
+        }
+
+        unsafe { Waker::from_raw(clone(std::ptr::null())) }
+    }
+
+    /// Attempts to complete a future immediately, returning None if it would block
+    pub fn now_or_never<F: Future>(future: F) -> Option<F::Output> {
+        let waker = noop_waker();
+        let mut cx = Context::from_waker(&waker);
+
+        pin_mut!(future);
+
+        match future.poll(&mut cx) {
+            Poll::Ready(x) => Some(x),
+            Poll::Pending => None,
+        }
+    }
+}
+pub use now_or_never::now_or_never;
