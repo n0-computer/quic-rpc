@@ -180,7 +180,7 @@ impl ComputeApi {
     pub async fn sqr(&self, num: u64) -> anyhow::Result<oneshot::Receiver<u128>> {
         let msg = Sqr { num };
         match self.inner.request().await? {
-            ServiceRequest::Local(request, _) => {
+            ServiceRequest::Local(request) => {
                 let (tx, rx) = oneshot::channel();
                 request.send((msg, tx)).await?;
                 Ok(rx)
@@ -195,7 +195,7 @@ impl ComputeApi {
     pub async fn sum(&self) -> anyhow::Result<(spsc::Sender<i64>, oneshot::Receiver<i64>)> {
         let msg = Sum;
         match self.inner.request().await? {
-            ServiceRequest::Local(request, _) => {
+            ServiceRequest::Local(request) => {
                 let (num_tx, num_rx) = spsc::channel(10);
                 let (sum_tx, sum_rx) = oneshot::channel();
                 request.send((msg, sum_tx, num_rx)).await?;
@@ -211,7 +211,7 @@ impl ComputeApi {
     pub async fn fibonacci(&self, max: u64) -> anyhow::Result<spsc::Receiver<u64>> {
         let msg = Fibonacci { max };
         match self.inner.request().await? {
-            ServiceRequest::Local(request, _) => {
+            ServiceRequest::Local(request) => {
                 let (tx, rx) = spsc::channel(128);
                 request.send((msg, tx)).await?;
                 Ok(rx)
@@ -229,7 +229,7 @@ impl ComputeApi {
     ) -> anyhow::Result<(spsc::Sender<u64>, spsc::Receiver<u64>)> {
         let msg = Multiply { initial };
         match self.inner.request().await? {
-            ServiceRequest::Local(request, _) => {
+            ServiceRequest::Local(request) => {
                 let (in_tx, in_rx) = spsc::channel(128);
                 let (out_tx, out_rx) = spsc::channel(128);
                 request.send((msg, out_tx, in_rx)).await?;

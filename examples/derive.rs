@@ -138,7 +138,7 @@ impl StorageApi {
     pub async fn get(&self, key: String) -> anyhow::Result<oneshot::Receiver<Option<String>>> {
         let msg = Get { key };
         match self.inner.request().await? {
-            ServiceRequest::Local(request, _) => {
+            ServiceRequest::Local(request) => {
                 let (tx, rx) = oneshot::channel();
                 request.send((msg, tx)).await?;
                 Ok(rx)
@@ -153,7 +153,7 @@ impl StorageApi {
     pub async fn list(&self) -> anyhow::Result<spsc::Receiver<String>> {
         let msg = List;
         match self.inner.request().await? {
-            ServiceRequest::Local(request, _) => {
+            ServiceRequest::Local(request) => {
                 let (tx, rx) = spsc::channel(10);
                 request.send((msg, tx)).await?;
                 Ok(rx)
@@ -168,7 +168,7 @@ impl StorageApi {
     pub async fn set(&self, key: String, value: String) -> anyhow::Result<oneshot::Receiver<()>> {
         let msg = Set { key, value };
         match self.inner.request().await? {
-            ServiceRequest::Local(request, _) => {
+            ServiceRequest::Local(request) => {
                 let (tx, rx) = oneshot::channel();
                 request.send((msg, tx)).await?;
                 Ok(rx)

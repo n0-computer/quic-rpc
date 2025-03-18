@@ -476,11 +476,18 @@ impl<I: Channels<S>, S: Service> Deref for WithChannels<I, S> {
     }
 }
 
+#[derive(Debug)]
 pub enum ServiceSender<M, R, S> {
     Local(LocalMpscChannel<M, S>, PhantomData<R>),
     #[cfg(feature = "rpc")]
     #[cfg_attr(quicrpc_docsrs, doc(cfg(feature = "rpc")))]
     Remote(quinn::Endpoint, std::net::SocketAddr, PhantomData<(R, S)>),
+}
+
+impl<M, R, S> From<tokio::sync::mpsc::Sender<M>> for ServiceSender<M, R, S> {
+    fn from(tx: tokio::sync::mpsc::Sender<M>) -> Self {
+        Self::Local(tx.into(), PhantomData)
+    }
 }
 
 impl<M, R, S> Clone for ServiceSender<M, R, S> {
@@ -501,9 +508,20 @@ impl<M, R, S> From<LocalMpscChannel<M, S>> for ServiceSender<M, R, S> {
 }
 
 impl<M: Send + Sync + 'static, R, S: Service> ServiceSender<M, R, S> {
-    pub async fn request(&self) -> io::Result<ServiceRequest<M, R, S>> {
+    pub fn local(&self) -> Option<&LocalMpscChannel<M, S>> {
         match self {
-            Self::Local(tx, _) => Ok(ServiceRequest::from(tx.clone())),
+            Self::Local(tx, _) => Some(tx),
+            #[cfg(feature = "rpc")]
+            #[cfg_attr(quicrpc_docsrs, doc(cfg(feature = "rpc")))]
+            Self::Remote(_, _, _) => None,
+        }
+    }
+
+    pub async fn request(
+        &self,
+    ) -> io::Result<ServiceRequest<&LocalMpscChannel<M, S>, rpc::RemoteRequest<R, S>>> {
+        match self {
+            Self::Local(tx, _) => Ok(ServiceRequest::Local(tx)),
             #[cfg(feature = "rpc")]
             #[cfg_attr(quicrpc_docsrs, doc(cfg(feature = "rpc")))]
             Self::Remote(endpoint, addr, _) => {
@@ -562,6 +580,18 @@ pub mod rpc {
     impl<R, S> RemoteRequest<R, S> {
         pub fn new(send: quinn::SendStream, recv: quinn::RecvStream) -> Self {
             Self(send, recv, PhantomData)
+        }
+
+        pub async fn write(self, msg: impl Into<R>) -> io::Result<(RemoteRead, RemoteWrite)>
+        where
+            R: Serialize,
+        {
+            let RemoteRequest(mut send, recv, _) = self;
+            let msg = msg.into();
+            let mut buf = SmallVec::<[u8; 128]>::new();
+            buf.write_length_prefixed(msg)?;
+            send.write_all(&buf).await?;
+            Ok((RemoteRead(recv), RemoteWrite(send)))
         }
     }
 
@@ -722,17 +752,6 @@ pub mod rpc {
         }
     }
 
-    impl<R: Serialize, S> RemoteRequest<R, S> {
-        pub async fn write(self, msg: impl Into<R>) -> io::Result<(RemoteRead, RemoteWrite)> {
-            let RemoteRequest(mut send, recv, _) = self;
-            let msg = msg.into();
-            let mut buf = SmallVec::<[u8; 128]>::new();
-            buf.write_length_prefixed(msg)?;
-            send.write_all(&buf).await?;
-            Ok((RemoteRead(recv), RemoteWrite(send)))
-        }
-    }
-
     /// Type alias for a handler fn for remote requests
     pub type Handler<R> = Arc<
         dyn Fn(R, RemoteRead, RemoteWrite) -> crate::BoxedFuture<'static, io::Result<()>>
@@ -784,26 +803,24 @@ pub mod rpc {
 }
 
 #[derive(Debug)]
-pub enum ServiceRequest<M, R, S> {
-    Local(LocalMpscChannel<M, S>, PhantomData<R>),
-    #[cfg(feature = "rpc")]
-    #[cfg_attr(quicrpc_docsrs, doc(cfg(feature = "rpc")))]
-    Remote(rpc::RemoteRequest<R, S>),
-}
-
-impl<M, R, S> From<LocalMpscChannel<M, S>> for ServiceRequest<M, R, S> {
-    fn from(tx: LocalMpscChannel<M, S>) -> Self {
-        Self::Local(tx, PhantomData)
-    }
+pub enum ServiceRequest<L, R> {
+    Local(L),
+    Remote(R),
 }
 
 impl<M: Send, S: Service> LocalMpscChannel<M, S> {
+    /// Send a message to the service
     pub fn send<T>(&self, value: impl Into<WithChannels<T, S>>) -> SendFut<M>
     where
         T: Channels<S>,
         M: From<WithChannels<T, S>>,
     {
         let value: M = value.into().into();
+        SendFut::new(self.0.clone(), value)
+    }
+
+    /// Send a message to the service without the type conversion magic
+    pub fn send_raw(&self, value: M) -> SendFut<M> {
         SendFut::new(self.0.clone(), value)
     }
 }
