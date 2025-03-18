@@ -165,7 +165,7 @@ pub fn rpc_requests(attr: TokenStream, item: TokenStream) -> TokenStream {
         .collect::<Vec<_>>();
 
     let message_enum = quote! {
-        enum #message_enum_name {
+        pub enum #message_enum_name {
             #(#message_variants),*
         }
     };

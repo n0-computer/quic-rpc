@@ -102,6 +102,17 @@ pub mod channel {
             }
         }
 
+        impl<T> TryFrom<Sender<T>> for tokio::sync::oneshot::Sender<T> {
+            type Error = Sender<T>;
+
+            fn try_from(value: Sender<T>) -> Result<Self, Self::Error> {
+                match value {
+                    Sender::Tokio(tx) => Ok(tx),
+                    Sender::Boxed(_) => Err(value),
+                }
+            }
+        }
+
         #[derive(Debug)]
         pub enum SendError {
             ReceiverClosed,
@@ -175,6 +186,17 @@ pub mod channel {
         impl<T> From<tokio::sync::oneshot::Receiver<T>> for Receiver<T> {
             fn from(rx: tokio::sync::oneshot::Receiver<T>) -> Self {
                 Self::Tokio(FusedOneshotReceiver(rx))
+            }
+        }
+
+        impl<T> TryFrom<Receiver<T>> for tokio::sync::oneshot::Receiver<T> {
+            type Error = Receiver<T>;
+
+            fn try_from(value: Receiver<T>) -> Result<Self, Self::Error> {
+                match value {
+                    Receiver::Tokio(tx) => Ok(tx.0),
+                    Receiver::Boxed(_) => Err(value),
+                }
             }
         }
 
@@ -265,6 +287,17 @@ pub mod channel {
             }
         }
 
+        impl<T> TryFrom<Sender<T>> for tokio::sync::mpsc::Sender<T> {
+            type Error = Sender<T>;
+
+            fn try_from(value: Sender<T>) -> Result<Self, Self::Error> {
+                match value {
+                    Sender::Tokio(tx) => Ok(tx),
+                    Sender::Boxed(_) => Err(value),
+                }
+            }
+        }
+
         pub trait BoxedSender<T>: Debug + Send + Sync + 'static {
             fn send(
                 &mut self,
@@ -299,6 +332,16 @@ pub mod channel {
                     Sender::Boxed(sink) => sink.send(value).await.map_err(SendError::from),
                 }
             }
+
+            pub async fn try_send(&mut self, value: T) -> std::result::Result<(), SendError> {
+                match self {
+                    Sender::Tokio(tx) => tx.try_send(value).map_err(|_| SendError::ReceiverClosed),
+                    Sender::Boxed(sink) => {
+                        sink.try_send(value).await.map_err(SendError::from)?;
+                        Ok(())
+                    }
+                }
+            }
         }
 
         impl<T> crate::sealed::Sealed for Sender<T> {}
@@ -327,6 +370,17 @@ pub mod channel {
         impl<T> From<tokio::sync::mpsc::Receiver<T>> for Receiver<T> {
             fn from(rx: tokio::sync::mpsc::Receiver<T>) -> Self {
                 Self::Tokio(rx)
+            }
+        }
+
+        impl<T> TryFrom<Receiver<T>> for tokio::sync::mpsc::Receiver<T> {
+            type Error = Receiver<T>;
+
+            fn try_from(value: Receiver<T>) -> Result<Self, Self::Error> {
+                match value {
+                    Receiver::Tokio(tx) => Ok(tx),
+                    Receiver::Boxed(_) => Err(value),
+                }
             }
         }
 
