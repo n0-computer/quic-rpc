@@ -419,7 +419,6 @@ pub mod channel {
 /// active and unserializable channels.
 ///
 /// rx and tx can be set to an appropriate channel kind.
-#[derive(Debug)]
 pub struct WithChannels<I: Channels<S>, S: Service> {
     /// The inner message.
     pub inner: I,
@@ -431,6 +430,16 @@ pub struct WithChannels<I: Channels<S>, S: Service> {
     #[cfg(feature = "message_spans")]
     #[cfg_attr(quicrpc_docsrs, doc(cfg(feature = "message_spans")))]
     pub span: tracing::Span,
+}
+
+impl<I: Channels<S> + Debug, S: Service> Debug for WithChannels<I, S> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("WithChannels")
+            .field("inner", &self.inner)
+            .field("tx", &self.tx)
+            .field("rx", &self.rx)
+            .finish_non_exhaustive()
+    }
 }
 
 impl<I: Channels<S>, S: Service> WithChannels<I, S> {
