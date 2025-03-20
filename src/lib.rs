@@ -361,7 +361,13 @@ pub mod channel {
 
             pub async fn try_send(&mut self, value: T) -> std::result::Result<(), SendError> {
                 match self {
-                    Sender::Tokio(tx) => tx.try_send(value).map_err(|_| SendError::ReceiverClosed),
+                    Sender::Tokio(tx) => match tx.try_send(value) {
+                        Ok(()) => Ok(()),
+                        Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
+                            Err(SendError::ReceiverClosed)
+                        }
+                        Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => Ok(()),
+                    },
                     Sender::Boxed(sink) => {
                         sink.try_send(value).await.map_err(SendError::from)?;
                         Ok(())
@@ -853,7 +859,9 @@ pub mod rpc {
                 loop {
                     let (send, mut recv) = match connection.accept_bi().await {
                         Ok((s, r)) => (s, r),
-                        Err(ConnectionError::ApplicationClosed(cause)) if cause.error_code.into_inner() == 0 => {
+                        Err(ConnectionError::ApplicationClosed(cause))
+                            if cause.error_code.into_inner() == 0 =>
+                        {
                             trace!("remote side closed connection {cause:?}");
                             return Ok(());
                         }
