@@ -433,6 +433,19 @@ pub struct WithChannels<I: Channels<S>, S: Service> {
     pub span: tracing::Span,
 }
 
+impl<I: Channels<S>, S: Service> WithChannels<I, S> {
+    pub fn parent_span_opt(&self) -> Option<&tracing::Span> {
+        #[cfg(feature = "message_spans")]
+        {
+            Some(&self.span)
+        }
+        #[cfg(not(feature = "message_spans"))]
+        {
+            None
+        }
+    }
+}
+
 /// Tuple conversion from inner message and tx/rx channels to a WithChannels struct
 ///
 /// For the case where you want both tx and rx channels.

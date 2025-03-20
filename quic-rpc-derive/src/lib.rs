@@ -164,10 +164,23 @@ pub fn rpc_requests(attr: TokenStream, item: TokenStream) -> TokenStream {
         })
         .collect::<Vec<_>>();
 
+    // Extract variant names for the match pattern
+    let variant_names = variants.iter().map(|(name, _)| name).collect::<Vec<_>>();
+
     let message_enum = quote! {
         #[derive(Debug)]
         pub enum #message_enum_name {
             #(#message_variants),*
+        }
+
+        impl #message_enum_name {
+            /// Get the parent span of the message
+            fn parent_span(&self) -> tracing::Span {
+                let span = match self {
+                    #(#message_enum_name::#variant_names(inner) => inner.parent_span_opt()),*
+                };
+                span.cloned().unwrap_or_else(|| ::tracing::Span::current())
+            }
         }
     };
 

@@ -779,6 +779,7 @@ dependencies = [
  "quote",
  "serde",
  "syn 1.0.109",
+ "tracing",
  "trybuild",
 ]
 
