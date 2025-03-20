@@ -175,7 +175,7 @@ pub fn rpc_requests(attr: TokenStream, item: TokenStream) -> TokenStream {
 
         impl #message_enum_name {
             /// Get the parent span of the message
-            fn parent_span(&self) -> tracing::Span {
+            pub fn parent_span(&self) -> tracing::Span {
                 let span = match self {
                     #(#message_enum_name::#variant_names(inner) => inner.parent_span_opt()),*
                 };
