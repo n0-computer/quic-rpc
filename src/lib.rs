@@ -427,6 +427,10 @@ pub struct WithChannels<I: Channels<S>, S: Service> {
     pub tx: <I as Channels<S>>::Tx,
     /// The request channel to receive the request from. Can be set to [`NoReceiver`] if not needed.
     pub rx: <I as Channels<S>>::Rx,
+    /// The current span where the full message was created.
+    #[cfg(feature = "message_spans")]
+    #[cfg_attr(quicrpc_docsrs, doc(cfg(feature = "message_spans")))]
+    pub span: tracing::Span,
 }
 
 /// Tuple conversion from inner message and tx/rx channels to a WithChannels struct
@@ -444,6 +448,9 @@ where
             inner,
             tx: tx.into(),
             rx: rx.into(),
+            #[cfg(feature = "message_spans")]
+            #[cfg_attr(quicrpc_docsrs, doc(cfg(feature = "message_spans")))]
+            span: tracing::Span::current(),
         }
     }
 }
@@ -463,6 +470,9 @@ where
             inner,
             tx: tx.into(),
             rx: NoReceiver,
+            #[cfg(feature = "message_spans")]
+            #[cfg_attr(quicrpc_docsrs, doc(cfg(feature = "message_spans")))]
+            span: tracing::Span::current(),
         }
     }
 }
@@ -569,7 +579,7 @@ pub mod rpc {
     use serde::{de::DeserializeOwned, Serialize};
     use smallvec::SmallVec;
     use tokio::task::JoinSet;
-    use tracing::warn;
+    use tracing::{trace_span, warn, Instrument};
 
     use crate::{
         channel::{
@@ -775,10 +785,11 @@ pub mod rpc {
         endpoint: quinn::Endpoint,
         handler: Handler<R>,
     ) {
+        let mut request_id = 0u64;
         let mut tasks = JoinSet::new();
         while let Some(incoming) = endpoint.accept().await {
             let handler = handler.clone();
-            tasks.spawn(async move {
+            let fut = async move {
                 let connection = match incoming.await {
                     Ok(connection) => connection,
                     Err(cause) => {
@@ -807,7 +818,10 @@ pub mod rpc {
                     let tx = RemoteWrite::new(send);
                     handler(msg, rx, tx).await?;
                 }
-            });
+            };
+            let span = trace_span!("rpc", id = request_id);
+            tasks.spawn(fut.instrument(span));
+            request_id += 1;
         }
     }
 }

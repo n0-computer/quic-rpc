@@ -100,13 +100,17 @@ impl ComputeActor {
         match msg {
             ComputeMessage::Sqr(sqr) => {
                 trace!("sqr {:?}", sqr);
-                let WithChannels { tx, inner, .. } = sqr;
+                let WithChannels {
+                    tx, inner, span, ..
+                } = sqr;
+                let _entered = span.enter();
                 let result = (inner.num as u128) * (inner.num as u128);
                 tx.send(result).await?;
             }
             ComputeMessage::Sum(sum) => {
                 trace!("sum {:?}", sum);
-                let WithChannels { rx, tx, .. } = sum;
+                let WithChannels { rx, tx, span, .. } = sum;
+                let _entered = span.enter();
                 let mut receiver = rx;
                 let mut total = 0;
                 while let Some(num) = receiver.recv().await? {
@@ -116,7 +120,10 @@ impl ComputeActor {
             }
             ComputeMessage::Fibonacci(fib) => {
                 trace!("fibonacci {:?}", fib);
-                let WithChannels { tx, inner, .. } = fib;
+                let WithChannels {
+                    tx, inner, span, ..
+                } = fib;
+                let _entered = span.enter();
                 let mut sender = tx;
                 let mut a = 0u64;
                 let mut b = 1u64;
@@ -129,7 +136,14 @@ impl ComputeActor {
             }
             ComputeMessage::Multiply(mult) => {
                 trace!("multiply {:?}", mult);
-                let WithChannels { rx, tx, inner } = mult;
+                let WithChannels {
+                    rx,
+                    tx,
+                    inner,
+                    span,
+                    ..
+                } = mult;
+                let _entered = span.enter();
                 let mut receiver = rx;
                 let mut sender = tx;
                 let multiplier = inner.initial;
