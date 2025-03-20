@@ -460,10 +460,10 @@ pub struct WithChannels<I: Channels<S>, S: Service> {
 
 impl<I: Channels<S> + Debug, S: Service> Debug for WithChannels<I, S> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("WithChannels")
-            .field("inner", &self.inner)
-            .field("tx", &self.tx)
-            .field("rx", &self.rx)
+        f.debug_tuple("")
+            .field(&self.inner)
+            .field(&self.tx)
+            .field(&self.rx)
             .finish_non_exhaustive()
     }
 }
@@ -624,10 +624,11 @@ impl<M, S> Clone for LocalMpscChannel<M, S> {
 pub mod rpc {
     use std::{fmt::Debug, future::Future, io, marker::PhantomData, pin::Pin, sync::Arc};
 
+    use quinn::ConnectionError;
     use serde::{de::DeserializeOwned, Serialize};
     use smallvec::SmallVec;
     use tokio::task::JoinSet;
-    use tracing::{trace_span, warn, Instrument};
+    use tracing::{trace, trace_span, warn, Instrument};
 
     use crate::{
         channel::{
@@ -852,9 +853,13 @@ pub mod rpc {
                 loop {
                     let (send, mut recv) = match connection.accept_bi().await {
                         Ok((s, r)) => (s, r),
+                        Err(ConnectionError::ApplicationClosed(cause)) if cause.error_code.into_inner() == 0 => {
+                            trace!("remote side closed connection {cause:?}");
+                            return Ok(());
+                        }
                         Err(cause) => {
                             warn!("failed to accept bi stream {cause:?}");
-                            return Ok(());
+                            return Err(cause.into());
                         }
                     };
                     let size = recv.read_varint_u64().await?.ok_or_else(|| {
