@@ -161,6 +161,18 @@ pub mod channel {
             }
         }
 
+        impl<T> Sender<T> {
+            pub fn is_rpc(&self) -> bool
+            where
+                T: 'static,
+            {
+                match self {
+                    Sender::Tokio(_) => false,
+                    Sender::Boxed(_) => true,
+                }
+            }
+        }
+
         impl<T> crate::sealed::Sealed for Sender<T> {}
         impl<T> crate::Sender for Sender<T> {}
 
@@ -281,6 +293,18 @@ pub mod channel {
             Boxed(Box<dyn BoxedSender<T>>),
         }
 
+        impl<T> Sender<T> {
+            pub fn is_rpc(&self) -> bool
+            where
+                T: 'static,
+            {
+                match self {
+                    Sender::Tokio(_) => false,
+                    Sender::Boxed(x) => x.is_rpc(),
+                }
+            }
+        }
+
         impl<T> From<tokio::sync::mpsc::Sender<T>> for Sender<T> {
             fn from(tx: tokio::sync::mpsc::Sender<T>) -> Self {
                 Self::Tokio(tx)
@@ -308,6 +332,8 @@ pub mod channel {
                 &mut self,
                 value: T,
             ) -> Pin<Box<dyn Future<Output = io::Result<bool>> + Send + '_>>;
+
+            fn is_rpc(&self) -> bool;
         }
 
         pub trait BoxedReceiver<T>: Debug + Send + Sync + 'static {
@@ -777,7 +803,7 @@ pub mod rpc {
                 let value = value;
                 self.buffer.clear();
                 self.buffer.write_length_prefixed(value)?;
-                let Some(n) = now_or_never(self.send.write(&mut self.buffer)) else {
+                let Some(n) = now_or_never(self.send.write(&self.buffer)) else {
                     return Ok(false);
                 };
                 let n = n?;
@@ -785,6 +811,10 @@ pub mod rpc {
                 self.buffer.clear();
                 Ok(true)
             })
+        }
+
+        fn is_rpc(&self) -> bool {
+            true
         }
     }
 
