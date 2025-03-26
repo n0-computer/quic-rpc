@@ -252,15 +252,11 @@ mod varint_util {
         mut write: impl std::io::Write,
         value: T,
     ) -> io::Result<()> {
-        let size = postcard::experimental::serialized_size(&value).map_err(|_| {
-            Error::new(
-                io::ErrorKind::InvalidData,
-                "Failed to calculate serialized size",
-            )
-        })? as u64;
+        let size = postcard::experimental::serialized_size(&value)
+            .map_err(|e| Error::new(io::ErrorKind::InvalidData, e))? as u64;
         write_varint_u64_sync(&mut write, size)?;
         postcard::to_io(&value, &mut write)
-            .map_err(|_| Error::new(io::ErrorKind::InvalidData, "Failed to serialize data"))?;
+            .map_err(|e| Error::new(io::ErrorKind::InvalidData, e))?;
         Ok(())
     }
 

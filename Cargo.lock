@@ -762,6 +762,7 @@ dependencies = [
  "rustls",
  "serde",
  "smallvec",
+ "thiserror 2.0.12",
  "thousands",
  "tokio",
  "tokio-util",

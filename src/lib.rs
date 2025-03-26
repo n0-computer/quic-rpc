@@ -1,5 +1,5 @@
 #![cfg_attr(quicrpc_docsrs, feature(doc_cfg))]
-use std::{fmt::Debug, future::Future, io, marker::PhantomData, ops::Deref};
+use std::{fmt::Debug, future::Future, marker::PhantomData, ops::Deref};
 
 use channel::none::NoReceiver;
 use sealed::Sealed;
@@ -261,7 +261,9 @@ pub mod channel {
         }
 
         pub trait BoxedReceiver<T>: Debug + Send + Sync + 'static {
-            fn recv(&mut self) -> Pin<Box<dyn Future<Output = std::result::Result<Option<T>, RecvError>> + Send + '_>>;
+            fn recv(
+                &mut self,
+            ) -> Pin<Box<dyn Future<Output = std::result::Result<Option<T>, RecvError>> + Send + '_>>;
         }
 
         impl<T> Debug for Sender<T> {
@@ -369,16 +371,12 @@ pub mod channel {
         impl crate::Receiver for NoReceiver {}
     }
 
-    #[derive(Debug)]
+    #[derive(Debug, thiserror::Error)]
     pub enum SendError {
+        #[error("receiver closed")]
         ReceiverClosed,
-        Io(io::Error),
-    }
-
-    impl From<io::Error> for SendError {
-        fn from(e: io::Error) -> Self {
-            Self::Io(e)
-        }
+        #[error("io error: {0}")]
+        Io(#[from] io::Error),
     }
 
     impl From<SendError> for io::Error {
@@ -390,34 +388,12 @@ pub mod channel {
         }
     }
 
-    impl std::fmt::Display for SendError {
-        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            match self {
-                SendError::ReceiverClosed => write!(f, "receiver closed"),
-                SendError::Io(e) => write!(f, "io error: {}", e),
-            }
-        }
-    }
-
-    impl std::error::Error for SendError {
-        fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-            match self {
-                SendError::Io(e) => Some(e),
-                _ => None,
-            }
-        }
-    }
-
-    #[derive(Debug)]
+    #[derive(Debug, thiserror::Error)]
     pub enum RecvError {
+        #[error("sender closed")]
         SenderClosed,
-        Io(io::Error),
-    }
-
-    impl From<io::Error> for RecvError {
-        fn from(e: io::Error) -> Self {
-            Self::Io(e)
-        }
+        #[error("io error: {0}")]
+        Io(#[from] io::Error),
     }
 
     impl From<RecvError> for io::Error {
@@ -425,24 +401,6 @@ pub mod channel {
             match e {
                 RecvError::Io(e) => e,
                 RecvError::SenderClosed => io::Error::new(io::ErrorKind::BrokenPipe, e),
-            }
-        }
-    }
-
-    impl std::fmt::Display for RecvError {
-        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            match self {
-                RecvError::SenderClosed => write!(f, "sender closed"),
-                RecvError::Io(e) => write!(f, "io error: {}", e),
-            }
-        }
-    }
-
-    impl std::error::Error for RecvError {
-        fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-            match self {
-                RecvError::SenderClosed => None,
-                RecvError::Io(e) => Some(e),
             }
         }
     }
@@ -573,6 +531,18 @@ impl<M, R, S> From<LocalMpscChannel<M, S>> for ServiceSender<M, R, S> {
     }
 }
 
+#[derive(Debug, thiserror::Error)]
+pub enum RequestError {
+    #[cfg(feature = "rpc")]
+    #[cfg_attr(quicrpc_docsrs, doc(cfg(feature = "rpc")))]
+    #[error("error establishing connection: {0}")]
+    Connect(#[from] quinn::ConnectError),
+    #[cfg(feature = "rpc")]
+    #[cfg_attr(quicrpc_docsrs, doc(cfg(feature = "rpc")))]
+    #[error("error opening stream: {0}")]
+    Connection(#[from] quinn::ConnectionError),
+}
+
 impl<M: Send + Sync + 'static, R, S: Service> ServiceSender<M, R, S> {
     pub fn local(&self) -> Option<&LocalMpscChannel<M, S>> {
         match self {
@@ -586,7 +556,10 @@ impl<M: Send + Sync + 'static, R, S: Service> ServiceSender<M, R, S> {
     pub fn request(
         &self,
     ) -> impl Future<
-        Output = io::Result<ServiceRequest<LocalMpscChannel<M, S>, rpc::RemoteRequest<R, S>>>,
+        Output = std::result::Result<
+            ServiceRequest<LocalMpscChannel<M, S>, rpc::RemoteRequest<R, S>>,
+            RequestError,
+        >,
     > + 'static {
         let cloned = match self {
             Self::Local(tx, _) => ServiceRequest::Local(tx.clone()),
@@ -600,10 +573,7 @@ impl<M: Send + Sync + 'static, R, S: Service> ServiceSender<M, R, S> {
                 #[cfg(feature = "rpc")]
                 #[cfg_attr(quicrpc_docsrs, doc(cfg(feature = "rpc")))]
                 ServiceRequest::Remote((endpoint, addr)) => {
-                    let connection = endpoint
-                        .connect(addr, "localhost")
-                        .map_err(io::Error::other)?
-                        .await?;
+                    let connection = endpoint.connect(addr, "localhost")?.await?;
                     let (send, recv) = connection.open_bi().await?;
                     Ok(ServiceRequest::Remote(rpc::RemoteRequest::new(send, recv)))
                 }
@@ -642,11 +612,20 @@ pub mod rpc {
         channel::{
             none::NoSender,
             oneshot,
-            spsc::{self, BoxedReceiver, BoxedSender}, RecvError,
+            spsc::{self, BoxedReceiver, BoxedSender},
+            RecvError,
         },
         util::{now_or_never, AsyncReadVarintExt, WriteVarintExt},
         RpcMessage,
     };
+
+    #[derive(Debug, thiserror::Error)]
+    pub enum WriteError {
+        #[error("error serializing: {0}")]
+        Io(#[from] io::Error),
+        #[error("error writing to stream: {0}")]
+        Quinn(#[from] quinn::WriteError),
+    }
 
     #[derive(Debug)]
     pub struct RemoteRequest<R, S>(
@@ -660,7 +639,10 @@ pub mod rpc {
             Self(send, recv, PhantomData)
         }
 
-        pub async fn write(self, msg: impl Into<R>) -> io::Result<(RemoteWrite, RemoteRead)>
+        pub async fn write(
+            self,
+            msg: impl Into<R>,
+        ) -> std::result::Result<(RemoteWrite, RemoteRead), WriteError>
         where
             R: Serialize,
         {
@@ -766,7 +748,10 @@ pub mod rpc {
     }
 
     impl<T: RpcMessage> BoxedReceiver<T> for QuinnReceiver<T> {
-        fn recv(&mut self) -> Pin<Box<dyn Future<Output = std::result::Result<Option<T>, RecvError>> + Send + '_>> {
+        fn recv(
+            &mut self,
+        ) -> Pin<Box<dyn Future<Output = std::result::Result<Option<T>, RecvError>> + Send + '_>>
+        {
             Box::pin(async {
                 let read = &mut self.recv;
                 let Some(size) = read.read_varint_u64().await? else {
