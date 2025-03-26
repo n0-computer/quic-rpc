@@ -200,7 +200,7 @@ impl ComputeApi {
                 Ok(rx)
             }
             ServiceRequest::Remote(request) => {
-                let (rx, _tx) = request.write(msg).await?;
+                let (_tx, rx) = request.write(msg).await?;
                 Ok(rx.into())
             }
         }
@@ -216,7 +216,7 @@ impl ComputeApi {
                 Ok((num_tx, sum_rx))
             }
             ServiceRequest::Remote(request) => {
-                let (rx, tx) = request.write(msg).await?;
+                let (tx, rx) = request.write(msg).await?;
                 Ok((tx.into(), rx.into()))
             }
         }
@@ -231,7 +231,7 @@ impl ComputeApi {
                 Ok(rx)
             }
             ServiceRequest::Remote(request) => {
-                let (rx, _tx) = request.write(msg).await?;
+                let (_tx, rx) = request.write(msg).await?;
                 Ok(rx.into())
             }
         }
@@ -250,7 +250,7 @@ impl ComputeApi {
                 Ok((in_tx, out_rx))
             }
             ServiceRequest::Remote(request) => {
-                let (rx, tx) = request.write(msg).await?;
+                let (tx, rx) = request.write(msg).await?;
                 Ok((tx.into(), rx.into()))
             }
         }

@@ -638,6 +638,7 @@ pub mod rpc {
 
     use crate::{
         channel::{
+            none::NoSender,
             oneshot,
             spsc::{self, BoxedReceiver, BoxedSender},
         },
@@ -657,7 +658,7 @@ pub mod rpc {
             Self(send, recv, PhantomData)
         }
 
-        pub async fn write(self, msg: impl Into<R>) -> io::Result<(RemoteRead, RemoteWrite)>
+        pub async fn write(self, msg: impl Into<R>) -> io::Result<(RemoteWrite, RemoteRead)>
         where
             R: Serialize,
         {
@@ -666,7 +667,7 @@ pub mod rpc {
             let mut buf = SmallVec::<[u8; 128]>::new();
             buf.write_length_prefixed(msg)?;
             send.write_all(&buf).await?;
-            Ok((RemoteRead(recv), RemoteWrite(send)))
+            Ok((RemoteWrite(send), RemoteRead(recv)))
         }
     }
 
@@ -715,6 +716,13 @@ pub mod rpc {
     impl RemoteWrite {
         pub(crate) fn new(send: quinn::SendStream) -> Self {
             Self(send)
+        }
+    }
+
+    impl From<RemoteWrite> for NoSender {
+        fn from(write: RemoteWrite) -> Self {
+            let _ = write;
+            NoSender
         }
     }
 

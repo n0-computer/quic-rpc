@@ -156,7 +156,7 @@ impl StorageApi {
                 Ok(rx)
             }
             ServiceRequest::Remote(request) => {
-                let (rx, _tx) = request.write(msg).await?;
+                let (_tx, rx) = request.write(msg).await?;
                 Ok(rx.into())
             }
         }
@@ -171,7 +171,7 @@ impl StorageApi {
                 Ok(rx)
             }
             ServiceRequest::Remote(request) => {
-                let (rx, _tx) = request.write(msg).await?;
+                let (_tx, rx) = request.write(msg).await?;
                 Ok(rx.into())
             }
         }
@@ -186,7 +186,7 @@ impl StorageApi {
                 Ok(rx)
             }
             ServiceRequest::Remote(request) => {
-                let (rx, _tx) = request.write(msg).await?;
+                let (_tx, rx) = request.write(msg).await?;
                 Ok(rx.into())
             }
         }
