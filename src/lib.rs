@@ -7,6 +7,8 @@ use serde::{de::DeserializeOwned, Serialize};
 #[cfg(feature = "rpc")]
 #[cfg_attr(quicrpc_docsrs, doc(cfg(feature = "rpc")))]
 pub mod util;
+#[cfg(not(feature = "rpc"))]
+mod util;
 
 /// Requirements for a RPC message
 ///
@@ -435,15 +437,9 @@ impl<I: Channels<S> + Debug, S: Service> Debug for WithChannels<I, S> {
 }
 
 impl<I: Channels<S>, S: Service> WithChannels<I, S> {
+    #[cfg(feature = "message_spans")]
     pub fn parent_span_opt(&self) -> Option<&tracing::Span> {
-        #[cfg(feature = "message_spans")]
-        {
-            Some(&self.span)
-        }
-        #[cfg(not(feature = "message_spans"))]
-        {
-            None
-        }
+        Some(&self.span)
     }
 }
 
@@ -546,7 +542,9 @@ pub enum RequestError {
 impl From<RequestError> for io::Error {
     fn from(e: RequestError) -> Self {
         match e {
+            #[cfg(feature = "rpc")]
             RequestError::Connect(e) => io::Error::other(e),
+            #[cfg(feature = "rpc")]
             RequestError::Connection(e) => e.into(),
         }
     }
@@ -557,7 +555,6 @@ impl<M: Send + Sync + 'static, R, S: Service> ServiceSender<M, R, S> {
         match self {
             Self::Local(tx, _) => Some(tx),
             #[cfg(feature = "rpc")]
-            #[cfg_attr(quicrpc_docsrs, doc(cfg(feature = "rpc")))]
             Self::Remote(_, _, _) => None,
         }
     }

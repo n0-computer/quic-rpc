@@ -143,6 +143,7 @@ mod quinn_setup_utils {
 #[cfg_attr(quicrpc_docsrs, doc(cfg(feature = "test")))]
 pub use quinn_setup_utils::*;
 
+#[cfg(feature = "rpc")]
 mod varint_util {
     use std::{
         future::Future,
@@ -285,6 +286,7 @@ mod varint_util {
         }
     }
 }
+#[cfg(feature = "rpc")]
 pub use varint_util::{AsyncReadVarintExt, WriteVarintExt};
 
 mod fuse_wrapper {
@@ -311,6 +313,7 @@ mod fuse_wrapper {
 }
 pub use fuse_wrapper::FusedOneshotReceiver;
 
+#[cfg(feature = "rpc")]
 mod now_or_never {
     use std::{
         future::Future,
@@ -353,4 +356,5 @@ mod now_or_never {
         }
     }
 }
+#[cfg(feature = "rpc")]
 pub use now_or_never::now_or_never;
