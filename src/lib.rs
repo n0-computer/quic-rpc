@@ -1,5 +1,5 @@
 #![cfg_attr(quicrpc_docsrs, feature(doc_cfg))]
-use std::{fmt::Debug, future::Future, marker::PhantomData, ops::Deref};
+use std::{fmt::Debug, future::Future, io, marker::PhantomData, ops::Deref};
 
 use channel::none::NoReceiver;
 use sealed::Sealed;
@@ -543,6 +543,15 @@ pub enum RequestError {
     Connection(#[from] quinn::ConnectionError),
 }
 
+impl From<RequestError> for io::Error {
+    fn from(e: RequestError) -> Self {
+        match e {
+            RequestError::Connect(e) => io::Error::other(e),
+            RequestError::Connection(e) => e.into(),
+        }
+    }
+}
+
 impl<M: Send + Sync + 'static, R, S: Service> ServiceSender<M, R, S> {
     pub fn local(&self) -> Option<&LocalMpscChannel<M, S>> {
         match self {
@@ -625,6 +634,15 @@ pub mod rpc {
         Io(#[from] io::Error),
         #[error("error writing to stream: {0}")]
         Quinn(#[from] quinn::WriteError),
+    }
+
+    impl From<WriteError> for io::Error {
+        fn from(e: WriteError) -> Self {
+            match e {
+                WriteError::Io(e) => e,
+                WriteError::Quinn(e) => e.into(),
+            }
+        }
     }
 
     #[derive(Debug)]
