@@ -71,9 +71,8 @@ pub mod channel {
     pub mod oneshot {
         use std::{fmt::Debug, future::Future, io, pin::Pin, task};
 
+        use super::{RecvError, SendError};
         use crate::util::FusedOneshotReceiver;
-
-        use super::SendError;
 
         pub fn channel<T>() -> (Sender<T>, Receiver<T>) {
             let (tx, rx) = tokio::sync::oneshot::channel();
@@ -147,14 +146,12 @@ pub mod channel {
         }
 
         impl<T> Future for Receiver<T> {
-            type Output = io::Result<T>;
+            type Output = std::result::Result<T, RecvError>;
 
             fn poll(self: Pin<&mut Self>, cx: &mut task::Context) -> task::Poll<Self::Output> {
                 match self.get_mut() {
-                    Self::Tokio(rx) => Pin::new(rx)
-                        .poll(cx)
-                        .map_err(|e| io::Error::new(io::ErrorKind::BrokenPipe, e)),
-                    Self::Boxed(rx) => Pin::new(rx).poll(cx),
+                    Self::Tokio(rx) => Pin::new(rx).poll(cx).map_err(|_| RecvError::SenderClosed),
+                    Self::Boxed(rx) => Pin::new(rx).poll(cx).map_err(RecvError::Io),
                 }
             }
         }
@@ -207,9 +204,8 @@ pub mod channel {
     pub mod spsc {
         use std::{fmt::Debug, future::Future, io, pin::Pin};
 
+        use super::{RecvError, SendError};
         use crate::RpcMessage;
-
-        use super::SendError;
 
         pub fn channel<T>(buffer: usize) -> (Sender<T>, Receiver<T>) {
             let (tx, rx) = tokio::sync::mpsc::channel(buffer);
@@ -265,7 +261,7 @@ pub mod channel {
         }
 
         pub trait BoxedReceiver<T>: Debug + Send + Sync + 'static {
-            fn recv(&mut self) -> Pin<Box<dyn Future<Output = io::Result<Option<T>>> + Send + '_>>;
+            fn recv(&mut self) -> Pin<Box<dyn Future<Output = std::result::Result<Option<T>, RecvError>> + Send + '_>>;
         }
 
         impl<T> Debug for Sender<T> {
@@ -319,10 +315,10 @@ pub mod channel {
             /// cleanly closed the connection.
             ///
             /// Returns an an io error if there was an error receiving the message.
-            pub async fn recv(&mut self) -> io::Result<Option<T>> {
+            pub async fn recv(&mut self) -> std::result::Result<Option<T>, RecvError> {
                 match self {
                     Self::Tokio(rx) => Ok(rx.recv().await),
-                    Self::Boxed(rx) => rx.recv().await,
+                    Self::Boxed(rx) => Ok(rx.recv().await?),
                 }
             }
         }
@@ -373,7 +369,6 @@ pub mod channel {
         impl crate::Receiver for NoReceiver {}
     }
 
-
     #[derive(Debug)]
     pub enum SendError {
         ReceiverClosed,
@@ -409,6 +404,45 @@ pub mod channel {
             match self {
                 SendError::Io(e) => Some(e),
                 _ => None,
+            }
+        }
+    }
+
+    #[derive(Debug)]
+    pub enum RecvError {
+        SenderClosed,
+        Io(io::Error),
+    }
+
+    impl From<io::Error> for RecvError {
+        fn from(e: io::Error) -> Self {
+            Self::Io(e)
+        }
+    }
+
+    impl From<RecvError> for io::Error {
+        fn from(e: RecvError) -> Self {
+            match e {
+                RecvError::Io(e) => e,
+                RecvError::SenderClosed => io::Error::new(io::ErrorKind::BrokenPipe, e),
+            }
+        }
+    }
+
+    impl std::fmt::Display for RecvError {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            match self {
+                RecvError::SenderClosed => write!(f, "sender closed"),
+                RecvError::Io(e) => write!(f, "io error: {}", e),
+            }
+        }
+    }
+
+    impl std::error::Error for RecvError {
+        fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+            match self {
+                RecvError::SenderClosed => None,
+                RecvError::Io(e) => Some(e),
             }
         }
     }
@@ -608,7 +642,7 @@ pub mod rpc {
         channel::{
             none::NoSender,
             oneshot,
-            spsc::{self, BoxedReceiver, BoxedSender},
+            spsc::{self, BoxedReceiver, BoxedSender}, RecvError,
         },
         util::{now_or_never, AsyncReadVarintExt, WriteVarintExt},
         RpcMessage,
@@ -732,7 +766,7 @@ pub mod rpc {
     }
 
     impl<T: RpcMessage> BoxedReceiver<T> for QuinnReceiver<T> {
-        fn recv(&mut self) -> Pin<Box<dyn Future<Output = io::Result<Option<T>>> + Send + '_>> {
+        fn recv(&mut self) -> Pin<Box<dyn Future<Output = std::result::Result<Option<T>, RecvError>> + Send + '_>> {
             Box::pin(async {
                 let read = &mut self.recv;
                 let Some(size) = read.read_varint_u64().await? else {
