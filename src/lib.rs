@@ -65,11 +65,15 @@ use wasm_browser::*;
 
 /// Channels that abstract over local or remote sending
 pub mod channel {
+    use std::io;
+
     /// Oneshot channel, similar to tokio's oneshot channel
     pub mod oneshot {
         use std::{fmt::Debug, future::Future, io, pin::Pin, task};
 
         use crate::util::FusedOneshotReceiver;
+
+        use super::SendError;
 
         pub fn channel<T>() -> (Sender<T>, Receiver<T>) {
             let (tx, rx) = tokio::sync::oneshot::channel();
@@ -109,45 +113,6 @@ pub mod channel {
                 match value {
                     Sender::Tokio(tx) => Ok(tx),
                     Sender::Boxed(_) => Err(value),
-                }
-            }
-        }
-
-        #[derive(Debug)]
-        pub enum SendError {
-            ReceiverClosed,
-            Io(io::Error),
-        }
-
-        impl From<SendError> for io::Error {
-            fn from(e: SendError) -> Self {
-                match e {
-                    SendError::ReceiverClosed => io::Error::new(io::ErrorKind::BrokenPipe, e),
-                    SendError::Io(e) => e,
-                }
-            }
-        }
-
-        impl From<io::Error> for SendError {
-            fn from(e: io::Error) -> Self {
-                Self::Io(e)
-            }
-        }
-
-        impl std::fmt::Display for SendError {
-            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                match self {
-                    SendError::ReceiverClosed => write!(f, "receiver closed"),
-                    SendError::Io(e) => write!(f, "io error: {}", e),
-                }
-            }
-        }
-
-        impl std::error::Error for SendError {
-            fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-                match self {
-                    SendError::Io(e) => Some(e),
-                    _ => None,
                 }
             }
         }
@@ -244,48 +209,11 @@ pub mod channel {
 
         use crate::RpcMessage;
 
+        use super::SendError;
+
         pub fn channel<T>(buffer: usize) -> (Sender<T>, Receiver<T>) {
             let (tx, rx) = tokio::sync::mpsc::channel(buffer);
             (tx.into(), rx.into())
-        }
-
-        #[derive(Debug)]
-        pub enum SendError {
-            ReceiverClosed,
-            Io(io::Error),
-        }
-
-        impl From<io::Error> for SendError {
-            fn from(e: io::Error) -> Self {
-                Self::Io(e)
-            }
-        }
-
-        impl From<SendError> for io::Error {
-            fn from(e: SendError) -> Self {
-                match e {
-                    SendError::ReceiverClosed => io::Error::new(io::ErrorKind::BrokenPipe, e),
-                    SendError::Io(e) => e,
-                }
-            }
-        }
-
-        impl std::fmt::Display for SendError {
-            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                match self {
-                    SendError::ReceiverClosed => write!(f, "receiver closed"),
-                    SendError::Io(e) => write!(f, "io error: {}", e),
-                }
-            }
-        }
-
-        impl std::error::Error for SendError {
-            fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-                match self {
-                    SendError::Io(e) => Some(e),
-                    _ => None,
-                }
-            }
         }
 
         pub enum Sender<T> {
@@ -443,6 +371,46 @@ pub mod channel {
 
         impl Sealed for NoReceiver {}
         impl crate::Receiver for NoReceiver {}
+    }
+
+
+    #[derive(Debug)]
+    pub enum SendError {
+        ReceiverClosed,
+        Io(io::Error),
+    }
+
+    impl From<io::Error> for SendError {
+        fn from(e: io::Error) -> Self {
+            Self::Io(e)
+        }
+    }
+
+    impl From<SendError> for io::Error {
+        fn from(e: SendError) -> Self {
+            match e {
+                SendError::ReceiverClosed => io::Error::new(io::ErrorKind::BrokenPipe, e),
+                SendError::Io(e) => e,
+            }
+        }
+    }
+
+    impl std::fmt::Display for SendError {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            match self {
+                SendError::ReceiverClosed => write!(f, "receiver closed"),
+                SendError::Io(e) => write!(f, "io error: {}", e),
+            }
+        }
+    }
+
+    impl std::error::Error for SendError {
+        fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+            match self {
+                SendError::Io(e) => Some(e),
+                _ => None,
+            }
+        }
     }
 }
 
