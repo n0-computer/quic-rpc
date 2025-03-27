@@ -15,7 +15,7 @@ use quic_rpc::{
     channel::{oneshot, spsc},
     rpc::{listen, Handler, RemoteRead},
     util::{make_client_endpoint, make_server_endpoint},
-    LocalMpscChannel, Service, ServiceRequest, ServiceSender, WithChannels,
+    LocalMpscChannel, Request, Service, ServiceSender, WithChannels,
 };
 use quic_rpc_derive::rpc_requests;
 use serde::{Deserialize, Serialize};
@@ -194,12 +194,12 @@ impl ComputeApi {
     pub async fn sqr(&self, num: u64) -> anyhow::Result<oneshot::Receiver<u128>> {
         let msg = Sqr { num };
         match self.inner.request().await? {
-            ServiceRequest::Local(request) => {
+            Request::Local(request) => {
                 let (tx, rx) = oneshot::channel();
                 request.send((msg, tx)).await?;
                 Ok(rx)
             }
-            ServiceRequest::Remote(request) => {
+            Request::Remote(request) => {
                 let (_tx, rx) = request.write(msg).await?;
                 Ok(rx.into())
             }
@@ -209,13 +209,13 @@ impl ComputeApi {
     pub async fn sum(&self) -> anyhow::Result<(spsc::Sender<i64>, oneshot::Receiver<i64>)> {
         let msg = Sum;
         match self.inner.request().await? {
-            ServiceRequest::Local(request) => {
+            Request::Local(request) => {
                 let (num_tx, num_rx) = spsc::channel(10);
                 let (sum_tx, sum_rx) = oneshot::channel();
                 request.send((msg, sum_tx, num_rx)).await?;
                 Ok((num_tx, sum_rx))
             }
-            ServiceRequest::Remote(request) => {
+            Request::Remote(request) => {
                 let (tx, rx) = request.write(msg).await?;
                 Ok((tx.into(), rx.into()))
             }
@@ -225,12 +225,12 @@ impl ComputeApi {
     pub async fn fibonacci(&self, max: u64) -> anyhow::Result<spsc::Receiver<u64>> {
         let msg = Fibonacci { max };
         match self.inner.request().await? {
-            ServiceRequest::Local(request) => {
+            Request::Local(request) => {
                 let (tx, rx) = spsc::channel(128);
                 request.send((msg, tx)).await?;
                 Ok(rx)
             }
-            ServiceRequest::Remote(request) => {
+            Request::Remote(request) => {
                 let (_tx, rx) = request.write(msg).await?;
                 Ok(rx.into())
             }
@@ -243,13 +243,13 @@ impl ComputeApi {
     ) -> anyhow::Result<(spsc::Sender<u64>, spsc::Receiver<u64>)> {
         let msg = Multiply { initial };
         match self.inner.request().await? {
-            ServiceRequest::Local(request) => {
+            Request::Local(request) => {
                 let (in_tx, in_rx) = spsc::channel(128);
                 let (out_tx, out_rx) = spsc::channel(128);
                 request.send((msg, out_tx, in_rx)).await?;
                 Ok((in_tx, out_rx))
             }
-            ServiceRequest::Remote(request) => {
+            Request::Remote(request) => {
                 let (tx, rx) = request.write(msg).await?;
                 Ok((tx.into(), rx.into()))
             }

@@ -442,7 +442,7 @@ impl<I: Channels<S> + Debug, S: Service> Debug for WithChannels<I, S> {
             .field(&self.inner)
             .field(&self.tx)
             .field(&self.rx)
-            .finish_non_exhaustive()
+            .finish()
     }
 }
 
@@ -512,6 +512,9 @@ pub enum ServiceSender<M, R, S> {
     #[cfg(feature = "rpc")]
     #[cfg_attr(quicrpc_docsrs, doc(cfg(feature = "rpc")))]
     Remote(quinn::Endpoint, std::net::SocketAddr, PhantomData<(R, S)>),
+    #[cfg(not(feature = "rpc"))]
+    #[cfg_attr(quicrpc_docsrs, doc(cfg(feature = "rpc")))]
+    Remote(PhantomData<(R, S)>),
 }
 
 impl<M, R, S> From<tokio::sync::mpsc::Sender<M>> for ServiceSender<M, R, S> {
@@ -525,8 +528,9 @@ impl<M, R, S> Clone for ServiceSender<M, R, S> {
         match self {
             Self::Local(tx, _) => Self::Local(tx.clone(), PhantomData),
             #[cfg(feature = "rpc")]
-            #[cfg_attr(quicrpc_docsrs, doc(cfg(feature = "rpc")))]
             Self::Remote(endpoint, addr, _) => Self::Remote(endpoint.clone(), *addr, PhantomData),
+            #[cfg(not(feature = "rpc"))]
+            Self::Remote(_) => unreachable!(),
         }
     }
 }
@@ -592,36 +596,41 @@ impl<M: Send + Sync + 'static, R, S: Service> ServiceSender<M, R, S> {
     pub fn local(&self) -> Option<&LocalMpscChannel<M, S>> {
         match self {
             Self::Local(tx, _) => Some(tx),
-            #[cfg(feature = "rpc")]
-            Self::Remote(_, _, _) => None,
+            Self::Remote(..) => None,
         }
     }
 
+    #[allow(clippy::type_complexity)]
     pub fn request(
         &self,
     ) -> impl Future<
-        Output = std::result::Result<
-            ServiceRequest<LocalMpscChannel<M, S>, rpc::RemoteRequest<R, S>>,
-            RequestError,
-        >,
+        Output = Result<Request<LocalMpscChannel<M, S>, rpc::RemoteRequest<R, S>>, RequestError>,
     > + 'static {
-        let cloned = match self {
-            Self::Local(tx, _) => ServiceRequest::Local(tx.clone()),
-            #[cfg(feature = "rpc")]
-            #[cfg_attr(quicrpc_docsrs, doc(cfg(feature = "rpc")))]
-            Self::Remote(endpoint, addr, _) => ServiceRequest::Remote((endpoint.clone(), *addr)),
-        };
-        async move {
-            match cloned {
-                ServiceRequest::Local(tx) => Ok(ServiceRequest::Local(tx.clone())),
-                #[cfg(feature = "rpc")]
-                #[cfg_attr(quicrpc_docsrs, doc(cfg(feature = "rpc")))]
-                ServiceRequest::Remote((endpoint, addr)) => {
-                    let connection = endpoint.connect(addr, "localhost")?.await?;
-                    let (send, recv) = connection.open_bi().await?;
-                    Ok(ServiceRequest::Remote(rpc::RemoteRequest::new(send, recv)))
+        #[cfg(feature = "rpc")]
+        {
+            let cloned = match self {
+                Self::Local(tx, _) => Request::Local(tx.clone()),
+                Self::Remote(endpoint, addr, _) => Request::Remote((endpoint.clone(), *addr)),
+            };
+            async move {
+                match cloned {
+                    Request::Local(tx) => Ok(Request::Local(tx.clone())),
+                    #[cfg(feature = "rpc")]
+                    Request::Remote((endpoint, addr)) => {
+                        let connection = endpoint.connect(addr, "localhost")?.await?;
+                        let (send, recv) = connection.open_bi().await?;
+                        Ok(Request::Remote(rpc::RemoteRequest::new(send, recv)))
+                    }
                 }
             }
+        }
+        #[cfg(not(feature = "rpc"))]
+        {
+            let Self::Local(tx, _) = self else {
+                unreachable!()
+            };
+            let tx = tx.clone();
+            async move { Ok(Request::Local(tx)) }
         }
     }
 }
@@ -641,6 +650,10 @@ impl<M, S> Clone for LocalMpscChannel<M, S> {
     }
 }
 
+#[cfg(not(feature = "rpc"))]
+pub mod rpc {
+    pub struct RemoteRequest<R, S>(std::marker::PhantomData<(R, S)>);
+}
 #[cfg(feature = "rpc")]
 #[cfg_attr(quicrpc_docsrs, doc(cfg(feature = "rpc")))]
 pub mod rpc {
@@ -944,7 +957,7 @@ pub mod rpc {
 }
 
 #[derive(Debug)]
-pub enum ServiceRequest<L, R> {
+pub enum Request<L, R> {
     Local(L),
     Remote(R),
 }
