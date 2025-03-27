@@ -373,6 +373,11 @@ pub mod channel {
         impl crate::Receiver for NoReceiver {}
     }
 
+    /// Error when sending a oneshot or spsc message. For local communication,
+    /// the only thing that can go wrong is that the receiver has been dropped.
+    ///
+    /// For rpc communication, there can be any number of errors, so this is a
+    /// generic io error.
     #[derive(Debug, thiserror::Error)]
     pub enum SendError {
         #[error("receiver closed")]
@@ -390,6 +395,11 @@ pub mod channel {
         }
     }
 
+    /// Error when receiving a oneshot or spsc message. For local communication,
+    /// the only thing that can go wrong is that the sender has been closed.
+    ///
+    /// For rpc communication, there can be any number of errors, so this is a
+    /// generic io error.
     #[derive(Debug, thiserror::Error)]
     pub enum RecvError {
         #[error("sender closed")]
@@ -527,6 +537,8 @@ impl<M, R, S> From<LocalMpscChannel<M, S>> for ServiceSender<M, R, S> {
     }
 }
 
+/// Error when opening a request. When cross-process rpc is disabled, this is
+/// an empty enum since local requests can not fail.
 #[derive(Debug, thiserror::Error)]
 pub enum RequestError {
     #[cfg(feature = "rpc")]
@@ -537,6 +549,32 @@ pub enum RequestError {
     #[cfg_attr(quicrpc_docsrs, doc(cfg(feature = "rpc")))]
     #[error("error opening stream: {0}")]
     Connection(#[from] quinn::ConnectionError),
+}
+
+/// Error type that subsumes all possible errors in this crate, for convenience.
+#[derive(Debug, thiserror::Error)]
+pub enum Error {
+    #[error("request error: {0}")]
+    Request(#[from] RequestError),
+    #[error("send error: {0}")]
+    Send(#[from] channel::SendError),
+    #[error("recv error: {0}")]
+    Recv(#[from] channel::RecvError),
+    #[cfg(feature = "rpc")]
+    #[error("recv error: {0}")]
+    Write(#[from] rpc::WriteError),
+}
+
+impl From<Error> for io::Error {
+    fn from(e: Error) -> Self {
+        match e {
+            Error::Request(e) => e.into(),
+            Error::Send(e) => e.into(),
+            Error::Recv(e) => e.into(),
+            #[cfg(feature = "rpc")]
+            Error::Write(e) => e.into(),
+        }
+    }
 }
 
 impl From<RequestError> for io::Error {
@@ -619,7 +657,7 @@ pub mod rpc {
             none::NoSender,
             oneshot,
             spsc::{self, BoxedReceiver, BoxedSender},
-            RecvError,
+            RecvError, SendError,
         },
         util::{now_or_never, AsyncReadVarintExt, WriteVarintExt},
         RpcMessage,
@@ -843,7 +881,11 @@ pub mod rpc {
 
     /// Type alias for a handler fn for remote requests
     pub type Handler<R> = Arc<
-        dyn Fn(R, RemoteRead, RemoteWrite) -> crate::BoxedFuture<'static, io::Result<()>>
+        dyn Fn(
+                R,
+                RemoteRead,
+                RemoteWrite,
+            ) -> crate::BoxedFuture<'static, std::result::Result<(), SendError>>
             + Send
             + Sync
             + 'static,
@@ -927,13 +969,14 @@ impl<M: Send, S: Service> LocalMpscChannel<M, S> {
 mod send_fut {
     use std::{
         future::Future,
-        io,
         pin::Pin,
         task::{Context, Poll},
     };
 
     use tokio::sync::mpsc::Sender;
     use tokio_util::sync::PollSender;
+
+    use crate::channel::SendError;
 
     pub struct SendFut<T: Send> {
         poll_sender: PollSender<T>,
@@ -950,7 +993,7 @@ mod send_fut {
     }
 
     impl<T: Send + Unpin> Future for SendFut<T> {
-        type Output = io::Result<()>;
+        type Output = std::result::Result<(), SendError>;
 
         fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
             let this = self.get_mut();
@@ -970,10 +1013,7 @@ mod send_fut {
                 }
                 Poll::Ready(Err(_)) => {
                     // Channel is closed
-                    Poll::Ready(Err(io::Error::new(
-                        io::ErrorKind::BrokenPipe,
-                        "Channel closed",
-                    )))
+                    Poll::Ready(Err(SendError::ReceiverClosed))
                 }
                 Poll::Pending => {
                     // Restore the value and wait
