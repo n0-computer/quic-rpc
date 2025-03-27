@@ -399,7 +399,7 @@ async fn bench(api: ComputeApi, n: u64) -> anyhow::Result<()> {
             i += 1;
         }
         let rps = ((n as f64) / t0.elapsed().as_secs_f64()).round() as u64;
-        assert_eq!(sum, (0..n).map(|x| x * 2).sum());
+        assert_eq!(sum, (0..n).map(|x| x * 2).sum::<u64>());
         clear_line()?;
         println!("bidi seq {} rps", rps.separate_with_underscores());
         handle.await??;
