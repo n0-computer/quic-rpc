@@ -1,11 +1,11 @@
-//! Memory transport implementation using [flume]
-//!
-//! [flume]: https://docs.rs/flume/
+//! Memory transport implementation using [tokio::sync::mpsc::channel].
 use core::fmt;
-use std::{error, fmt::Display, marker::PhantomData, pin::Pin, result, task::Poll};
+use std::{error, fmt::Display, pin::Pin, result, task::Poll};
 
 use futures_lite::{Future, Stream};
 use futures_sink::Sink;
+use tokio_stream::wrappers::ReceiverStream;
+use tokio_util::sync::PollSender;
 
 use super::StreamTypes;
 use crate::{
@@ -26,7 +26,7 @@ impl fmt::Display for RecvError {
 }
 
 /// Sink for memory channels
-pub struct SendSink<T: RpcMessage>(pub(crate) flume::r#async::SendSink<'static, T>);
+pub struct SendSink<T: RpcMessage>(pub(crate) tokio_util::sync::PollSender<T>);
 
 impl<T: RpcMessage> fmt::Debug for SendSink<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -72,7 +72,7 @@ impl<T: RpcMessage> Sink<T> for SendSink<T> {
 }
 
 /// Stream for memory channels
-pub struct RecvStream<T: RpcMessage>(pub(crate) flume::r#async::RecvStream<'static, T>);
+pub struct RecvStream<T: RpcMessage>(pub(crate) tokio_stream::wrappers::ReceiverStream<T>);
 
 impl<T: RpcMessage> fmt::Debug for RecvStream<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -100,20 +100,12 @@ impl error::Error for RecvError {}
 /// A flume based listener.
 ///
 /// Created using [channel].
-pub struct FlumeListener<In: RpcMessage, Out: RpcMessage> {
+pub struct MemListener<In: RpcMessage, Out: RpcMessage> {
     #[allow(clippy::type_complexity)]
-    stream: flume::Receiver<(SendSink<Out>, RecvStream<In>)>,
+    stream: tokio::sync::mpsc::Receiver<(SendSink<Out>, RecvStream<In>)>,
 }
 
-impl<In: RpcMessage, Out: RpcMessage> Clone for FlumeListener<In, Out> {
-    fn clone(&self) -> Self {
-        Self {
-            stream: self.stream.clone(),
-        }
-    }
-}
-
-impl<In: RpcMessage, Out: RpcMessage> fmt::Debug for FlumeListener<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> fmt::Debug for MemListener<In, Out> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("FlumeListener")
             .field("stream", &self.stream)
@@ -121,7 +113,7 @@ impl<In: RpcMessage, Out: RpcMessage> fmt::Debug for FlumeListener<In, Out> {
     }
 }
 
-impl<In: RpcMessage, Out: RpcMessage> ConnectionErrors for FlumeListener<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> ConnectionErrors for MemListener<In, Out> {
     type SendError = self::SendError;
     type RecvError = self::RecvError;
     type OpenError = self::OpenError;
@@ -130,22 +122,28 @@ impl<In: RpcMessage, Out: RpcMessage> ConnectionErrors for FlumeListener<In, Out
 
 type Socket<In, Out> = (self::SendSink<Out>, self::RecvStream<In>);
 
-/// Future returned by [FlumeConnector::open]
+/// Future returned by [FlumeConnection::open]
 pub struct OpenFuture<In: RpcMessage, Out: RpcMessage> {
-    inner: flume::r#async::SendFut<'static, Socket<Out, In>>,
+    inner: PollSender<Socket<Out, In>>,
+    send: Option<Socket<Out, In>>,
     res: Option<Socket<In, Out>>,
 }
 
 impl<In: RpcMessage, Out: RpcMessage> fmt::Debug for OpenFuture<In, Out> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("OpenFuture").finish()
+        f.debug_struct("OpenBiFuture").finish()
     }
 }
 
 impl<In: RpcMessage, Out: RpcMessage> OpenFuture<In, Out> {
-    fn new(inner: flume::r#async::SendFut<'static, Socket<Out, In>>, res: Socket<In, Out>) -> Self {
+    fn new(
+        inner: PollSender<Socket<Out, In>>,
+        send: Socket<Out, In>,
+        res: Socket<In, Out>,
+    ) -> Self {
         Self {
             inner,
+            send: Some(send),
             res: Some(res),
         }
     }
@@ -158,55 +156,37 @@ impl<In: RpcMessage, Out: RpcMessage> Future for OpenFuture<In, Out> {
         mut self: Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Self::Output> {
-        match Pin::new(&mut self.inner).poll(cx) {
-            Poll::Ready(Ok(())) => self
-                .res
-                .take()
-                .map(|x| Poll::Ready(Ok(x)))
-                .unwrap_or(Poll::Pending),
+        match Pin::new(&mut self.inner).poll_reserve(cx) {
+            Poll::Ready(Ok(())) => {
+                let Some(item) = self.send.take() else {
+                    return Poll::Pending;
+                };
+                let Ok(_) = self.inner.send_item(item) else {
+                    return Poll::Ready(Err(self::OpenError::RemoteDropped));
+                };
+                self.res
+                    .take()
+                    .map(|x| Poll::Ready(Ok(x)))
+                    .unwrap_or(Poll::Pending)
+            }
             Poll::Ready(Err(_)) => Poll::Ready(Err(self::OpenError::RemoteDropped)),
             Poll::Pending => Poll::Pending,
         }
     }
 }
 
-/// Future returned by [FlumeListener::accept]
-pub struct AcceptFuture<In: RpcMessage, Out: RpcMessage> {
-    wrapped: flume::r#async::RecvFut<'static, (SendSink<Out>, RecvStream<In>)>,
-    _p: PhantomData<(In, Out)>,
-}
-
-impl<In: RpcMessage, Out: RpcMessage> fmt::Debug for AcceptFuture<In, Out> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("AcceptFuture").finish()
-    }
-}
-
-impl<In: RpcMessage, Out: RpcMessage> Future for AcceptFuture<In, Out> {
-    type Output = result::Result<(SendSink<Out>, RecvStream<In>), AcceptError>;
-
-    fn poll(mut self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
-        match Pin::new(&mut self.wrapped).poll(cx) {
-            Poll::Ready(Ok((send, recv))) => Poll::Ready(Ok((send, recv))),
-            Poll::Ready(Err(_)) => Poll::Ready(Err(AcceptError::RemoteDropped)),
-            Poll::Pending => Poll::Pending,
-        }
-    }
-}
-
-impl<In: RpcMessage, Out: RpcMessage> StreamTypes for FlumeListener<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> StreamTypes for MemListener<In, Out> {
     type In = In;
     type Out = Out;
     type SendSink = SendSink<Out>;
     type RecvStream = RecvStream<In>;
 }
 
-impl<In: RpcMessage, Out: RpcMessage> Listener for FlumeListener<In, Out> {
-    #[allow(refining_impl_trait)]
-    fn accept(&mut self) -> AcceptFuture<In, Out> {
-        AcceptFuture {
-            wrapped: self.stream.clone().into_recv_async(),
-            _p: PhantomData,
+impl<In: RpcMessage, Out: RpcMessage> Listener for MemListener<In, Out> {
+    async fn accept(&mut self) -> Result<(Self::SendSink, Self::RecvStream), AcceptError> {
+        match self.stream.recv().await {
+            Some((send, recv)) => Ok((send, recv)),
+            None => Err(AcceptError::RemoteDropped),
         }
     }
 
@@ -215,46 +195,47 @@ impl<In: RpcMessage, Out: RpcMessage> Listener for FlumeListener<In, Out> {
     }
 }
 
-impl<In: RpcMessage, Out: RpcMessage> ConnectionErrors for FlumeConnector<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> ConnectionErrors for MemConnector<In, Out> {
     type SendError = self::SendError;
     type RecvError = self::RecvError;
     type OpenError = self::OpenError;
     type AcceptError = self::AcceptError;
 }
 
-impl<In: RpcMessage, Out: RpcMessage> StreamTypes for FlumeConnector<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> StreamTypes for MemConnector<In, Out> {
     type In = In;
     type Out = Out;
     type SendSink = SendSink<Out>;
     type RecvStream = RecvStream<In>;
 }
 
-impl<In: RpcMessage, Out: RpcMessage> Connector for FlumeConnector<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> Connector for MemConnector<In, Out> {
     #[allow(refining_impl_trait)]
     fn open(&self) -> OpenFuture<In, Out> {
-        let (local_send, remote_recv) = flume::bounded::<Out>(128);
-        let (remote_send, local_recv) = flume::bounded::<In>(128);
+        let (local_send, remote_recv) = tokio::sync::mpsc::channel::<Out>(128);
+        let (remote_send, local_recv) = tokio::sync::mpsc::channel::<In>(128);
         let remote_chan = (
-            SendSink(remote_send.into_sink()),
-            RecvStream(remote_recv.into_stream()),
+            SendSink(PollSender::new(remote_send)),
+            RecvStream(ReceiverStream::new(remote_recv)),
         );
         let local_chan = (
-            SendSink(local_send.into_sink()),
-            RecvStream(local_recv.into_stream()),
+            SendSink(PollSender::new(local_send)),
+            RecvStream(ReceiverStream::new(local_recv)),
         );
-        OpenFuture::new(self.sink.clone().into_send_async(remote_chan), local_chan)
+        let sender = PollSender::new(self.sink.clone());
+        OpenFuture::new(sender, remote_chan, local_chan)
     }
 }
 
 /// A flume based connector.
 ///
 /// Created using [channel].
-pub struct FlumeConnector<In: RpcMessage, Out: RpcMessage> {
+pub struct MemConnector<In: RpcMessage, Out: RpcMessage> {
     #[allow(clippy::type_complexity)]
-    sink: flume::Sender<(SendSink<In>, RecvStream<Out>)>,
+    sink: tokio::sync::mpsc::Sender<(SendSink<In>, RecvStream<Out>)>,
 }
 
-impl<In: RpcMessage, Out: RpcMessage> Clone for FlumeConnector<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> Clone for MemConnector<In, Out> {
     fn clone(&self) -> Self {
         Self {
             sink: self.sink.clone(),
@@ -262,9 +243,9 @@ impl<In: RpcMessage, Out: RpcMessage> Clone for FlumeConnector<In, Out> {
     }
 }
 
-impl<In: RpcMessage, Out: RpcMessage> fmt::Debug for FlumeConnector<In, Out> {
+impl<In: RpcMessage, Out: RpcMessage> fmt::Debug for MemConnector<In, Out> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("FlumeClientChannel")
+        f.debug_struct("MemConnector")
             .field("sink", &self.sink)
             .finish()
     }
@@ -339,7 +320,7 @@ impl std::error::Error for CreateChannelError {}
 /// `buffer` the size of the buffer for each channel. Keep this at a low value to get backpressure
 pub fn channel<Req: RpcMessage, Res: RpcMessage>(
     buffer: usize,
-) -> (FlumeListener<Req, Res>, FlumeConnector<Res, Req>) {
-    let (sink, stream) = flume::bounded(buffer);
-    (FlumeListener { stream }, FlumeConnector { sink })
+) -> (MemListener<Req, Res>, MemConnector<Res, Req>) {
+    let (sink, stream) = tokio::sync::mpsc::channel(buffer);
+    (MemListener { stream }, MemConnector { sink })
 }

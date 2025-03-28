@@ -45,6 +45,7 @@ pub mod misc;
 #[cfg(feature = "quinn-transport")]
 #[cfg_attr(quicrpc_docsrs, doc(cfg(feature = "quinn-transport")))]
 pub mod quinn;
+pub mod tokio;
 
 #[cfg(any(feature = "quinn-transport", feature = "iroh-transport"))]
 #[cfg_attr(
@@ -54,7 +55,7 @@ pub mod quinn;
 mod util;
 
 /// Errors that can happen when creating and using a [`Connector`] or [`Listener`].
-pub trait ConnectionErrors: Debug + Clone + Send + Sync + 'static {
+pub trait ConnectionErrors: Debug + Send + Sync + 'static {
     /// Error when sending a message via a channel
     type SendError: RpcError;
     /// Error when receiving a message via a channel
@@ -86,7 +87,7 @@ pub trait StreamTypes: ConnectionErrors {
 /// A connection to a specific remote machine
 ///
 /// A connection can be used to open bidirectional typed channels using [`Connector::open`].
-pub trait Connector: StreamTypes {
+pub trait Connector: StreamTypes + Clone {
     /// Open a channel to the remote che
     fn open(
         &self,
@@ -118,7 +119,7 @@ pub trait Listener: StreamTypes {
     /// Accept a new typed bidirectional channel on any of the connections we
     /// have currently opened.
     fn accept(
-        &self,
+        &mut self,
     ) -> impl Future<Output = Result<(Self::SendSink, Self::RecvStream), Self::AcceptError>> + Send;
 
     /// The local addresses this endpoint is bound to.

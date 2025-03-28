@@ -40,6 +40,7 @@ rustls = { version = "0.23", default-features = false, features = ["ring"], opti
 slab = "0.4.9" # iroh-quinn
 smallvec = "1.13.2"
 time = "0.3.36" # serde
+tokio-stream = "0.1.17"
 
 [dev-dependencies]
 anyhow = "1"

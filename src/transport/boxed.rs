@@ -290,11 +290,8 @@ impl<In: RpcMessage, Out: RpcMessage> StreamTypes for BoxedStreamTypes<In, Out> 
 
 /// A boxable listener
 pub trait BoxableListener<In: RpcMessage, Out: RpcMessage>: Debug + Send + Sync + 'static {
-    /// Clone the listener and box it
-    fn clone_box(&self) -> Box<dyn BoxableListener<In, Out>>;
-
     /// Accept a channel from a remote client
-    fn accept_bi_boxed(&self) -> AcceptFuture<In, Out>;
+    fn accept_bi_boxed(&mut self) -> AcceptFuture<In, Out>;
 
     /// Get the local address
     fn local_addr(&self) -> &[super::LocalAddr];
@@ -308,12 +305,6 @@ impl<In: RpcMessage, Out: RpcMessage> BoxedListener<In, Out> {
     /// Wrap a boxable listener into a box, transforming all the types to concrete types
     pub fn new(x: impl BoxableListener<In, Out>) -> Self {
         Self(Box::new(x))
-    }
-}
-
-impl<In: RpcMessage, Out: RpcMessage> Clone for BoxedListener<In, Out> {
-    fn clone(&self) -> Self {
-        Self(self.0.clone_box())
     }
 }
 
@@ -333,7 +324,7 @@ impl<In: RpcMessage, Out: RpcMessage> ConnectionErrors for BoxedListener<In, Out
 
 impl<In: RpcMessage, Out: RpcMessage> super::Listener for BoxedListener<In, Out> {
     fn accept(
-        &self,
+        &mut self,
     ) -> impl Future<Output = Result<(Self::SendSink, Self::RecvStream), Self::AcceptError>> + Send
     {
         self.0.accept_bi_boxed()
@@ -378,11 +369,7 @@ impl<In: RpcMessage, Out: RpcMessage> BoxableConnector<In, Out>
 impl<In: RpcMessage, Out: RpcMessage> BoxableListener<In, Out>
     for super::quinn::QuinnListener<In, Out>
 {
-    fn clone_box(&self) -> Box<dyn BoxableListener<In, Out>> {
-        Box::new(self.clone())
-    }
-
-    fn accept_bi_boxed(&self) -> AcceptFuture<In, Out> {
+    fn accept_bi_boxed(&mut self) -> AcceptFuture<In, Out> {
         let f = async move {
             let (send, recv) = super::Listener::accept(self).await?;
             let send = send.sink_map_err(anyhow::Error::from);
@@ -422,11 +409,7 @@ impl<In: RpcMessage, Out: RpcMessage> BoxableConnector<In, Out>
 impl<In: RpcMessage, Out: RpcMessage> BoxableListener<In, Out>
     for super::iroh::IrohListener<In, Out>
 {
-    fn clone_box(&self) -> Box<dyn BoxableListener<In, Out>> {
-        Box::new(self.clone())
-    }
-
-    fn accept_bi_boxed(&self) -> AcceptFuture<In, Out> {
+    fn accept_bi_boxed(&mut self) -> AcceptFuture<In, Out> {
         let f = async move {
             let (send, recv) = super::Listener::accept(self).await?;
             let send = send.sink_map_err(anyhow::Error::from);
@@ -458,11 +441,7 @@ impl<In: RpcMessage, Out: RpcMessage> BoxableConnector<In, Out>
 impl<In: RpcMessage, Out: RpcMessage> BoxableListener<In, Out>
     for super::flume::FlumeListener<In, Out>
 {
-    fn clone_box(&self) -> Box<dyn BoxableListener<In, Out>> {
-        Box::new(self.clone())
-    }
-
-    fn accept_bi_boxed(&self) -> AcceptFuture<In, Out> {
+    fn accept_bi_boxed(&mut self) -> AcceptFuture<In, Out> {
         AcceptFuture::direct(super::Listener::accept(self))
     }
 
@@ -520,7 +499,7 @@ mod tests {
         use crate::transport::{Connector, Listener};
 
         let (server, client) = crate::transport::flume::channel(1);
-        let server = super::BoxedListener::new(server);
+        let mut server = super::BoxedListener::new(server);
         let client = super::BoxedConnector::new(client);
         // spawn echo server
         tokio::spawn(async move {

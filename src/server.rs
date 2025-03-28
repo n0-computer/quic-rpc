@@ -88,15 +88,6 @@ pub struct RpcServer<S, C = BoxedListener<S>> {
     _p: PhantomData<S>,
 }
 
-impl<S, C: Clone> Clone for RpcServer<S, C> {
-    fn clone(&self) -> Self {
-        Self {
-            source: self.source.clone(),
-            _p: PhantomData,
-        }
-    }
-}
-
 impl<S: Service, C: Listener<S>> RpcServer<S, C> {
     /// Create a new rpc server for a specific service for a [Service] given a compatible
     /// [Listener].
@@ -225,7 +216,7 @@ impl<S: Service, C: Listener<S>> Accepting<S, C> {
 impl<S: Service, C: Listener<S>> RpcServer<S, C> {
     /// Accepts a new channel from a client. The result is an [Accepting] object that
     /// can be used to read the first request.
-    pub async fn accept(&self) -> result::Result<Accepting<S, C>, RpcServerError<C>> {
+    pub async fn accept(&mut self) -> result::Result<Accepting<S, C>, RpcServerError<C>> {
         let (send, recv) = self.source.accept().await.map_err(RpcServerError::Accept)?;
         Ok(Accepting {
             send,
@@ -244,7 +235,7 @@ impl<S: Service, C: Listener<S>> RpcServer<S, C> {
     /// Each request will be handled in a separate task.
     ///
     /// It is the caller's responsibility to poll the returned future to drive the server.
-    pub async fn accept_loop<Fun, Fut, E>(self, handler: Fun)
+    pub async fn accept_loop<Fun, Fut, E>(mut self, handler: Fun)
     where
         S: Service,
         C: Listener<S>,
@@ -487,7 +478,7 @@ where
     F: FnMut(RpcChannel<S, C>, S::Req, T) -> Fut + Send + 'static,
     Fut: Future<Output = Result<(), RpcServerError<C>>> + Send + 'static,
 {
-    let server: RpcServer<S, C> = RpcServer::<S, C>::new(conn);
+    let mut server: RpcServer<S, C> = RpcServer::<S, C>::new(conn);
     loop {
         let (req, chan) = server.accept().await?.read_first().await?;
         let target = target.clone();

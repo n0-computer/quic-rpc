@@ -74,7 +74,7 @@ async fn try_server_streaming() -> anyhow::Result<()> {
     tracing_subscriber::fmt::try_init().ok();
     let (server, client) = flume::channel(1);
 
-    let server = RpcServer::<TryService, _>::new(server);
+    let mut server = RpcServer::<TryService, _>::new(server);
     let server_handle = tokio::task::spawn(async move {
         loop {
             let (req, chan) = server.accept().await?.read_first().await?;
