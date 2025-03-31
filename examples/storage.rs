@@ -1,16 +1,16 @@
 use std::{
     collections::BTreeMap,
-    marker::PhantomData,
     net::{Ipv4Addr, SocketAddr, SocketAddrV4},
     sync::Arc,
 };
 
+use anyhow::bail;
 use n0_future::task::{self, AbortOnDropHandle};
 use quic_rpc::{
     channel::{none::NoReceiver, oneshot, spsc},
     rpc::{listen, Handler},
     util::{make_client_endpoint, make_server_endpoint},
-    Channels, LocalMpscChannel, Request, Service, ServiceSender, WithChannels,
+    Channels, LocalSender, Request, Service, ServiceSender, WithChannels,
 };
 use serde::{Deserialize, Serialize};
 use tracing::info;
@@ -77,7 +77,7 @@ impl StorageActor {
             state: BTreeMap::new(),
         };
         n0_future::task::spawn(actor.run());
-        let local = LocalMpscChannel::<StorageMessage, StorageService>::from(tx);
+        let local = LocalSender::<StorageMessage, StorageService>::from(tx);
         StorageApi {
             inner: local.into(),
         }
@@ -121,35 +121,31 @@ struct StorageApi {
 impl StorageApi {
     pub fn connect(endpoint: quinn::Endpoint, addr: SocketAddr) -> anyhow::Result<StorageApi> {
         Ok(StorageApi {
-            inner: ServiceSender::Remote(endpoint, addr, PhantomData),
+            inner: ServiceSender::quinn(endpoint, addr),
         })
     }
 
     pub fn listen(&self, endpoint: quinn::Endpoint) -> anyhow::Result<AbortOnDropHandle<()>> {
-        match &self.inner {
-            ServiceSender::Local(local, _) => {
-                let local = local.clone();
-                let handler: Handler<StorageProtocol> = Arc::new(move |msg, _rx, tx| {
-                    let local = local.clone();
-                    Box::pin(match msg {
-                        StorageProtocol::Get(msg) => local.send((msg, tx)),
-                        StorageProtocol::Set(msg) => local.send((msg, tx)),
-                        StorageProtocol::List(msg) => local.send((msg, tx)),
-                    })
-                });
-                Ok(AbortOnDropHandle::new(task::spawn(listen(
-                    endpoint, handler,
-                ))))
-            }
-            ServiceSender::Remote(_, _, _) => {
-                Err(anyhow::anyhow!("cannot listen on a remote service"))
-            }
-        }
+        let Some(local) = self.inner.local() else {
+            bail!("cannot listen on a remote service");
+        };
+        let local = local.clone();
+        let handler: Handler<StorageProtocol> = Arc::new(move |msg, _rx, tx| {
+            let local = local.clone();
+            Box::pin(match msg {
+                StorageProtocol::Get(msg) => local.send((msg, tx)),
+                StorageProtocol::Set(msg) => local.send((msg, tx)),
+                StorageProtocol::List(msg) => local.send((msg, tx)),
+            })
+        });
+        Ok(AbortOnDropHandle::new(task::spawn(listen(
+            endpoint, handler,
+        ))))
     }
 
     pub async fn get(&self, key: String) -> anyhow::Result<oneshot::Receiver<Option<String>>> {
         let msg = Get { key };
-        match self.inner.request().await? {
+        match self.inner.sender().await? {
             Request::Local(request) => {
                 let (tx, rx) = oneshot::channel();
                 request.send((msg, tx)).await?;
@@ -164,7 +160,7 @@ impl StorageApi {
 
     pub async fn list(&self) -> anyhow::Result<spsc::Receiver<String>> {
         let msg = List;
-        match self.inner.request().await? {
+        match self.inner.sender().await? {
             Request::Local(request) => {
                 let (tx, rx) = spsc::channel(10);
                 request.send((msg, tx)).await?;
@@ -179,7 +175,7 @@ impl StorageApi {
 
     pub async fn set(&self, key: String, value: String) -> anyhow::Result<oneshot::Receiver<()>> {
         let msg = Set { key, value };
-        match self.inner.request().await? {
+        match self.inner.sender().await? {
             Request::Local(request) => {
                 let (tx, rx) = oneshot::channel();
                 request.send((msg, tx)).await?;

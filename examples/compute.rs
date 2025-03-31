@@ -1,6 +1,5 @@
 use std::{
     io::{self, Write},
-    marker::PhantomData,
     net::{Ipv4Addr, SocketAddr, SocketAddrV4},
     sync::Arc,
 };
@@ -15,7 +14,7 @@ use quic_rpc::{
     channel::{oneshot, spsc},
     rpc::{listen, Handler, RemoteRead},
     util::{make_client_endpoint, make_server_endpoint},
-    LocalMpscChannel, Request, Service, ServiceSender, WithChannels,
+    LocalSender, Request, Service, ServiceSender, WithChannels,
 };
 use quic_rpc_derive::rpc_requests;
 use serde::{Deserialize, Serialize};
@@ -80,7 +79,7 @@ impl ComputeActor {
         let (tx, rx) = tokio::sync::mpsc::channel(128);
         let actor = Self { recv: rx };
         n0_future::task::spawn(actor.run());
-        let local = LocalMpscChannel::<ComputeMessage, ComputeService>::from(tx);
+        let local = LocalSender::<ComputeMessage, ComputeService>::from(tx);
         ComputeApi {
             inner: local.into(),
         }
@@ -164,36 +163,32 @@ struct ComputeApi {
 impl ComputeApi {
     pub fn connect(endpoint: quinn::Endpoint, addr: SocketAddr) -> anyhow::Result<ComputeApi> {
         Ok(ComputeApi {
-            inner: ServiceSender::Remote(endpoint, addr, PhantomData),
+            inner: ServiceSender::quinn(endpoint, addr),
         })
     }
 
     pub fn listen(&self, endpoint: quinn::Endpoint) -> anyhow::Result<AbortOnDropHandle<()>> {
-        match &self.inner {
-            ServiceSender::Local(local, _) => {
-                let local = local.clone();
-                let handler: Handler<ComputeProtocol> = Arc::new(move |msg, rx: RemoteRead, tx| {
-                    let local = local.clone();
-                    Box::pin(match msg {
-                        ComputeProtocol::Sqr(msg) => local.send((msg, tx)),
-                        ComputeProtocol::Sum(msg) => local.send((msg, tx, rx)),
-                        ComputeProtocol::Fibonacci(msg) => local.send((msg, tx)),
-                        ComputeProtocol::Multiply(msg) => local.send((msg, tx, rx)),
-                    })
-                });
-                Ok(AbortOnDropHandle::new(task::spawn(listen(
-                    endpoint, handler,
-                ))))
-            }
-            ServiceSender::Remote(_, _, _) => {
-                bail!("cannot listen on a remote service");
-            }
-        }
+        let Some(local) = self.inner.local() else {
+            bail!("cannot listen on a remote service");
+        };
+        let local = local.clone();
+        let handler: Handler<ComputeProtocol> = Arc::new(move |msg, rx: RemoteRead, tx| {
+            let local = local.clone();
+            Box::pin(match msg {
+                ComputeProtocol::Sqr(msg) => local.send((msg, tx)),
+                ComputeProtocol::Sum(msg) => local.send((msg, tx, rx)),
+                ComputeProtocol::Fibonacci(msg) => local.send((msg, tx)),
+                ComputeProtocol::Multiply(msg) => local.send((msg, tx, rx)),
+            })
+        });
+        Ok(AbortOnDropHandle::new(task::spawn(listen(
+            endpoint, handler,
+        ))))
     }
 
     pub async fn sqr(&self, num: u64) -> anyhow::Result<oneshot::Receiver<u128>> {
         let msg = Sqr { num };
-        match self.inner.request().await? {
+        match self.inner.sender().await? {
             Request::Local(request) => {
                 let (tx, rx) = oneshot::channel();
                 request.send((msg, tx)).await?;
@@ -208,7 +203,7 @@ impl ComputeApi {
 
     pub async fn sum(&self) -> anyhow::Result<(spsc::Sender<i64>, oneshot::Receiver<i64>)> {
         let msg = Sum;
-        match self.inner.request().await? {
+        match self.inner.sender().await? {
             Request::Local(request) => {
                 let (num_tx, num_rx) = spsc::channel(10);
                 let (sum_tx, sum_rx) = oneshot::channel();
@@ -224,7 +219,7 @@ impl ComputeApi {
 
     pub async fn fibonacci(&self, max: u64) -> anyhow::Result<spsc::Receiver<u64>> {
         let msg = Fibonacci { max };
-        match self.inner.request().await? {
+        match self.inner.sender().await? {
             Request::Local(request) => {
                 let (tx, rx) = spsc::channel(128);
                 request.send((msg, tx)).await?;
@@ -242,7 +237,7 @@ impl ComputeApi {
         initial: u64,
     ) -> anyhow::Result<(spsc::Sender<u64>, spsc::Receiver<u64>)> {
         let msg = Multiply { initial };
-        match self.inner.request().await? {
+        match self.inner.sender().await? {
             Request::Local(request) => {
                 let (in_tx, in_rx) = spsc::channel(128);
                 let (out_tx, out_rx) = spsc::channel(128);

@@ -2,6 +2,7 @@
 use std::{fmt::Debug, future::Future, io, marker::PhantomData, ops::Deref};
 
 use channel::none::NoReceiver;
+use rpc::QuinnRemoteConnection;
 use sealed::Sealed;
 use serde::{de::DeserializeOwned, Serialize};
 #[cfg(feature = "rpc")]
@@ -507,37 +508,112 @@ impl<I: Channels<S>, S: Service> Deref for WithChannels<I, S> {
 }
 
 #[derive(Debug)]
-pub enum ServiceSender<M, R, S> {
-    Local(LocalMpscChannel<M, S>, PhantomData<R>),
+pub struct ServiceSender<M, R, S>(ServiceSenderInner<M, R, S>);
+
+impl<M, R, S> Clone for ServiceSender<M, R, S> {
+    fn clone(&self) -> Self {
+        Self(self.0.clone())
+    }
+}
+
+impl<M, R, S> From<LocalSender<M, S>> for ServiceSender<M, R, S> {
+    fn from(tx: LocalSender<M, S>) -> Self {
+        Self(ServiceSenderInner::Local(tx, PhantomData))
+    }
+}
+
+impl<M, R, S> From<tokio::sync::mpsc::Sender<M>> for ServiceSender<M, R, S> {
+    fn from(tx: tokio::sync::mpsc::Sender<M>) -> Self {
+        LocalSender::from(tx).into()
+    }
+}
+
+impl<M, R, S> ServiceSender<M, R, S> {
+    pub fn quinn(endpoint: quinn::Endpoint, addr: std::net::SocketAddr) -> Self {
+        Self(ServiceSenderInner::Quinn(
+            QuinnRemoteConnection::new(endpoint, addr),
+            PhantomData,
+        ))
+    }
+
+    /// Get the local sender. This is useful if you don't care about remote
+    /// requests.
+    pub fn local(&self) -> Option<&LocalSender<M, S>> {
+        match &self.0 {
+            ServiceSenderInner::Local(tx, _) => Some(tx),
+            ServiceSenderInner::Quinn(..) => None,
+        }
+    }
+
+    /// Create a sender that allows sending messages to the service.
+    ///
+    /// In the local case, this is just a clone which has almost zero overhead.
+    /// Creating a local sender can not fail.
+    ///
+    /// In the remote case, this involves lazily creating a connection to the
+    /// remote side and then creating a new stream on the underlying
+    /// [`quinn`] or iroh connection.
+    ///
+    /// In both cases, the returned sender is fully self contained.
+    #[allow(clippy::type_complexity)]
+    pub fn sender(
+        &self,
+    ) -> impl Future<
+        Output = Result<Request<LocalSender<M, S>, rpc::RemoteSender<R, S>>, RequestError>,
+    > + 'static
+    where
+        S: Service,
+        M: Send + Sync + 'static,
+        R: 'static,
+    {
+        #[cfg(feature = "rpc")]
+        {
+            let cloned = match &self.0 {
+                ServiceSenderInner::Local(tx, _) => Request::Local(tx.clone()),
+                ServiceSenderInner::Quinn(connection, _) => Request::Remote(connection.clone()),
+            };
+            async move {
+                match cloned {
+                    Request::Local(tx) => Ok(Request::Local(tx.clone())),
+                    #[cfg(feature = "rpc")]
+                    Request::Remote(conn) => {
+                        let (send, recv) = conn.open_bi().await?;
+                        Ok(Request::Remote(rpc::RemoteSender::new(send, recv)))
+                    }
+                }
+            }
+        }
+        #[cfg(not(feature = "rpc"))]
+        {
+            let Self::Local(tx, _) = self else {
+                unreachable!()
+            };
+            let tx = tx.clone();
+            async move { Ok(Request::Local(tx)) }
+        }
+    }
+}
+
+#[derive(Debug)]
+pub(crate) enum ServiceSenderInner<M, R, S> {
+    Local(LocalSender<M, S>, PhantomData<R>),
     #[cfg(feature = "rpc")]
     #[cfg_attr(quicrpc_docsrs, doc(cfg(feature = "rpc")))]
-    Remote(quinn::Endpoint, std::net::SocketAddr, PhantomData<(R, S)>),
+    Quinn(QuinnRemoteConnection<R, S>, PhantomData<M>),
     #[cfg(not(feature = "rpc"))]
     #[cfg_attr(quicrpc_docsrs, doc(cfg(feature = "rpc")))]
     Remote(PhantomData<(R, S)>),
 }
 
-impl<M, R, S> From<tokio::sync::mpsc::Sender<M>> for ServiceSender<M, R, S> {
-    fn from(tx: tokio::sync::mpsc::Sender<M>) -> Self {
-        Self::Local(tx.into(), PhantomData)
-    }
-}
-
-impl<M, R, S> Clone for ServiceSender<M, R, S> {
+impl<M, R, S> Clone for ServiceSenderInner<M, R, S> {
     fn clone(&self) -> Self {
         match self {
             Self::Local(tx, _) => Self::Local(tx.clone(), PhantomData),
             #[cfg(feature = "rpc")]
-            Self::Remote(endpoint, addr, _) => Self::Remote(endpoint.clone(), *addr, PhantomData),
+            Self::Quinn(conn, _) => Self::Quinn(conn.clone(), PhantomData),
             #[cfg(not(feature = "rpc"))]
             Self::Remote(_) => unreachable!(),
         }
-    }
-}
-
-impl<M, R, S> From<LocalMpscChannel<M, S>> for ServiceSender<M, R, S> {
-    fn from(tx: LocalMpscChannel<M, S>) -> Self {
-        Self::Local(tx, PhantomData)
     }
 }
 
@@ -592,67 +668,30 @@ impl From<RequestError> for io::Error {
     }
 }
 
-impl<M: Send + Sync + 'static, R, S: Service> ServiceSender<M, R, S> {
-    pub fn local(&self) -> Option<&LocalMpscChannel<M, S>> {
-        match self {
-            Self::Local(tx, _) => Some(tx),
-            Self::Remote(..) => None,
-        }
-    }
-
-    #[allow(clippy::type_complexity)]
-    pub fn request(
-        &self,
-    ) -> impl Future<
-        Output = Result<Request<LocalMpscChannel<M, S>, rpc::RemoteRequest<R, S>>, RequestError>,
-    > + 'static {
-        #[cfg(feature = "rpc")]
-        {
-            let cloned = match self {
-                Self::Local(tx, _) => Request::Local(tx.clone()),
-                Self::Remote(endpoint, addr, _) => Request::Remote((endpoint.clone(), *addr)),
-            };
-            async move {
-                match cloned {
-                    Request::Local(tx) => Ok(Request::Local(tx.clone())),
-                    #[cfg(feature = "rpc")]
-                    Request::Remote((endpoint, addr)) => {
-                        let connection = endpoint.connect(addr, "localhost")?.await?;
-                        let (send, recv) = connection.open_bi().await?;
-                        Ok(Request::Remote(rpc::RemoteRequest::new(send, recv)))
-                    }
-                }
-            }
-        }
-        #[cfg(not(feature = "rpc"))]
-        {
-            let Self::Local(tx, _) = self else {
-                unreachable!()
-            };
-            let tx = tx.clone();
-            async move { Ok(Request::Local(tx)) }
-        }
-    }
-}
-
+/// A local sender for the service `S` using the message type `M`.
+///
+/// This is a wrapper around an in-memory channel (currently [`tokio::sync::mpsc::Sender`]),
+/// that adds nice syntax for sending messages that can be converted into
+/// [`WithChannels`].
 #[derive(Debug)]
-pub struct LocalMpscChannel<M, S>(tokio::sync::mpsc::Sender<M>, std::marker::PhantomData<S>);
+#[repr(transparent)]
+pub struct LocalSender<M, S>(tokio::sync::mpsc::Sender<M>, std::marker::PhantomData<S>);
 
-impl<M, S> From<tokio::sync::mpsc::Sender<M>> for LocalMpscChannel<M, S> {
-    fn from(tx: tokio::sync::mpsc::Sender<M>) -> Self {
-        Self(tx, PhantomData)
-    }
-}
-
-impl<M, S> Clone for LocalMpscChannel<M, S> {
+impl<M, S> Clone for LocalSender<M, S> {
     fn clone(&self) -> Self {
         Self(self.0.clone(), PhantomData)
     }
 }
 
+impl<M, S> From<tokio::sync::mpsc::Sender<M>> for LocalSender<M, S> {
+    fn from(tx: tokio::sync::mpsc::Sender<M>) -> Self {
+        Self(tx, PhantomData)
+    }
+}
+
 #[cfg(not(feature = "rpc"))]
 pub mod rpc {
-    pub struct RemoteRequest<R, S>(std::marker::PhantomData<(R, S)>);
+    pub struct RemoteSender<R, S>(std::marker::PhantomData<(R, S)>);
 }
 #[cfg(feature = "rpc")]
 #[cfg_attr(quicrpc_docsrs, doc(cfg(feature = "rpc")))]
@@ -673,7 +712,7 @@ pub mod rpc {
             RecvError, SendError,
         },
         util::{now_or_never, AsyncReadVarintExt, WriteVarintExt},
-        RpcMessage,
+        RequestError, RpcMessage,
     };
 
     #[derive(Debug, thiserror::Error)]
@@ -693,14 +732,86 @@ pub mod rpc {
         }
     }
 
+    /// A connection to a remote service.
+    ///
+    /// Initially this does just have the endpoint and the address. Once a
+    /// connection is established, it will be stored.
     #[derive(Debug)]
-    pub struct RemoteRequest<R, S>(
+    pub(crate) struct QuinnRemoteConnection<R, S> {
+        pub endpoint: quinn::Endpoint,
+        pub addr: std::net::SocketAddr,
+        pub connection: Arc<tokio::sync::Mutex<Option<quinn::Connection>>>,
+        _p: PhantomData<(R, S)>,
+    }
+
+    impl<R, S> Clone for QuinnRemoteConnection<R, S> {
+        fn clone(&self) -> Self {
+            Self {
+                endpoint: self.endpoint.clone(),
+                addr: self.addr,
+                connection: self.connection.clone(),
+                _p: PhantomData,
+            }
+        }
+    }
+
+    impl<R, S> QuinnRemoteConnection<R, S> {
+        pub fn new(endpoint: quinn::Endpoint, addr: std::net::SocketAddr) -> Self {
+            Self {
+                endpoint,
+                addr,
+                connection: Default::default(),
+                _p: PhantomData,
+            }
+        }
+
+        pub fn open_bi(
+            &self,
+        ) -> impl Future<Output = Result<(quinn::SendStream, quinn::RecvStream), RequestError>> + 'static
+        {
+            let endpoint = self.endpoint.clone();
+            let connection = self.connection.clone();
+            let addr = self.addr;
+            async move {
+                let mut guard = connection.lock().await;
+                let pair = match guard.as_mut() {
+                    Some(conn) => {
+                        // try to reuse the connection
+                        match conn.open_bi().await {
+                            Ok(pair) => pair,
+                            Err(_) => {
+                                // try with a new connection, just once
+                                *guard = None;
+                                connect_and_open_bi(endpoint, addr, guard).await?
+                            }
+                        }
+                    }
+                    None => connect_and_open_bi(endpoint, addr, guard).await?,
+                };
+                Ok(pair)
+            }
+        }
+    }
+
+    async fn connect_and_open_bi(
+        endpoint: quinn::Endpoint,
+        addr: std::net::SocketAddr,
+        mut guard: tokio::sync::MutexGuard<'_, Option<quinn::Connection>>,
+    ) -> Result<(quinn::SendStream, quinn::RecvStream), RequestError> {
+        let conn = endpoint.connect(addr, "localhost")?.await?;
+        let (send, recv) = conn.open_bi().await?;
+        *guard = Some(conn);
+        Ok((send, recv))
+    }
+
+    #[derive(Debug)]
+    pub struct RemoteSender<R, S>(
         quinn::SendStream,
         quinn::RecvStream,
         std::marker::PhantomData<(R, S)>,
     );
 
-    impl<R, S> RemoteRequest<R, S> {
+    impl<R, S> RemoteSender<R, S> {
         pub fn new(send: quinn::SendStream, recv: quinn::RecvStream) -> Self {
             Self(send, recv, PhantomData)
         }
@@ -712,7 +823,7 @@ pub mod rpc {
         where
             R: Serialize,
         {
-            let RemoteRequest(mut send, recv, _) = self;
+            let RemoteSender(mut send, recv, _) = self;
             let msg = msg.into();
             let mut buf = SmallVec::<[u8; 128]>::new();
             buf.write_length_prefixed(msg)?;
@@ -962,7 +1073,7 @@ pub enum Request<L, R> {
     Remote(R),
 }
 
-impl<M: Send, S: Service> LocalMpscChannel<M, S> {
+impl<M: Send, S: Service> LocalSender<M, S> {
     /// Send a message to the service
     pub fn send<T>(&self, value: impl Into<WithChannels<T, S>>) -> SendFut<M>
     where
