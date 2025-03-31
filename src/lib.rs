@@ -507,27 +507,27 @@ impl<I: Channels<S>, S: Service> Deref for WithChannels<I, S> {
 }
 
 #[derive(Debug)]
-pub struct ServiceSender<M, R, S>(ServiceSenderInner<M>, PhantomData<(R, S)>);
+pub struct Client<M, R, S>(ClientInner<M>, PhantomData<(R, S)>);
 
-impl<M, R, S> Clone for ServiceSender<M, R, S> {
+impl<M, R, S> Clone for Client<M, R, S> {
     fn clone(&self) -> Self {
         Self(self.0.clone(), PhantomData)
     }
 }
 
-impl<M, R, S> From<LocalSender<M, S>> for ServiceSender<M, R, S> {
+impl<M, R, S> From<LocalSender<M, S>> for Client<M, R, S> {
     fn from(tx: LocalSender<M, S>) -> Self {
-        Self(ServiceSenderInner::Local(tx.0), PhantomData)
+        Self(ClientInner::Local(tx.0), PhantomData)
     }
 }
 
-impl<M, R, S> From<tokio::sync::mpsc::Sender<M>> for ServiceSender<M, R, S> {
+impl<M, R, S> From<tokio::sync::mpsc::Sender<M>> for Client<M, R, S> {
     fn from(tx: tokio::sync::mpsc::Sender<M>) -> Self {
         LocalSender::from(tx).into()
     }
 }
 
-impl<M, R, S> ServiceSender<M, R, S> {
+impl<M, R, S> Client<M, R, S> {
     #[cfg(feature = "rpc")]
     pub fn quinn(endpoint: quinn::Endpoint, addr: std::net::SocketAddr) -> Self {
         Self::boxed(rpc::QuinnRemoteConnection::new(endpoint, addr))
@@ -535,15 +535,15 @@ impl<M, R, S> ServiceSender<M, R, S> {
 
     #[cfg(feature = "rpc")]
     pub fn boxed(remote: impl rpc::RemoteConnection) -> Self {
-        Self(ServiceSenderInner::Remote(Box::new(remote)), PhantomData)
+        Self(ClientInner::Remote(Box::new(remote)), PhantomData)
     }
 
     /// Get the local sender. This is useful if you don't care about remote
     /// requests.
     pub fn local(&self) -> Option<LocalSender<M, S>> {
         match &self.0 {
-            ServiceSenderInner::Local(tx) => Some(tx.clone().into()),
-            ServiceSenderInner::Remote(..) => None,
+            ClientInner::Local(tx) => Some(tx.clone().into()),
+            ClientInner::Remote(..) => None,
         }
     }
 
@@ -558,7 +558,7 @@ impl<M, R, S> ServiceSender<M, R, S> {
     ///
     /// In both cases, the returned sender is fully self contained.
     #[allow(clippy::type_complexity)]
-    pub fn sender(
+    pub fn request(
         &self,
     ) -> impl Future<
         Output = Result<Request<LocalSender<M, S>, rpc::RemoteSender<R, S>>, RequestError>,
@@ -571,8 +571,8 @@ impl<M, R, S> ServiceSender<M, R, S> {
         #[cfg(feature = "rpc")]
         {
             let cloned = match &self.0 {
-                ServiceSenderInner::Local(tx) => Request::Local(tx.clone()),
-                ServiceSenderInner::Remote(connection) => Request::Remote(connection.clone_boxed()),
+                ClientInner::Local(tx) => Request::Local(tx.clone()),
+                ClientInner::Remote(connection) => Request::Remote(connection.clone_boxed()),
             };
             async move {
                 match cloned {
@@ -587,7 +587,7 @@ impl<M, R, S> ServiceSender<M, R, S> {
         }
         #[cfg(not(feature = "rpc"))]
         {
-            let ServiceSenderInner::Local(tx) = &self.0 else {
+            let ClientInner::Local(tx) = &self.0 else {
                 unreachable!()
             };
             let tx = tx.clone().into();
@@ -597,7 +597,7 @@ impl<M, R, S> ServiceSender<M, R, S> {
 }
 
 #[derive(Debug)]
-pub(crate) enum ServiceSenderInner<M> {
+pub(crate) enum ClientInner<M> {
     Local(tokio::sync::mpsc::Sender<M>),
     #[cfg(feature = "rpc")]
     #[cfg_attr(quicrpc_docsrs, doc(cfg(feature = "rpc")))]
@@ -607,7 +607,7 @@ pub(crate) enum ServiceSenderInner<M> {
     Remote(PhantomData<M>),
 }
 
-impl<M> Clone for ServiceSenderInner<M> {
+impl<M> Clone for ClientInner<M> {
     fn clone(&self) -> Self {
         match self {
             Self::Local(tx) => Self::Local(tx.clone()),
