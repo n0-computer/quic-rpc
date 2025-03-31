@@ -2,7 +2,6 @@
 use std::{fmt::Debug, future::Future, io, marker::PhantomData, ops::Deref};
 
 use channel::none::NoReceiver;
-use rpc::QuinnRemoteConnection;
 use sealed::Sealed;
 use serde::{de::DeserializeOwned, Serialize};
 #[cfg(feature = "rpc")]
@@ -529,9 +528,10 @@ impl<M, R, S> From<tokio::sync::mpsc::Sender<M>> for ServiceSender<M, R, S> {
 }
 
 impl<M, R, S> ServiceSender<M, R, S> {
+    #[cfg(feature = "rpc")]
     pub fn quinn(endpoint: quinn::Endpoint, addr: std::net::SocketAddr) -> Self {
         Self(
-            ServiceSenderInner::Quinn(QuinnRemoteConnection::new(endpoint, addr)),
+            ServiceSenderInner::Quinn(rpc::QuinnRemoteConnection::new(endpoint, addr)),
             PhantomData,
         )
     }
@@ -568,6 +568,7 @@ impl<M, R, S> ServiceSender<M, R, S> {
     {
         #[cfg(feature = "rpc")]
         {
+            use rpc::RemoteConnection;
             let cloned = match &self.0 {
                 ServiceSenderInner::Local(tx) => Request::Local(tx.clone()),
                 ServiceSenderInner::Quinn(connection) => Request::Remote(connection.clone()),
@@ -585,10 +586,10 @@ impl<M, R, S> ServiceSender<M, R, S> {
         }
         #[cfg(not(feature = "rpc"))]
         {
-            let Self::Local(tx, _) = self else {
+            let ServiceSenderInner::Local(tx) = &self.0 else {
                 unreachable!()
             };
-            let tx = tx.clone();
+            let tx = tx.clone().into();
             async move { Ok(Request::Local(tx)) }
         }
     }
@@ -599,7 +600,7 @@ pub(crate) enum ServiceSenderInner<M> {
     Local(tokio::sync::mpsc::Sender<M>),
     #[cfg(feature = "rpc")]
     #[cfg_attr(quicrpc_docsrs, doc(cfg(feature = "rpc")))]
-    Quinn(QuinnRemoteConnection),
+    Quinn(rpc::QuinnRemoteConnection),
     #[cfg(not(feature = "rpc"))]
     #[cfg_attr(quicrpc_docsrs, doc(cfg(feature = "rpc")))]
     Quinn(PhantomData<M>),
@@ -612,7 +613,7 @@ impl<M> Clone for ServiceSenderInner<M> {
             #[cfg(feature = "rpc")]
             Self::Quinn(conn) => Self::Quinn(conn.clone()),
             #[cfg(not(feature = "rpc"))]
-            Self::Remote(_) => unreachable!(),
+            Self::Quinn(_) => unreachable!(),
         }
     }
 }
@@ -732,6 +733,12 @@ pub mod rpc {
         }
     }
 
+    pub trait RemoteConnection {
+        fn open_bi(
+            &self,
+        ) -> impl Future<Output = Result<(quinn::SendStream, quinn::RecvStream), RequestError>> + 'static;
+    }
+
     /// A connection to a remote service.
     ///
     /// Initially this does just have the endpoint and the address. Once a
@@ -761,8 +768,10 @@ pub mod rpc {
                 connection: Default::default(),
             }
         }
+    }
 
-        pub fn open_bi(
+    impl RemoteConnection for QuinnRemoteConnection {
+        fn open_bi(
             &self,
         ) -> impl Future<Output = Result<(quinn::SendStream, quinn::RecvStream), RequestError>> + 'static
         {
