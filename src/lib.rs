@@ -508,17 +508,17 @@ impl<I: Channels<S>, S: Service> Deref for WithChannels<I, S> {
 }
 
 #[derive(Debug)]
-pub struct ServiceSender<M, R, S>(ServiceSenderInner<M, R, S>);
+pub struct ServiceSender<M, R, S>(ServiceSenderInner<M, R, S>, PhantomData<S>);
 
 impl<M, R, S> Clone for ServiceSender<M, R, S> {
     fn clone(&self) -> Self {
-        Self(self.0.clone())
+        Self(self.0.clone(), PhantomData)
     }
 }
 
 impl<M, R, S> From<LocalSender<M, S>> for ServiceSender<M, R, S> {
     fn from(tx: LocalSender<M, S>) -> Self {
-        Self(ServiceSenderInner::Local(tx, PhantomData))
+        Self(ServiceSenderInner::Local(tx.0, PhantomData), PhantomData)
     }
 }
 
@@ -530,17 +530,17 @@ impl<M, R, S> From<tokio::sync::mpsc::Sender<M>> for ServiceSender<M, R, S> {
 
 impl<M, R, S> ServiceSender<M, R, S> {
     pub fn quinn(endpoint: quinn::Endpoint, addr: std::net::SocketAddr) -> Self {
-        Self(ServiceSenderInner::Quinn(
-            QuinnRemoteConnection::new(endpoint, addr),
+        Self(
+            ServiceSenderInner::Quinn(QuinnRemoteConnection::new(endpoint, addr), PhantomData),
             PhantomData,
-        ))
+        )
     }
 
     /// Get the local sender. This is useful if you don't care about remote
     /// requests.
-    pub fn local(&self) -> Option<&LocalSender<M, S>> {
+    pub fn local(&self) -> Option<LocalSender<M, S>> {
         match &self.0 {
-            ServiceSenderInner::Local(tx, _) => Some(tx),
+            ServiceSenderInner::Local(tx, _) => Some(tx.clone().into()),
             ServiceSenderInner::Quinn(..) => None,
         }
     }
@@ -574,7 +574,7 @@ impl<M, R, S> ServiceSender<M, R, S> {
             };
             async move {
                 match cloned {
-                    Request::Local(tx) => Ok(Request::Local(tx.clone())),
+                    Request::Local(tx) => Ok(Request::Local(tx.into())),
                     #[cfg(feature = "rpc")]
                     Request::Remote(conn) => {
                         let (send, recv) = conn.open_bi().await?;
@@ -596,10 +596,10 @@ impl<M, R, S> ServiceSender<M, R, S> {
 
 #[derive(Debug)]
 pub(crate) enum ServiceSenderInner<M, R, S> {
-    Local(LocalSender<M, S>, PhantomData<R>),
+    Local(tokio::sync::mpsc::Sender<M>, PhantomData<(R, S)>),
     #[cfg(feature = "rpc")]
     #[cfg_attr(quicrpc_docsrs, doc(cfg(feature = "rpc")))]
-    Quinn(QuinnRemoteConnection<R, S>, PhantomData<M>),
+    Quinn(QuinnRemoteConnection, PhantomData<(M, R, S)>),
     #[cfg(not(feature = "rpc"))]
     #[cfg_attr(quicrpc_docsrs, doc(cfg(feature = "rpc")))]
     Remote(PhantomData<(R, S)>),
@@ -737,31 +737,28 @@ pub mod rpc {
     /// Initially this does just have the endpoint and the address. Once a
     /// connection is established, it will be stored.
     #[derive(Debug)]
-    pub(crate) struct QuinnRemoteConnection<R, S> {
+    pub(crate) struct QuinnRemoteConnection {
         pub endpoint: quinn::Endpoint,
         pub addr: std::net::SocketAddr,
         pub connection: Arc<tokio::sync::Mutex<Option<quinn::Connection>>>,
-        _p: PhantomData<(R, S)>,
     }
 
-    impl<R, S> Clone for QuinnRemoteConnection<R, S> {
+    impl Clone for QuinnRemoteConnection {
         fn clone(&self) -> Self {
             Self {
                 endpoint: self.endpoint.clone(),
                 addr: self.addr,
                 connection: self.connection.clone(),
-                _p: PhantomData,
             }
         }
     }
 
-    impl<R, S> QuinnRemoteConnection<R, S> {
+    impl QuinnRemoteConnection {
         pub fn new(endpoint: quinn::Endpoint, addr: std::net::SocketAddr) -> Self {
             Self {
                 endpoint,
                 addr,
                 connection: Default::default(),
-                _p: PhantomData,
             }
         }
 
