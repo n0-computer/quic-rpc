@@ -508,7 +508,7 @@ impl<I: Channels<S>, S: Service> Deref for WithChannels<I, S> {
 }
 
 #[derive(Debug)]
-pub struct ServiceSender<M, R, S>(ServiceSenderInner<M, R, S>, PhantomData<S>);
+pub struct ServiceSender<M, R, S>(ServiceSenderInner<M>, PhantomData<(R, S)>);
 
 impl<M, R, S> Clone for ServiceSender<M, R, S> {
     fn clone(&self) -> Self {
@@ -518,7 +518,7 @@ impl<M, R, S> Clone for ServiceSender<M, R, S> {
 
 impl<M, R, S> From<LocalSender<M, S>> for ServiceSender<M, R, S> {
     fn from(tx: LocalSender<M, S>) -> Self {
-        Self(ServiceSenderInner::Local(tx.0, PhantomData), PhantomData)
+        Self(ServiceSenderInner::Local(tx.0), PhantomData)
     }
 }
 
@@ -531,7 +531,7 @@ impl<M, R, S> From<tokio::sync::mpsc::Sender<M>> for ServiceSender<M, R, S> {
 impl<M, R, S> ServiceSender<M, R, S> {
     pub fn quinn(endpoint: quinn::Endpoint, addr: std::net::SocketAddr) -> Self {
         Self(
-            ServiceSenderInner::Quinn(QuinnRemoteConnection::new(endpoint, addr), PhantomData),
+            ServiceSenderInner::Quinn(QuinnRemoteConnection::new(endpoint, addr)),
             PhantomData,
         )
     }
@@ -540,7 +540,7 @@ impl<M, R, S> ServiceSender<M, R, S> {
     /// requests.
     pub fn local(&self) -> Option<LocalSender<M, S>> {
         match &self.0 {
-            ServiceSenderInner::Local(tx, _) => Some(tx.clone().into()),
+            ServiceSenderInner::Local(tx) => Some(tx.clone().into()),
             ServiceSenderInner::Quinn(..) => None,
         }
     }
@@ -569,8 +569,8 @@ impl<M, R, S> ServiceSender<M, R, S> {
         #[cfg(feature = "rpc")]
         {
             let cloned = match &self.0 {
-                ServiceSenderInner::Local(tx, _) => Request::Local(tx.clone()),
-                ServiceSenderInner::Quinn(connection, _) => Request::Remote(connection.clone()),
+                ServiceSenderInner::Local(tx) => Request::Local(tx.clone()),
+                ServiceSenderInner::Quinn(connection) => Request::Remote(connection.clone()),
             };
             async move {
                 match cloned {
@@ -595,22 +595,22 @@ impl<M, R, S> ServiceSender<M, R, S> {
 }
 
 #[derive(Debug)]
-pub(crate) enum ServiceSenderInner<M, R, S> {
-    Local(tokio::sync::mpsc::Sender<M>, PhantomData<(R, S)>),
+pub(crate) enum ServiceSenderInner<M> {
+    Local(tokio::sync::mpsc::Sender<M>),
     #[cfg(feature = "rpc")]
     #[cfg_attr(quicrpc_docsrs, doc(cfg(feature = "rpc")))]
-    Quinn(QuinnRemoteConnection, PhantomData<(M, R, S)>),
+    Quinn(QuinnRemoteConnection),
     #[cfg(not(feature = "rpc"))]
     #[cfg_attr(quicrpc_docsrs, doc(cfg(feature = "rpc")))]
-    Remote(PhantomData<(R, S)>),
+    Quinn(PhantomData<M>),
 }
 
-impl<M, R, S> Clone for ServiceSenderInner<M, R, S> {
+impl<M> Clone for ServiceSenderInner<M> {
     fn clone(&self) -> Self {
         match self {
-            Self::Local(tx, _) => Self::Local(tx.clone(), PhantomData),
+            Self::Local(tx) => Self::Local(tx.clone()),
             #[cfg(feature = "rpc")]
-            Self::Quinn(conn, _) => Self::Quinn(conn.clone(), PhantomData),
+            Self::Quinn(conn) => Self::Quinn(conn.clone()),
             #[cfg(not(feature = "rpc"))]
             Self::Remote(_) => unreachable!(),
         }
