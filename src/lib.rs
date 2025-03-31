@@ -530,10 +530,12 @@ impl<M, R, S> From<tokio::sync::mpsc::Sender<M>> for ServiceSender<M, R, S> {
 impl<M, R, S> ServiceSender<M, R, S> {
     #[cfg(feature = "rpc")]
     pub fn quinn(endpoint: quinn::Endpoint, addr: std::net::SocketAddr) -> Self {
-        Self(
-            ServiceSenderInner::Quinn(rpc::QuinnRemoteConnection::new(endpoint, addr)),
-            PhantomData,
-        )
+        Self::boxed(rpc::QuinnRemoteConnection::new(endpoint, addr))
+    }
+
+    #[cfg(feature = "rpc")]
+    pub fn boxed(remote: impl rpc::RemoteConnection) -> Self {
+        Self(ServiceSenderInner::Remote(Box::new(remote)), PhantomData)
     }
 
     /// Get the local sender. This is useful if you don't care about remote
@@ -541,7 +543,7 @@ impl<M, R, S> ServiceSender<M, R, S> {
     pub fn local(&self) -> Option<LocalSender<M, S>> {
         match &self.0 {
             ServiceSenderInner::Local(tx) => Some(tx.clone().into()),
-            ServiceSenderInner::Quinn(..) => None,
+            ServiceSenderInner::Remote(..) => None,
         }
     }
 
@@ -568,10 +570,9 @@ impl<M, R, S> ServiceSender<M, R, S> {
     {
         #[cfg(feature = "rpc")]
         {
-            use rpc::RemoteConnection;
             let cloned = match &self.0 {
                 ServiceSenderInner::Local(tx) => Request::Local(tx.clone()),
-                ServiceSenderInner::Quinn(connection) => Request::Remote(connection.clone()),
+                ServiceSenderInner::Remote(connection) => Request::Remote(connection.clone_boxed()),
             };
             async move {
                 match cloned {
@@ -600,10 +601,10 @@ pub(crate) enum ServiceSenderInner<M> {
     Local(tokio::sync::mpsc::Sender<M>),
     #[cfg(feature = "rpc")]
     #[cfg_attr(quicrpc_docsrs, doc(cfg(feature = "rpc")))]
-    Quinn(rpc::QuinnRemoteConnection),
+    Remote(Box<dyn rpc::RemoteConnection>),
     #[cfg(not(feature = "rpc"))]
     #[cfg_attr(quicrpc_docsrs, doc(cfg(feature = "rpc")))]
-    Quinn(PhantomData<M>),
+    Remote(PhantomData<M>),
 }
 
 impl<M> Clone for ServiceSenderInner<M> {
@@ -611,9 +612,9 @@ impl<M> Clone for ServiceSenderInner<M> {
         match self {
             Self::Local(tx) => Self::Local(tx.clone()),
             #[cfg(feature = "rpc")]
-            Self::Quinn(conn) => Self::Quinn(conn.clone()),
+            Self::Remote(conn) => Self::Remote(conn.clone_boxed()),
             #[cfg(not(feature = "rpc"))]
-            Self::Quinn(_) => unreachable!(),
+            Self::Remote(_) => unreachable!(),
         }
     }
 }
@@ -630,6 +631,10 @@ pub enum RequestError {
     #[cfg_attr(quicrpc_docsrs, doc(cfg(feature = "rpc")))]
     #[error("error opening stream: {0}")]
     Connection(#[from] quinn::ConnectionError),
+    #[cfg(feature = "rpc")]
+    #[cfg_attr(quicrpc_docsrs, doc(cfg(feature = "rpc")))]
+    #[error("error opening stream: {0}")]
+    Other(#[from] anyhow::Error),
 }
 
 /// Error type that subsumes all possible errors in this crate, for convenience.
@@ -665,6 +670,8 @@ impl From<RequestError> for io::Error {
             RequestError::Connect(e) => io::Error::other(e),
             #[cfg(feature = "rpc")]
             RequestError::Connection(e) => e.into(),
+            #[cfg(feature = "rpc")]
+            RequestError::Other(e) => io::Error::other(e),
         }
     }
 }
@@ -713,7 +720,7 @@ pub mod rpc {
             RecvError, SendError,
         },
         util::{now_or_never, AsyncReadVarintExt, WriteVarintExt},
-        RequestError, RpcMessage,
+        BoxedFuture, RequestError, RpcMessage,
     };
 
     #[derive(Debug, thiserror::Error)]
@@ -733,53 +740,50 @@ pub mod rpc {
         }
     }
 
-    pub trait RemoteConnection {
+    pub trait RemoteConnection: Send + Sync + Debug + 'static {
+        fn clone_boxed(&self) -> Box<dyn RemoteConnection>;
+
         fn open_bi(
             &self,
-        ) -> impl Future<Output = Result<(quinn::SendStream, quinn::RecvStream), RequestError>> + 'static;
+        ) -> BoxedFuture<std::result::Result<(quinn::SendStream, quinn::RecvStream), RequestError>>;
     }
 
     /// A connection to a remote service.
     ///
     /// Initially this does just have the endpoint and the address. Once a
     /// connection is established, it will be stored.
+    #[derive(Debug, Clone)]
+    pub(crate) struct QuinnRemoteConnection(Arc<QuinnRemoteConnectionInner>);
+
     #[derive(Debug)]
-    pub(crate) struct QuinnRemoteConnection {
+    struct QuinnRemoteConnectionInner {
         pub endpoint: quinn::Endpoint,
         pub addr: std::net::SocketAddr,
-        pub connection: Arc<tokio::sync::Mutex<Option<quinn::Connection>>>,
-    }
-
-    impl Clone for QuinnRemoteConnection {
-        fn clone(&self) -> Self {
-            Self {
-                endpoint: self.endpoint.clone(),
-                addr: self.addr,
-                connection: self.connection.clone(),
-            }
-        }
+        pub connection: tokio::sync::Mutex<Option<quinn::Connection>>,
     }
 
     impl QuinnRemoteConnection {
         pub fn new(endpoint: quinn::Endpoint, addr: std::net::SocketAddr) -> Self {
-            Self {
+            Self(Arc::new(QuinnRemoteConnectionInner {
                 endpoint,
                 addr,
                 connection: Default::default(),
-            }
+            }))
         }
     }
 
     impl RemoteConnection for QuinnRemoteConnection {
+        fn clone_boxed(&self) -> Box<dyn RemoteConnection> {
+            Box::new(self.clone())
+        }
+
         fn open_bi(
             &self,
-        ) -> impl Future<Output = Result<(quinn::SendStream, quinn::RecvStream), RequestError>> + 'static
+        ) -> BoxedFuture<std::result::Result<(quinn::SendStream, quinn::RecvStream), RequestError>>
         {
-            let endpoint = self.endpoint.clone();
-            let connection = self.connection.clone();
-            let addr = self.addr;
-            async move {
-                let mut guard = connection.lock().await;
+            let this = self.0.clone();
+            Box::pin(async move {
+                let mut guard = this.connection.lock().await;
                 let pair = match guard.as_mut() {
                     Some(conn) => {
                         // try to reuse the connection
@@ -788,23 +792,23 @@ pub mod rpc {
                             Err(_) => {
                                 // try with a new connection, just once
                                 *guard = None;
-                                connect_and_open_bi(endpoint, addr, guard).await?
+                                connect_and_open_bi(&this.endpoint, &this.addr, guard).await?
                             }
                         }
                     }
-                    None => connect_and_open_bi(endpoint, addr, guard).await?,
+                    None => connect_and_open_bi(&this.endpoint, &this.addr, guard).await?,
                 };
                 Ok(pair)
-            }
+            })
         }
     }
 
     async fn connect_and_open_bi(
-        endpoint: quinn::Endpoint,
-        addr: std::net::SocketAddr,
+        endpoint: &quinn::Endpoint,
+        addr: &std::net::SocketAddr,
         mut guard: tokio::sync::MutexGuard<'_, Option<quinn::Connection>>,
     ) -> Result<(quinn::SendStream, quinn::RecvStream), RequestError> {
-        let conn = endpoint.connect(addr, "localhost")?.await?;
+        let conn = endpoint.connect(*addr, "localhost")?.await?;
         let (send, recv) = conn.open_bi().await?;
         *guard = Some(conn);
         Ok((send, recv))
@@ -842,7 +846,7 @@ pub mod rpc {
     pub struct RemoteRead(quinn::RecvStream);
 
     impl RemoteRead {
-        pub(crate) fn new(recv: quinn::RecvStream) -> Self {
+        pub fn new(recv: quinn::RecvStream) -> Self {
             Self(recv)
         }
     }
@@ -881,7 +885,7 @@ pub mod rpc {
     pub struct RemoteWrite(quinn::SendStream);
 
     impl RemoteWrite {
-        pub(crate) fn new(send: quinn::SendStream) -> Self {
+        pub fn new(send: quinn::SendStream) -> Self {
             Self(send)
         }
     }

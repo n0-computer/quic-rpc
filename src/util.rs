@@ -272,6 +272,7 @@ mod varint_util {
     }
 
     pub trait WriteVarintExt: std::io::Write {
+        #[allow(dead_code)]
         fn write_varint_u64(&mut self, value: u64) -> io::Result<usize>;
         fn write_length_prefixed<T: Serialize>(&mut self, value: T) -> io::Result<()>;
     }
@@ -312,7 +313,7 @@ mod fuse_wrapper {
         }
     }
 }
-pub use fuse_wrapper::FusedOneshotReceiver;
+pub(crate) use fuse_wrapper::FusedOneshotReceiver;
 
 #[cfg(feature = "rpc")]
 mod now_or_never {
@@ -345,7 +346,7 @@ mod now_or_never {
     }
 
     /// Attempts to complete a future immediately, returning None if it would block
-    pub fn now_or_never<F: Future>(future: F) -> Option<F::Output> {
+    pub(crate) fn now_or_never<F: Future>(future: F) -> Option<F::Output> {
         let waker = noop_waker();
         let mut cx = Context::from_waker(&waker);
 
@@ -358,4 +359,4 @@ mod now_or_never {
     }
 }
 #[cfg(feature = "rpc")]
-pub use now_or_never::now_or_never;
+pub(crate) use now_or_never::now_or_never;

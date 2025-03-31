@@ -1,0 +1,18 @@
+[package]
+name = "quic-rpc-iroh"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0.97"
+iroh = "0.34.0"
+quic-rpc = { path = ".." }
+tokio = { version = "1.44.1", default-features = false, features = ["sync"] }
+serde = { version = "1", default-features = false }
+tracing = { version = "0.1.41" }
+postcard = { version = "1.1.1", features = ["alloc", "use-std"] }
+
+[dev-dependencies]
+n0-future = { version = "0.1.2", default-features = false }
+quic-rpc-derive = { path = "../quic-rpc-derive" }
+tracing-subscriber = { version = "0.3.19", features = ["fmt"] }

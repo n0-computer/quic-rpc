@@ -61,7 +61,7 @@ message_spans = []
 default = ["rpc", "test", "message_spans"]
 
 [workspace]
-members = ["quic-rpc-derive"]
+members = ["quic-rpc-derive", "quic-rpc-iroh"]
 
 [package.metadata.docs.rs]
 all-features = true
