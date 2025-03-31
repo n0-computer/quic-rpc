@@ -3,7 +3,7 @@ use std::{collections::BTreeMap, sync::Arc};
 use anyhow::bail;
 use n0_future::task::{self, AbortOnDropHandle};
 use quic_rpc::{
-    LocalSender, Request, Service, ServiceSender, WithChannels,
+    Client, LocalSender, Request, Service, WithChannels,
     channel::{oneshot, spsc},
     rpc::Handler,
 };
@@ -98,13 +98,13 @@ impl StorageActor {
 }
 
 struct StorageApi {
-    inner: ServiceSender<StorageMessage, StorageProtocol, StorageService>,
+    inner: Client<StorageMessage, StorageProtocol, StorageService>,
 }
 
 impl StorageApi {
     pub fn connect(endpoint: iroh::Endpoint, addr: iroh::NodeAddr) -> anyhow::Result<StorageApi> {
         Ok(StorageApi {
-            inner: ServiceSender::boxed(IrohRemoteConnection::new(
+            inner: Client::boxed(IrohRemoteConnection::new(
                 endpoint,
                 addr,
                 b"RPC-Storage".to_vec(),
@@ -132,7 +132,7 @@ impl StorageApi {
 
     pub async fn get(&self, key: String) -> anyhow::Result<oneshot::Receiver<Option<String>>> {
         let msg = Get { key };
-        match self.inner.sender().await? {
+        match self.inner.request().await? {
             Request::Local(request) => {
                 let (tx, rx) = oneshot::channel();
                 request.send((msg, tx)).await?;
@@ -147,7 +147,7 @@ impl StorageApi {
 
     pub async fn list(&self) -> anyhow::Result<spsc::Receiver<String>> {
         let msg = List;
-        match self.inner.sender().await? {
+        match self.inner.request().await? {
             Request::Local(request) => {
                 let (tx, rx) = spsc::channel(10);
                 request.send((msg, tx)).await?;
@@ -162,7 +162,7 @@ impl StorageApi {
 
     pub async fn set(&self, key: String, value: String) -> anyhow::Result<oneshot::Receiver<()>> {
         let msg = Set { key, value };
-        match self.inner.sender().await? {
+        match self.inner.request().await? {
             Request::Local(request) => {
                 let (tx, rx) = oneshot::channel();
                 request.send((msg, tx)).await?;

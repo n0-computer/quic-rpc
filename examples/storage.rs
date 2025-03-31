@@ -10,7 +10,7 @@ use quic_rpc::{
     channel::{none::NoReceiver, oneshot, spsc},
     rpc::{listen, Handler},
     util::{make_client_endpoint, make_server_endpoint},
-    Channels, LocalSender, Request, Service, ServiceSender, WithChannels,
+    Channels, Client, LocalSender, Request, Service, WithChannels,
 };
 use serde::{Deserialize, Serialize};
 use tracing::info;
@@ -115,13 +115,13 @@ impl StorageActor {
     }
 }
 struct StorageApi {
-    inner: ServiceSender<StorageMessage, StorageProtocol, StorageService>,
+    inner: Client<StorageMessage, StorageProtocol, StorageService>,
 }
 
 impl StorageApi {
     pub fn connect(endpoint: quinn::Endpoint, addr: SocketAddr) -> anyhow::Result<StorageApi> {
         Ok(StorageApi {
-            inner: ServiceSender::quinn(endpoint, addr),
+            inner: Client::quinn(endpoint, addr),
         })
     }
 
@@ -145,7 +145,7 @@ impl StorageApi {
 
     pub async fn get(&self, key: String) -> anyhow::Result<oneshot::Receiver<Option<String>>> {
         let msg = Get { key };
-        match self.inner.sender().await? {
+        match self.inner.request().await? {
             Request::Local(request) => {
                 let (tx, rx) = oneshot::channel();
                 request.send((msg, tx)).await?;
@@ -160,7 +160,7 @@ impl StorageApi {
 
     pub async fn list(&self) -> anyhow::Result<spsc::Receiver<String>> {
         let msg = List;
-        match self.inner.sender().await? {
+        match self.inner.request().await? {
             Request::Local(request) => {
                 let (tx, rx) = spsc::channel(10);
                 request.send((msg, tx)).await?;
@@ -175,7 +175,7 @@ impl StorageApi {
 
     pub async fn set(&self, key: String, value: String) -> anyhow::Result<oneshot::Receiver<()>> {
         let msg = Set { key, value };
-        match self.inner.sender().await? {
+        match self.inner.request().await? {
             Request::Local(request) => {
                 let (tx, rx) = oneshot::channel();
                 request.send((msg, tx)).await?;

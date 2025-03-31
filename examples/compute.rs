@@ -14,7 +14,7 @@ use quic_rpc::{
     channel::{oneshot, spsc},
     rpc::{listen, Handler, RemoteRead},
     util::{make_client_endpoint, make_server_endpoint},
-    LocalSender, Request, Service, ServiceSender, WithChannels,
+    Client, LocalSender, Request, Service, WithChannels,
 };
 use quic_rpc_derive::rpc_requests;
 use serde::{Deserialize, Serialize};
@@ -157,13 +157,13 @@ impl ComputeActor {
 // The API for interacting with the ComputeService
 #[derive(Clone)]
 struct ComputeApi {
-    inner: ServiceSender<ComputeMessage, ComputeProtocol, ComputeService>,
+    inner: Client<ComputeMessage, ComputeProtocol, ComputeService>,
 }
 
 impl ComputeApi {
     pub fn connect(endpoint: quinn::Endpoint, addr: SocketAddr) -> anyhow::Result<ComputeApi> {
         Ok(ComputeApi {
-            inner: ServiceSender::quinn(endpoint, addr),
+            inner: Client::quinn(endpoint, addr),
         })
     }
 
@@ -188,7 +188,7 @@ impl ComputeApi {
 
     pub async fn sqr(&self, num: u64) -> anyhow::Result<oneshot::Receiver<u128>> {
         let msg = Sqr { num };
-        match self.inner.sender().await? {
+        match self.inner.request().await? {
             Request::Local(request) => {
                 let (tx, rx) = oneshot::channel();
                 request.send((msg, tx)).await?;
@@ -203,7 +203,7 @@ impl ComputeApi {
 
     pub async fn sum(&self) -> anyhow::Result<(spsc::Sender<i64>, oneshot::Receiver<i64>)> {
         let msg = Sum;
-        match self.inner.sender().await? {
+        match self.inner.request().await? {
             Request::Local(request) => {
                 let (num_tx, num_rx) = spsc::channel(10);
                 let (sum_tx, sum_rx) = oneshot::channel();
@@ -219,7 +219,7 @@ impl ComputeApi {
 
     pub async fn fibonacci(&self, max: u64) -> anyhow::Result<spsc::Receiver<u64>> {
         let msg = Fibonacci { max };
-        match self.inner.sender().await? {
+        match self.inner.request().await? {
             Request::Local(request) => {
                 let (tx, rx) = spsc::channel(128);
                 request.send((msg, tx)).await?;
@@ -237,7 +237,7 @@ impl ComputeApi {
         initial: u64,
     ) -> anyhow::Result<(spsc::Sender<u64>, spsc::Receiver<u64>)> {
         let msg = Multiply { initial };
-        match self.inner.sender().await? {
+        match self.inner.request().await? {
             Request::Local(request) => {
                 let (in_tx, in_rx) = spsc::channel(128);
                 let (out_tx, out_rx) = spsc::channel(128);
