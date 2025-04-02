@@ -1,6 +1,6 @@
 use std::{collections::BTreeMap, sync::Arc};
 
-use anyhow::bail;
+use anyhow::Context;
 use n0_future::task::{self, AbortOnDropHandle};
 use quic_rpc::{
     Client, LocalSender, Request, Service, WithChannels,
@@ -113,10 +113,7 @@ impl StorageApi {
     }
 
     pub fn listen(&self, endpoint: iroh::Endpoint) -> anyhow::Result<AbortOnDropHandle<()>> {
-        let Some(local) = self.inner.local() else {
-            bail!("cannot listen on a remote service");
-        };
-        let local = local.clone();
+        let local = self.inner.local().context("can not listen on remote service")?;
         let handler: Handler<StorageProtocol> = Arc::new(move |msg, _, tx| {
             let local = local.clone();
             Box::pin(match msg {

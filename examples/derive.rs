@@ -116,7 +116,6 @@ impl StorageApi {
         let Some(local) = self.inner.local() else {
             bail!("cannot listen on a remote service");
         };
-        let local = local.clone();
         let handler: Handler<StorageProtocol> = Arc::new(move |msg, _, tx| {
             let local = local.clone();
             Box::pin(match msg {
