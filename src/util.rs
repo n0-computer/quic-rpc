@@ -1,3 +1,7 @@
+//! Utilities
+//!
+//! This module contains utilities to read and write varints, as well as
+//! functions to set up quinn endpoints for local rpc and testing.
 #[cfg(feature = "test")]
 #[cfg_attr(quicrpc_docsrs, doc(cfg(feature = "test")))]
 mod quinn_setup_utils {
@@ -261,7 +265,11 @@ mod varint_util {
         Ok(())
     }
 
+    /// Provides a fn to read a varint from an AsyncRead source.
     pub trait AsyncReadVarintExt: AsyncRead + Unpin {
+        /// Reads a u64 varint from an AsyncRead source, using the Postcard/LEB128 format.
+        ///
+        /// If the stream is at the end, this returns `Ok(None)`.
         fn read_varint_u64(&mut self) -> impl Future<Output = io::Result<Option<u64>>>;
     }
 
@@ -271,9 +279,13 @@ mod varint_util {
         }
     }
 
+    /// Provides a fn to write a varint to an [`io::Write`] target, as well as a
+    /// helper to write a length-prefixed value.
     pub trait WriteVarintExt: std::io::Write {
+        /// Write a varint
         #[allow(dead_code)]
         fn write_varint_u64(&mut self, value: u64) -> io::Result<usize>;
+        /// Write a value with a varint enoded length prefix.
         fn write_length_prefixed<T: Serialize>(&mut self, value: T) -> io::Result<()>;
     }
 

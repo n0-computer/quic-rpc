@@ -506,6 +506,22 @@ impl<I: Channels<S>, S: Service> Deref for WithChannels<I, S> {
     }
 }
 
+/// A client to the service `S` using the local message type `M` and the remote
+/// message type `R`.
+///
+/// `R` is typically a serializable enum with a case for each possible message
+/// type. It can be thought of as the definition of the protocol.
+///
+/// `M` is typically an enum with a case for each possible message type, where
+/// each case is a `WithChannels` struct that extends the inner protocol message
+/// with a local tx and rx channel as well as a tracing span to allow for
+/// keeping tracing context across async boundaries.
+///
+/// In some cases, `M` and `R` can be enums for a subset of the protocol. E.g.
+/// if you have a subsystem that only handles a part of the messages.
+///
+/// The service type `S` provides a scope for the protocol messages. It exists
+/// so you can use the same message with multiple services.
 #[derive(Debug)]
 pub struct Client<M, R, S>(ClientInner<M>, PhantomData<(R, S)>);
 
@@ -528,11 +544,16 @@ impl<M, R, S> From<tokio::sync::mpsc::Sender<M>> for Client<M, R, S> {
 }
 
 impl<M, R, S> Client<M, R, S> {
+    /// Create a new client to a remote service using the given quinn `endpoint`
+    /// and a socket `addr` of the remote service.
     #[cfg(feature = "rpc")]
     pub fn quinn(endpoint: quinn::Endpoint, addr: std::net::SocketAddr) -> Self {
         Self::boxed(rpc::QuinnRemoteConnection::new(endpoint, addr))
     }
 
+    /// Create a new client from a `rpc::RemoteConnection` trait object.
+    /// This is used from crates that want to provide other transports than quinn,
+    /// such as the iroh transport.
     #[cfg(feature = "rpc")]
     pub fn boxed(remote: impl rpc::RemoteConnection) -> Self {
         Self(ClientInner::Remote(Box::new(remote)), PhantomData)
@@ -725,12 +746,17 @@ pub mod rpc {
         BoxedFuture, RequestError, RpcMessage,
     };
 
+    /// Error that can occur when writing the initial message when doing a
+    /// cross-process RPC.
     #[derive(Debug, thiserror::Error)]
     pub enum WriteError {
-        #[error("error serializing: {0}")]
-        Io(#[from] io::Error),
+        /// Error writing to the stream with quinn
         #[error("error writing to stream: {0}")]
         Quinn(#[from] quinn::WriteError),
+        /// Generic IO error, e.g. when serializing the message or when using
+        /// other transports.
+        #[error("error serializing: {0}")]
+        Io(#[from] io::Error),
     }
 
     impl From<WriteError> for io::Error {
@@ -742,9 +768,21 @@ pub mod rpc {
         }
     }
 
+    /// Trait to abstract over a client connection to a remote service.
+    ///
+    /// This isn't really that much abstracted, since the result of open_bi must
+    /// still be a quinn::SendStream and quinn::RecvStream. This is just so we
+    /// can have different connection implementations for normal quinn connections,
+    /// iroh connections, and possibly quinn connections with disabled encryption
+    /// for performance.
+    ///
+    /// This is done as a trait instead of an enum, so we don't need an iroh
+    /// dependency in the main crate.
     pub trait RemoteConnection: Send + Sync + Debug + 'static {
+        /// Boxed clone so the trait is dynable.
         fn clone_boxed(&self) -> Box<dyn RemoteConnection>;
 
+        /// Open a bidirectional stream to the remote service.
         fn open_bi(
             &self,
         ) -> BoxedFuture<std::result::Result<(quinn::SendStream, quinn::RecvStream), RequestError>>;
@@ -1058,9 +1096,12 @@ pub mod rpc {
     }
 }
 
+/// A request to a service. This can be either local or remote.
 #[derive(Debug)]
 pub enum Request<L, R> {
+    /// Local request
     Local(L),
+    /// Remote request
     Remote(R),
 }
 
