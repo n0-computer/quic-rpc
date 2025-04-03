@@ -1,3 +1,71 @@
+//! # A minimal RPC library for use with [iroh].
+//!
+//! ## Goals
+//!
+//! The main goal of this library is to provide an rpc framework that is so
+//! lightweight that it can be also used for async boundaries within a single
+//! process without any overhead, instead of the usual practice of a mpsc channel
+//! with a giant message enum where each enum case contains mpsc or oneshot
+//! backchannels.
+//!
+//! The second goal is to lightly abstract over remote and local communication,
+//! so that a system can be interacted with cross process or even across networks.
+//!
+//! ## Non-goals
+//!
+//! - Cross language interop. This is for talking from rust to rust
+//! - Any kind of versioning. You have to do this yourself
+//! - Making remote message passing look like local async function calls
+//! - Being runtime agnostic. This is for tokio
+//!
+//! ## Interaction patterns
+//!
+//! For each request, there can be a response and update channel. Each channel
+//! can be either oneshot, carry multiple messages, or be disabled. This enables
+//! the typical interaction patterns known from libraries like grpc:
+//!
+//! - rpc: 1 request, 1 response
+//! - server streaming: 1 request, multiple responses
+//! - client streaming: multiple requests, 1 response
+//! - bidi streaming: multiple requests, multiple responses
+//!
+//! as well as more complex patterns. It is however not possible to have multiple
+//! differently typed tx channels for a single message type.
+//!
+//! ## Transports
+//!
+//! We don't abstract over the send and receive stream. These must always be
+//! quinn streams, specifically streams from the [iroh quinn fork].
+//!
+//! This restricts the possible rpc transports to quinn (QUIC with dial by
+//! socket address) and iroh (QUIC with dial by node id).
+//!
+//! An upside of this is that the quinn streams can be tuned for each rpc
+//! request, e.g. by setting the stream priority or by directy using more
+//! advanced part of the quinn SendStream and RecvStream APIs such as out of
+//! order receiving.
+//!
+//! ## Serialization
+//!
+//! Serialization is currently done using [postcard]. Messages are always
+//! length prefixed with postcard varints, even in the case of oneshot
+//! channels.
+//!
+//! ## Features
+//!
+//! - `rpc`: Enable the rpc features. Enabled by default.
+//!     By disabling this feature, all rpc related dependencies are removed.
+//!     The remaining dependencies are just serde, tokio and tokio-util.
+//! - `message_spans`: Enable tracing spans for messages. Enabled by default.
+//!     This is useful even without rpc, to not lose tracing context when message
+//!     passing. This is frequently done manually. This obviously requires
+//!     a dependency on tracing.
+//! - `test`: Test features. Mostly easy way to create two connected quinn endpoints.
+//!
+//! - [iroh]: https://docs.rs/iroh/latest/iroh/index.html
+//! - [quinn]: https://docs.rs/quinn/latest/quinn/index.html
+//! - [bytes]: https://docs.rs/bytes/latest/bytes/index.html
+//! - [iroh quinn fork]: https://docs.rs/iroh-quinn/latest/iroh-quinn/index.html
 #![cfg_attr(quicrpc_docsrs, feature(doc_cfg))]
 use std::{fmt::Debug, future::Future, io, marker::PhantomData, ops::Deref};
 
@@ -28,6 +96,9 @@ impl<T> RpcMessage for T where
 ///
 /// This is usually implemented by a zero-sized struct.
 /// It has various bounds to make derives easier.
+///
+/// A service acts as a scope for defining the tx and rx channels for each
+/// message type, and provides some type safety when sending messages.
 pub trait Service: Send + Sync + Debug + Clone + 'static {}
 
 mod sealed {
@@ -40,7 +111,7 @@ pub trait Sender: Debug + Sealed {}
 /// Sealed marker trait for a receiver
 pub trait Receiver: Debug + Sealed {}
 
-/// Channels to be used for a message and service
+/// Trait to specify channels for a message and service
 pub trait Channels<S: Service> {
     /// The sender type, can be either spsc, oneshot or none
     type Tx: Sender;
@@ -76,17 +147,35 @@ pub mod channel {
         use super::{RecvError, SendError};
         use crate::util::FusedOneshotReceiver;
 
+        /// Create a local oneshot sender and receiver pair.
+        ///
+        /// This is currently using a tokio channel pair internally.
         pub fn channel<T>() -> (Sender<T>, Receiver<T>) {
             let (tx, rx) = tokio::sync::oneshot::channel();
             (tx.into(), rx.into())
         }
 
+        /// A generic boxed sender.
+        ///
+        /// Remote senders are always boxed, since for remote communication the boxing
+        /// overhead is negligible. However, boxing can also be used for local communication,
+        /// e.g. when applying a transform or filter to the message before sending it.
         pub type BoxedSender<T> = Box<
             dyn FnOnce(T) -> crate::BoxedFuture<'static, io::Result<()>> + Send + Sync + 'static,
         >;
 
+        /// A generic boxed receiver
+        ///
+        /// Remote receivers are always boxed, since for remote communication the boxing
+        /// overhead is negligible. However, boxing can also be used for local communication,
+        /// e.g. when applying a transform or filter to the message before receiving it.
         pub type BoxedReceiver<T> = crate::BoxedFuture<'static, io::Result<T>>;
 
+        /// A oneshot sender.
+        ///
+        /// Compared to a local onehsot sender, sending a message is async since in the case
+        /// of remote communication, sending over the wire is async. Other than that it
+        /// behaves like a local oneshot sender and has no overhead in the local case.
         pub enum Sender<T> {
             Tokio(tokio::sync::oneshot::Sender<T>),
             Boxed(BoxedSender<T>),
@@ -119,6 +208,10 @@ pub mod channel {
         }
 
         impl<T> Sender<T> {
+            /// Send a message
+            ///
+            /// If this is a boxed sender that represents a remote connection, sending may yield or fail with an io error.
+            /// Local senders will never yield, but can fail if the receiver has been closed.
             pub async fn send(self, value: T) -> std::result::Result<(), SendError> {
                 match self {
                     Sender::Tokio(tx) => tx.send(value).map_err(|_| SendError::ReceiverClosed),
@@ -128,6 +221,7 @@ pub mod channel {
         }
 
         impl<T> Sender<T> {
+            /// Check if this is a remote sender
             pub fn is_rpc(&self) -> bool
             where
                 T: 'static,
@@ -142,6 +236,10 @@ pub mod channel {
         impl<T> crate::sealed::Sealed for Sender<T> {}
         impl<T> crate::Sender for Sender<T> {}
 
+        /// A oneshot receiver.
+        ///
+        /// Compared to a local oneshot receiver, receiving a message can fail not just
+        /// when the sender has been closed, but also when the remote connection fails.
         pub enum Receiver<T> {
             Tokio(FusedOneshotReceiver<T>),
             Boxed(BoxedReceiver<T>),
@@ -209,11 +307,22 @@ pub mod channel {
         use super::{RecvError, SendError};
         use crate::RpcMessage;
 
+        /// Create a local spsc sender and receiver pair, with the given buffer size.
+        ///
+        /// This is currently using a tokio channel pair internally.
         pub fn channel<T>(buffer: usize) -> (Sender<T>, Receiver<T>) {
             let (tx, rx) = tokio::sync::mpsc::channel(buffer);
             (tx.into(), rx.into())
         }
 
+        /// Single producer, single consumer sender.
+        ///
+        /// For the local case, this wraps a tokio::sync::mpsc::Sender. However,
+        /// due to the fact that a stream to a remote service can not be cloned,
+        /// this can also not be cloned.
+        ///
+        /// This forces you to use senders in a linear way, passing out references
+        /// to the sender to other tasks instead of cloning it.
         pub enum Sender<T> {
             Tokio(tokio::sync::mpsc::Sender<T>),
             Boxed(Box<dyn BoxedSender<T>>),
@@ -249,16 +358,26 @@ pub mod channel {
         }
 
         pub trait BoxedSender<T>: Debug + Send + Sync + 'static {
+            /// Send a message.
+            ///
+            /// For the remote case, if the message can not be completely sent,
+            /// this must return an error and disable the channel.
             fn send(
                 &mut self,
                 value: T,
             ) -> Pin<Box<dyn Future<Output = io::Result<()>> + Send + '_>>;
 
+            /// Try to send a message, returning as fast as possible if sending
+            /// is not currently possible.
+            ///
+            /// For the remote case, it must be guaranteed that the message is
+            /// either completely sent or not at all.
             fn try_send(
                 &mut self,
                 value: T,
             ) -> Pin<Box<dyn Future<Output = io::Result<bool>> + Send + '_>>;
 
+            /// True if this is a remote sender
             fn is_rpc(&self) -> bool;
         }
 
@@ -271,13 +390,18 @@ pub mod channel {
         impl<T> Debug for Sender<T> {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                 match self {
-                    Self::Tokio(_) => f.debug_tuple("Tokio").finish(),
-                    Self::Boxed(_) => f.debug_tuple("Boxed").finish(),
+                    Self::Tokio(x) => f
+                        .debug_struct("Tokio")
+                        .field("avail", &x.capacity())
+                        .field("cap", &x.max_capacity())
+                        .finish(),
+                    Self::Boxed(inner) => f.debug_tuple("Boxed").field(&inner).finish(),
                 }
             }
         }
 
         impl<T: RpcMessage> Sender<T> {
+            /// Send a message and yield until either it is sent or an error occurs.
             pub async fn send(&mut self, value: T) -> std::result::Result<(), SendError> {
                 match self {
                     Sender::Tokio(tx) => {
@@ -287,6 +411,20 @@ pub mod channel {
                 }
             }
 
+            /// Try to send a message, returning as fast as possible if sending
+            /// is not currently possible. This can be used to send ephemeral
+            /// messages.
+            ///
+            /// For the local case, this will immediately return false if the
+            /// channel is full.
+            ///
+            /// For the remote case, it will attempt to send the message and
+            /// return false if sending the first byte fails, otherwise yield
+            /// until the message is completely sent or an error occurs. This
+            /// guarantees that the message is sent either completely or not at
+            /// all.
+            ///
+            /// Returns true if the message was sent.
             pub async fn try_send(&mut self, value: T) -> std::result::Result<(), SendError> {
                 match self {
                     Sender::Tokio(tx) => match tx.try_send(value) {
@@ -347,8 +485,12 @@ pub mod channel {
         impl<T> Debug for Receiver<T> {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                 match self {
-                    Self::Tokio(_) => f.debug_tuple("Tokio").finish(),
-                    Self::Boxed(_) => f.debug_tuple("Boxed").finish(),
+                    Self::Tokio(inner) => f
+                        .debug_struct("Tokio")
+                        .field("avail", &inner.capacity())
+                        .field("cap", &inner.max_capacity())
+                        .finish(),
+                    Self::Boxed(inner) => f.debug_tuple("Boxed").field(&inner).finish(),
                 }
             }
         }
@@ -361,11 +503,13 @@ pub mod channel {
     pub mod none {
         use crate::sealed::Sealed;
 
+        /// A sender that does nothing. This is used when no communication is needed.
         #[derive(Debug)]
         pub struct NoSender;
         impl Sealed for NoSender {}
         impl crate::Sender for NoSender {}
 
+        /// A receiver that does nothing. This is used when no communication is needed.
         #[derive(Debug)]
         pub struct NoReceiver;
 
@@ -380,8 +524,12 @@ pub mod channel {
     /// generic io error.
     #[derive(Debug, thiserror::Error)]
     pub enum SendError {
+        /// The receiver has been closed. This is the only error that can occur
+        /// for local communication.
         #[error("receiver closed")]
         ReceiverClosed,
+        /// The underlying io error. This can occur for remote communication,
+        /// due to a network error or serialization error.
         #[error("io error: {0}")]
         Io(#[from] io::Error),
     }
@@ -402,8 +550,12 @@ pub mod channel {
     /// generic io error.
     #[derive(Debug, thiserror::Error)]
     pub enum RecvError {
+        /// The sender has been closed. This is the only error that can occur
+        /// for local communication.
         #[error("sender closed")]
         SenderClosed,
+        /// An io error occurred. This can occur for remote communication,
+        /// due to a network error or deserialization error.
         #[error("io error: {0}")]
         Io(#[from] io::Error),
     }
@@ -422,7 +574,11 @@ pub mod channel {
 /// This expands the protocol message to a full message that includes the
 /// active and unserializable channels.
 ///
-/// rx and tx can be set to an appropriate channel kind.
+/// The channel kind for rx and tx is defined by implementing the `Channels`
+/// trait, either manually or using a macro.
+///
+/// When the `message_spans` feature is enabled, this also includes a tracing
+/// span to carry the tracing context during message passing.
 pub struct WithChannels<I: Channels<S>, S: Service> {
     /// The inner message.
     pub inner: I,
@@ -447,6 +603,7 @@ impl<I: Channels<S> + Debug, S: Service> Debug for WithChannels<I, S> {
 }
 
 impl<I: Channels<S>, S: Service> WithChannels<I, S> {
+    /// Get the parent span
     #[cfg(feature = "message_spans")]
     pub fn parent_span_opt(&self) -> Option<&tracing::Span> {
         Some(&self.span)
@@ -497,7 +654,10 @@ where
     }
 }
 
-/// Deref so you can access the inner fields directly
+/// Deref so you can access the inner fields directly.
+///
+/// If the inner message has fields named `tx`, `rx` or `span`, you need to use the
+/// `inner` field to access them.
 impl<I: Channels<S>, S: Service> Deref for WithChannels<I, S> {
     type Target = I;
 
@@ -568,7 +728,8 @@ impl<M, R, S> Client<M, R, S> {
         }
     }
 
-    /// Create a sender that allows sending messages to the service.
+    /// Start a request by creating a sender that can be used to send the initial
+    /// message to the local or remote service.
     ///
     /// In the local case, this is just a clone which has almost zero overhead.
     /// Creating a local sender can not fail.
@@ -644,14 +805,17 @@ impl<M> Clone for ClientInner<M> {
 /// an empty enum since local requests can not fail.
 #[derive(Debug, thiserror::Error)]
 pub enum RequestError {
+    /// Error in quinn during connect
     #[cfg(feature = "rpc")]
     #[cfg_attr(quicrpc_docsrs, doc(cfg(feature = "rpc")))]
     #[error("error establishing connection: {0}")]
     Connect(#[from] quinn::ConnectError),
+    /// Error in quinn when the connection already exists, when opening a stream pair
     #[cfg(feature = "rpc")]
     #[cfg_attr(quicrpc_docsrs, doc(cfg(feature = "rpc")))]
     #[error("error opening stream: {0}")]
     Connection(#[from] quinn::ConnectionError),
+    /// Generic error for non-quinn transports
     #[cfg(feature = "rpc")]
     #[cfg_attr(quicrpc_docsrs, doc(cfg(feature = "rpc")))]
     #[error("error opening stream: {0}")]

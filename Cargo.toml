@@ -53,9 +53,9 @@ n0-future = { version = "0.1.2" }
 
 [features]
 # enable the remote transport
-rpc = ["dep:quinn", "dep:postcard", "dep:smallvec", "dep:tracing", "tokio/io-util"]
+rpc = ["dep:quinn", "dep:postcard", "dep:anyhow", "dep:smallvec", "dep:tracing", "tokio/io-util"]
 # add test utilities
-test = ["dep:rustls", "dep:rcgen", "dep:anyhow", "dep:futures-buffered"]
+test = ["rpc", "dep:rustls", "dep:rcgen", "dep:anyhow", "dep:futures-buffered"]
 # pick up parent span when creating channel messages
 message_spans = []
 default = ["rpc", "test", "message_spans"]
