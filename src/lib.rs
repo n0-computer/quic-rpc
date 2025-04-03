@@ -170,6 +170,18 @@ pub mod channel {
             dyn FnOnce(T) -> crate::BoxedFuture<'static, io::Result<()>> + Send + Sync + 'static,
         >;
 
+        /// A sender that can be wrapped in a `Box<dyn DynSender<T>>`.
+        ///
+        /// In addition to implementing `Future`, this provides a fn to check if the sender is
+        /// an rpc sender.
+        ///
+        /// Remote receivers are always boxed, since for remote communication the boxing
+        /// overhead is negligible. However, boxing can also be used for local communication,
+        /// e.g. when applying a transform or filter to the message before receiving it.
+        pub trait DynSender<T>: Future<Output = io::Result<()>> + Send + Sync + 'static {
+            fn is_rpc(&self) -> bool;
+        }
+
         /// A generic boxed receiver
         ///
         /// Remote receivers are always boxed, since for remote communication the boxing
@@ -184,6 +196,9 @@ pub mod channel {
         /// behaves like a local oneshot sender and has no overhead in the local case.
         pub enum Sender<T> {
             Tokio(tokio::sync::oneshot::Sender<T>),
+            /// we can't yet distinguish between local and remote boxed oneshot senders.
+            /// If we ever want to have local boxed oneshot senders, we need to add a
+            /// third variant here.
             Boxed(BoxedSender<T>),
         }
 
@@ -331,7 +346,7 @@ pub mod channel {
         /// to the sender to other tasks instead of cloning it.
         pub enum Sender<T> {
             Tokio(tokio::sync::mpsc::Sender<T>),
-            Boxed(Box<dyn BoxedSender<T>>),
+            Boxed(Box<dyn DynSender<T>>),
         }
 
         impl<T> Sender<T> {
@@ -363,7 +378,8 @@ pub mod channel {
             }
         }
 
-        pub trait BoxedSender<T>: Debug + Send + Sync + 'static {
+        /// A sender that can be wrapped in a `Box<dyn DynSender<T>>`.
+        pub trait DynSender<T>: Debug + Send + Sync + 'static {
             /// Send a message.
             ///
             /// For the remote case, if the message can not be completely sent,
@@ -387,7 +403,8 @@ pub mod channel {
             fn is_rpc(&self) -> bool;
         }
 
-        pub trait BoxedReceiver<T>: Debug + Send + Sync + 'static {
+        /// A receiver that can be wrapped in a `Box<dyn DynReceiver<T>>`.
+        pub trait DynReceiver<T>: Debug + Send + Sync + 'static {
             fn recv(
                 &mut self,
             ) -> Pin<Box<dyn Future<Output = std::result::Result<Option<T>, RecvError>> + Send + '_>>;
@@ -453,7 +470,7 @@ pub mod channel {
 
         pub enum Receiver<T> {
             Tokio(tokio::sync::mpsc::Receiver<T>),
-            Boxed(Box<dyn BoxedReceiver<T>>),
+            Boxed(Box<dyn DynReceiver<T>>),
         }
 
         impl<T: RpcMessage> Receiver<T> {
@@ -909,7 +926,7 @@ pub mod rpc {
         channel::{
             none::NoSender,
             oneshot,
-            spsc::{self, BoxedReceiver, BoxedSender},
+            spsc::{self, DynReceiver, DynSender},
             RecvError, SendError,
         },
         util::{now_or_never, AsyncReadVarintExt, WriteVarintExt},
@@ -1123,7 +1140,7 @@ pub mod rpc {
         }
     }
 
-    impl<T: RpcMessage> BoxedReceiver<T> for QuinnReceiver<T> {
+    impl<T: RpcMessage> DynReceiver<T> for QuinnReceiver<T> {
         fn recv(
             &mut self,
         ) -> Pin<Box<dyn Future<Output = std::result::Result<Option<T>, RecvError>> + Send + '_>>
@@ -1160,7 +1177,7 @@ pub mod rpc {
         }
     }
 
-    impl<T: RpcMessage> BoxedSender<T> for QuinnSender<T> {
+    impl<T: RpcMessage> DynSender<T> for QuinnSender<T> {
         fn send(&mut self, value: T) -> Pin<Box<dyn Future<Output = io::Result<()>> + Send + '_>> {
             Box::pin(async {
                 let value = value;
