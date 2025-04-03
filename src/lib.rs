@@ -701,9 +701,11 @@ impl<M, S> From<tokio::sync::mpsc::Sender<M>> for LocalSender<M, S> {
 pub mod rpc {
     pub struct RemoteSender<R, S>(std::marker::PhantomData<(R, S)>);
 }
+
 #[cfg(feature = "rpc")]
 #[cfg_attr(quicrpc_docsrs, doc(cfg(feature = "rpc")))]
 pub mod rpc {
+    //! Module for cross-process RPC using [`quinn`].
     use std::{fmt::Debug, future::Future, io, marker::PhantomData, pin::Pin, sync::Arc};
 
     use quinn::ConnectionError;
@@ -814,6 +816,7 @@ pub mod rpc {
         Ok((send, recv))
     }
 
+    /// A connection to a remote service that can be used to send the initial message.
     #[derive(Debug)]
     pub struct RemoteSender<R, S>(
         quinn::SendStream,
@@ -829,7 +832,7 @@ pub mod rpc {
         pub async fn write(
             self,
             msg: impl Into<R>,
-        ) -> std::result::Result<(RemoteWrite, RemoteRead), WriteError>
+        ) -> std::result::Result<(quinn::SendStream, quinn::RecvStream), WriteError>
         where
             R: Serialize,
         {
@@ -838,23 +841,13 @@ pub mod rpc {
             let mut buf = SmallVec::<[u8; 128]>::new();
             buf.write_length_prefixed(msg)?;
             send.write_all(&buf).await?;
-            Ok((RemoteWrite(send), RemoteRead(recv)))
+            Ok((send, recv))
         }
     }
 
-    #[derive(Debug)]
-    pub struct RemoteRead(quinn::RecvStream);
-
-    impl RemoteRead {
-        pub fn new(recv: quinn::RecvStream) -> Self {
-            Self(recv)
-        }
-    }
-
-    impl<T: DeserializeOwned> From<RemoteRead> for oneshot::Receiver<T> {
-        fn from(read: RemoteRead) -> Self {
+    impl<T: DeserializeOwned> From<quinn::RecvStream> for oneshot::Receiver<T> {
+        fn from(mut read: quinn::RecvStream) -> Self {
             let fut = async move {
-                let mut read = read.0;
                 let size = read.read_varint_u64().await?.ok_or(io::Error::new(
                     io::ErrorKind::UnexpectedEof,
                     "failed to read size",
@@ -871,9 +864,8 @@ pub mod rpc {
         }
     }
 
-    impl<T: RpcMessage> From<RemoteRead> for spsc::Receiver<T> {
-        fn from(read: RemoteRead) -> Self {
-            let read = read.0;
+    impl<T: RpcMessage> From<quinn::RecvStream> for spsc::Receiver<T> {
+        fn from(read: quinn::RecvStream) -> Self {
             spsc::Receiver::Boxed(Box::new(QuinnReceiver {
                 recv: read,
                 _marker: PhantomData,
@@ -881,25 +873,15 @@ pub mod rpc {
         }
     }
 
-    #[derive(Debug)]
-    pub struct RemoteWrite(quinn::SendStream);
-
-    impl RemoteWrite {
-        pub fn new(send: quinn::SendStream) -> Self {
-            Self(send)
-        }
-    }
-
-    impl From<RemoteWrite> for NoSender {
-        fn from(write: RemoteWrite) -> Self {
+    impl From<quinn::SendStream> for NoSender {
+        fn from(write: quinn::SendStream) -> Self {
             let _ = write;
             NoSender
         }
     }
 
-    impl<T: RpcMessage> From<RemoteWrite> for oneshot::Sender<T> {
-        fn from(write: RemoteWrite) -> Self {
-            let mut writer = write.0;
+    impl<T: RpcMessage> From<quinn::SendStream> for oneshot::Sender<T> {
+        fn from(mut writer: quinn::SendStream) -> Self {
             oneshot::Sender::Boxed(Box::new(move |value| {
                 Box::pin(async move {
                     // write via a small buffer to avoid allocation for small values
@@ -912,9 +894,8 @@ pub mod rpc {
         }
     }
 
-    impl<T: RpcMessage> From<RemoteWrite> for spsc::Sender<T> {
-        fn from(write: RemoteWrite) -> Self {
-            let write = write.0;
+    impl<T: RpcMessage> From<quinn::SendStream> for spsc::Sender<T> {
+        fn from(write: quinn::SendStream) -> Self {
             spsc::Sender::Boxed(Box::new(QuinnSender {
                 send: write,
                 buffer: SmallVec::new(),
@@ -1017,8 +998,8 @@ pub mod rpc {
     pub type Handler<R> = Arc<
         dyn Fn(
                 R,
-                RemoteRead,
-                RemoteWrite,
+                quinn::RecvStream,
+                quinn::SendStream,
             ) -> crate::BoxedFuture<'static, std::result::Result<(), SendError>>
             + Send
             + Sync
@@ -1065,8 +1046,8 @@ pub mod rpc {
                         .map_err(|e| io::Error::new(io::ErrorKind::UnexpectedEof, e))?;
                     let msg: R = postcard::from_bytes(&buf)
                         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-                    let rx = RemoteRead::new(recv);
-                    let tx = RemoteWrite::new(send);
+                    let rx = recv;
+                    let tx = send;
                     handler(msg, rx, tx).await?;
                 }
             };

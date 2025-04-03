@@ -12,7 +12,7 @@ use n0_future::{
 };
 use quic_rpc::{
     channel::{oneshot, spsc},
-    rpc::{listen, Handler, RemoteRead},
+    rpc::{listen, Handler},
     util::{make_client_endpoint, make_server_endpoint},
     Client, LocalSender, Request, Service, WithChannels,
 };
@@ -171,7 +171,7 @@ impl ComputeApi {
         let Some(local) = self.inner.local() else {
             bail!("cannot listen on a remote service");
         };
-        let handler: Handler<ComputeProtocol> = Arc::new(move |msg, rx: RemoteRead, tx| {
+        let handler: Handler<ComputeProtocol> = Arc::new(move |msg, rx, tx| {
             let local = local.clone();
             Box::pin(match msg {
                 ComputeProtocol::Sqr(msg) => local.send((msg, tx)),

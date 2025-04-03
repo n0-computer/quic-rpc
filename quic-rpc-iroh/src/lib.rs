@@ -3,7 +3,7 @@ use std::{io, sync::Arc};
 use iroh::endpoint::{ConnectionError, RecvStream, SendStream};
 use quic_rpc::{
     RequestError,
-    rpc::{Handler, RemoteConnection, RemoteRead, RemoteWrite},
+    rpc::{Handler, RemoteConnection},
     util::AsyncReadVarintExt,
 };
 
@@ -132,8 +132,8 @@ pub async fn listen<R: DeserializeOwned + 'static>(endpoint: iroh::Endpoint, han
                     .map_err(|e| io::Error::new(io::ErrorKind::UnexpectedEof, e))?;
                 let msg: R = postcard::from_bytes(&buf)
                     .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-                let rx = RemoteRead::new(recv);
-                let tx = RemoteWrite::new(send);
+                let rx = recv;
+                let tx = send;
                 handler(msg, rx, tx).await?;
             }
         };

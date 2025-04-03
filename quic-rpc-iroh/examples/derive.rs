@@ -113,7 +113,10 @@ impl StorageApi {
     }
 
     pub fn listen(&self, endpoint: iroh::Endpoint) -> anyhow::Result<AbortOnDropHandle<()>> {
-        let local = self.inner.local().context("can not listen on remote service")?;
+        let local = self
+            .inner
+            .local()
+            .context("can not listen on remote service")?;
         let handler: Handler<StorageProtocol> = Arc::new(move |msg, _, tx| {
             let local = local.clone();
             Box::pin(match msg {
