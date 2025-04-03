@@ -2,8 +2,8 @@
 //!
 //! This module contains utilities to read and write varints, as well as
 //! functions to set up quinn endpoints for local rpc and testing.
-#[cfg(feature = "test")]
-#[cfg_attr(quicrpc_docsrs, doc(cfg(feature = "test")))]
+#[cfg(feature = "quinn_endpoint_setup")]
+#[cfg_attr(quicrpc_docsrs, doc(cfg(feature = "quinn_endpoint_setup")))]
 mod quinn_setup_utils {
     use std::{net::SocketAddr, sync::Arc};
 
@@ -143,8 +143,8 @@ mod quinn_setup_utils {
         }
     }
 }
-#[cfg(feature = "test")]
-#[cfg_attr(quicrpc_docsrs, doc(cfg(feature = "test")))]
+#[cfg(feature = "quinn_endpoint_setup")]
+#[cfg_attr(quicrpc_docsrs, doc(cfg(feature = "quinn_endpoint_setup")))]
 pub use quinn_setup_utils::*;
 
 #[cfg(feature = "rpc")]
