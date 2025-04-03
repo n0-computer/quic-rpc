@@ -66,7 +66,8 @@
 //!   This is useful even without rpc, to not lose tracing context when message
 //!   passing. This is frequently done manually. This obviously requires
 //!   a dependency on tracing.
-//! - `test`: Test features. Mostly easy way to create two connected quinn endpoints.
+//! - `quinn_endpoint_setup`: Easy way to create quinn endpoints. This is useful
+//!   both for testing and for rpc on localhost. Enabled by default.
 //!
 //! - iroh: https://docs.rs/iroh/latest/iroh/index.html
 //! - quinn: https://docs.rs/quinn/latest/quinn/index.html
