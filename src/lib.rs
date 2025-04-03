@@ -51,21 +51,27 @@
 //! length prefixed with postcard varints, even in the case of oneshot
 //! channels.
 //!
+//! Serialization only happens for cross process rpc communication.
+//!
+//! However, the requirement for message enums to be serializable is present even
+//! when disabling the `rpc` feature. Due to the fact that the channels live
+//! outside the message, this is not a big restriction.
+//!
 //! ## Features
 //!
 //! - `rpc`: Enable the rpc features. Enabled by default.
-//!     By disabling this feature, all rpc related dependencies are removed.
-//!     The remaining dependencies are just serde, tokio and tokio-util.
+//!   By disabling this feature, all rpc related dependencies are removed.
+//!   The remaining dependencies are just serde, tokio and tokio-util.
 //! - `message_spans`: Enable tracing spans for messages. Enabled by default.
-//!     This is useful even without rpc, to not lose tracing context when message
-//!     passing. This is frequently done manually. This obviously requires
-//!     a dependency on tracing.
+//!   This is useful even without rpc, to not lose tracing context when message
+//!   passing. This is frequently done manually. This obviously requires
+//!   a dependency on tracing.
 //! - `test`: Test features. Mostly easy way to create two connected quinn endpoints.
 //!
-//! - [iroh]: https://docs.rs/iroh/latest/iroh/index.html
-//! - [quinn]: https://docs.rs/quinn/latest/quinn/index.html
-//! - [bytes]: https://docs.rs/bytes/latest/bytes/index.html
-//! - [iroh quinn fork]: https://docs.rs/iroh-quinn/latest/iroh-quinn/index.html
+//! - iroh: https://docs.rs/iroh/latest/iroh/index.html
+//! - quinn: https://docs.rs/quinn/latest/quinn/index.html
+//! - bytes: https://docs.rs/bytes/latest/bytes/index.html
+//! - iroh quinn fork: https://docs.rs/iroh-quinn/latest/iroh-quinn/index.html
 #![cfg_attr(quicrpc_docsrs, feature(doc_cfg))]
 use std::{fmt::Debug, future::Future, io, marker::PhantomData, ops::Deref};
 
@@ -1263,9 +1269,9 @@ pub mod rpc {
 /// A request to a service. This can be either local or remote.
 #[derive(Debug)]
 pub enum Request<L, R> {
-    /// Local request
+    /// Local in memory request
     Local(L),
-    /// Remote request
+    /// Remote cross process request
     Remote(R),
 }
 
