@@ -19,7 +19,7 @@ futures-lite = "2.3.0"
 futures-sink = "0.3.30"
 futures-util = { version = "0.3.30", features = ["sink"] }
 hyper = { version = "0.14.16", features = ["full"], optional = true }
-iroh = { version = "0.34", optional = true }
+iroh = { version = "0.35", optional = true }
 pin-project = "1"
 quinn = { package = "iroh-quinn", version = "0.13", optional = true }
 serde = { version = "1", features = ["derive"] }
